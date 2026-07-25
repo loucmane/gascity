@@ -19,6 +19,7 @@ func TestTimerTraceCodesTotal(t *testing.T) {
 		TraceReasonIdleTimeout:   true,
 		TraceReasonUserHold:      true,
 		TraceReasonQuarantine:    true,
+		TraceReasonPinned:        true,
 		TraceReasonPending:       true,
 		TraceReasonAssignedWork:  true,
 	}
@@ -26,11 +27,12 @@ func TestTimerTraceCodesTotal(t *testing.T) {
 		TraceOutcomeStop:               true,
 		TraceOutcomeDeferredUserHold:   true,
 		TraceOutcomeDeferredQuarantine: true,
+		TraceOutcomeDeferredPinned:     true,
 		TraceOutcomeDeferredPending:    true,
 		TraceOutcomeDeferredBusy:       true,
 	}
 
-	blockers := []string{"", "user_hold", "quarantine"}
+	blockers := []string{"", "user_hold", "quarantine", "pinned"}
 	pendings := []sessionpkg.PendingFact{
 		sessionpkg.PendingUnknown, sessionpkg.PendingNo, sessionpkg.PendingYes,
 	}
