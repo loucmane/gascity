@@ -1795,6 +1795,9 @@ func TestHealStatePatchWithRollbackHonorsConfiguredStartupTimeout(t *testing.T) 
 		t.Fatal("configured startup lease reported expired while Start is still in flight")
 	}
 	got := healStatePatchWithRollback(inFlight, false, clk, startupTimeout, true)
+	if gotState, changed := got["state"]; changed {
+		t.Fatalf("healStatePatchWithRollback changed state to %q while configured startup lease is active: %#v", gotState, got)
+	}
 	if _, ok := got["pending_create_claim"]; ok {
 		t.Fatalf("healStatePatchWithRollback cleared pending_create_claim while configured startup lease is active: %#v", got)
 	}
@@ -1820,6 +1823,62 @@ func TestHealStatePatchWithRollbackHonorsConfiguredStartupTimeout(t *testing.T) 
 	}
 	if got["pending_create_started_at"] != "" {
 		t.Fatalf("pending_create_started_at clear = %q, want empty after configured lease expiry", got["pending_create_started_at"])
+	}
+}
+
+func TestHealStatePatchWithRollbackUsesOneConfiguredLeaseDecisionAcrossTicks(t *testing.T) {
+	startedAt := time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC)
+	clk := &clock.Fake{Time: startedAt.Add(90 * time.Second)}
+	startupTimeout := 5 * time.Minute
+	session := makeBead("b1", map[string]string{
+		"state":                     "creating",
+		"pending_create_claim":      "true",
+		"pending_create_started_at": startedAt.Format(time.RFC3339),
+		"last_woke_at":              startedAt.Format(time.RFC3339),
+		"session_key":               "in-flight-key",
+		"started_config_hash":       "in-flight-hash",
+	})
+	session.CreatedAt = startedAt
+
+	for _, elapsed := range []time.Duration{90 * time.Second, 306 * time.Second} {
+		clk.Time = startedAt.Add(elapsed)
+		if got := healStatePatchWithRollback(session, false, clk, startupTimeout, true); len(got) != 0 {
+			t.Fatalf("heal at %s = %#v, want no mutation before the configured lease expires", elapsed, got)
+		}
+		if got := session.Metadata["state"]; got != "creating" {
+			t.Fatalf("state at %s = %q, want creating", elapsed, got)
+		}
+		if pendingCreateLeaseExpiredForRollback(session, clk, startupTimeout) {
+			t.Fatalf("lease reported expired at %s, before the 307s rollback boundary", elapsed)
+		}
+	}
+
+	clk.Time = startedAt.Add(308 * time.Second)
+	if !pendingCreateLeaseExpiredForRollback(session, clk, startupTimeout) {
+		t.Fatal("lease remained active after the 307s rollback boundary")
+	}
+	got := healStatePatchWithRollback(session, false, clk, startupTimeout, true)
+	want := map[string]string{
+		"state":                      "asleep",
+		"sleep_reason":               sleepReasonRuntimeMissing,
+		"pending_create_claim":       "",
+		"pending_create_started_at":  "",
+		"session_key":                "",
+		"started_config_hash":        "",
+		"continuation_reset_pending": "true",
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Fatalf("rollback %s = %q, want %q; patch=%#v", key, got[key], value, got)
+		}
+	}
+
+	for key, value := range got {
+		session.Metadata[key] = value
+	}
+	clk.Time = clk.Time.Add(time.Second)
+	if got := healStatePatchWithRollback(session, false, clk, startupTimeout, true); len(got) != 0 {
+		t.Fatalf("second post-expiry heal = %#v, want exactly one rollback mutation", got)
 	}
 }
 
