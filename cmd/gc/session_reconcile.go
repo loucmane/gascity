@@ -996,8 +996,23 @@ func healStatePatchWithRollback(session beads.Bead, alive bool, clk clock.Clock,
 	// rollbackAvailable=false means the caller deferred the formal rollback
 	// (e.g. storeQueryPartial); preserve the claim so the next complete tick
 	// can drive attemptRollbackPendingCreate properly.
-	if rollbackAvailable && !alive && strings.TrimSpace(meta["state"]) == "creating" {
-		if pendingCreateLeaseExpiredForRollback(session, clk, startupTimeout) {
+	if !alive &&
+		strings.TrimSpace(meta["state"]) == "creating" &&
+		strings.TrimSpace(meta["pending_create_claim"]) == "true" {
+		leaseExpired := pendingCreateLeaseExpiredForRollback(session, clk, startupTimeout)
+		switch {
+		case !leaseExpired || !rollbackAvailable:
+			// ProjectLifecycle uses the generic one-minute creating timeout.
+			// An active configured provider Start lease is authoritative here:
+			// preserve both state and claim until the one rollback decision says
+			// they may move together. rollbackAvailable=false likewise defers
+			// the complete transition rather than applying half of it. Preserve
+			// a legitimate start-pending projection for a never-started queued
+			// create; only suppress the premature terminal asleep projection.
+			if target == string(sessionpkg.StateAsleep) {
+				target = string(sessionpkg.StateCreating)
+			}
+		default:
 			target = string(sessionpkg.StateAsleep)
 			stalePendingCreateRollback = true
 			clearPendingCreateLease(meta, batch)
