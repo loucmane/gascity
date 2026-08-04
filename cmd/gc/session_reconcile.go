@@ -918,8 +918,19 @@ func healStatePatchWithRollbackInfo(info sessionpkg.Info, alive bool, clk clock.
 		target = string(sessionpkg.StateAsleep)
 		clearPendingCreateLeaseInfo(info.PendingCreateClaim, batch)
 	}
-	if rollbackAvailable && !alive && strings.TrimSpace(info.MetadataState) == "creating" {
-		if pendingCreateLeaseExpiredForRollbackInfo(info, clk, startupTimeout) {
+	// ProjectLifecycle uses the generic one-minute creating timeout. Keep its
+	// advisory projection subordinate to the configured provider Start lease,
+	// and move state plus lease metadata together on the one rollback decision.
+	if !alive && strings.TrimSpace(info.MetadataState) == "creating" && info.PendingCreateClaim {
+		leaseExpired := pendingCreateLeaseExpiredForRollbackInfo(info, clk, startupTimeout)
+		switch {
+		case !leaseExpired || !rollbackAvailable:
+			// Preserve a legitimate start-pending projection for a never-started
+			// queued create; suppress only the premature terminal asleep state.
+			if target == string(sessionpkg.StateAsleep) {
+				target = string(sessionpkg.StateCreating)
+			}
+		default:
 			target = string(sessionpkg.StateAsleep)
 			stalePendingCreateRollback = true
 			clearPendingCreateLeaseInfo(info.PendingCreateClaim, batch)

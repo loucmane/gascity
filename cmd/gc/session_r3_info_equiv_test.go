@@ -78,12 +78,12 @@ func TestHealStatePatchWithRollbackInfo(t *testing.T) {
 			want:     resetBatch,
 		},
 		{
-			name:     "stale-creating-rollback-deferred",
+			name:     "stale-creating-rollback-deferred-preserves-state",
 			created:  -2 * time.Minute,
 			meta:     map[string]string{"state": "creating", "pending_create_claim": "true", "last_woke_at": rfc(-2 * time.Minute)},
 			alive:    false,
 			rollback: false,
-			want:     map[string]string{"state": "asleep"},
+			want:     nil,
 		},
 		{
 			name:     "never-started-inflight",
