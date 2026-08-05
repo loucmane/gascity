@@ -466,9 +466,10 @@ func (c *CachingStore) Ready(query ...ReadyQuery) ([]Bead, error) {
 		return c.backing.Ready(query...)
 	}
 	var (
-		statusByID map[string]string
-		depsByID   map[string][]Dep
-		openBeads  []Bead
+		beadByID       map[string]Bead
+		failedBlockers map[string]struct{}
+		depsByID       map[string][]Dep
+		openBeads      []Bead
 	)
 	// Ready requires a fully live cache with complete dependency coverage; the
 	// overlay refreshes any dirty rows first, then computes readiness from the
@@ -476,14 +477,14 @@ func (c *CachingStore) Ready(query ...ReadyQuery) ([]Bead, error) {
 	if err := c.readCacheWithOverlay(
 		func() bool { return c.state == cacheLive && c.depsComplete && c.primePartialErr == nil },
 		func(suppressed map[string]struct{}) {
-			statusByID = make(map[string]string, len(c.beads))
+			beadByID = make(map[string]Bead, len(c.beads))
 			openBeads = make([]Bead, 0, len(c.beads))
 			now := time.Now().UTC()
 			for _, b := range c.beads {
 				if _, gone := suppressed[b.ID]; gone {
 					continue
 				}
-				statusByID[b.ID] = b.Status
+				beadByID[b.ID] = cloneBead(b)
 				if IsReadyCandidate(b, now) {
 					openBeads = append(openBeads, cloneBead(b))
 				}
@@ -492,6 +493,7 @@ func (c *CachingStore) Ready(query ...ReadyQuery) ([]Bead, error) {
 			for _, b := range openBeads {
 				depsByID[b.ID] = cloneDeps(c.deps[b.ID])
 			}
+			failedBlockers = cloneStringSet(c.failedBlockers)
 		},
 	); err != nil {
 		return c.backing.Ready(query...)
@@ -499,7 +501,7 @@ func (c *CachingStore) Ready(query ...ReadyQuery) ([]Bead, error) {
 
 	var result []Bead
 	for _, b := range openBeads {
-		if cachedBeadReady(b, statusByID, depsByID[b.ID]) {
+		if cachedBeadReady(b, beadByID, failedBlockers, depsByID[b.ID]) {
 			result = append(result, cloneBead(b))
 		}
 	}
@@ -546,11 +548,11 @@ func (c *CachingStore) CachedReady() ([]Bead, bool) {
 		return nil, false
 	}
 
-	statusByID := make(map[string]string, len(c.beads))
+	beadByID := make(map[string]Bead, len(c.beads))
 	openBeads := make([]Bead, 0, len(c.beads))
 	now := time.Now().UTC()
 	for _, b := range c.beads {
-		statusByID[b.ID] = b.Status
+		beadByID[b.ID] = cloneBead(b)
 		if IsReadyCandidate(b, now) {
 			openBeads = append(openBeads, cloneBead(b))
 		}
@@ -566,7 +568,7 @@ func (c *CachingStore) CachedReady() ([]Bead, bool) {
 		default:
 			return nil, false
 		}
-		if cachedBeadReady(b, statusByID, deps) {
+		if cachedBeadReady(b, beadByID, c.failedBlockers, deps) {
 			result = append(result, cloneBead(b))
 		}
 	}
@@ -576,19 +578,33 @@ func (c *CachingStore) CachedReady() ([]Bead, bool) {
 	return result, true
 }
 
-func cachedBeadReady(b Bead, statusByID map[string]string, deps []Dep) bool {
-	if b.IsBlocked != nil {
-		return !*b.IsBlocked
+func cachedBeadReady(b Bead, beadByID map[string]Bead, failedBlockers map[string]struct{}, deps []Dep) bool {
+	if b.IsBlocked != nil && *b.IsBlocked {
+		return false
 	}
 	for _, dep := range deps {
 		if !isReadyBlockingDependencyType(dep.Type) {
 			continue
 		}
-		if status, ok := statusByID[dep.DependsOnID]; ok && status != "closed" {
+		if blocker, ok := beadByID[dep.DependsOnID]; ok {
+			if !IsReadyBlockingDependencySatisfiedFor(b, blocker) {
+				return false
+			}
+			continue
+		}
+		if _, failed := failedBlockers[dep.DependsOnID]; failed && !isReadyTerminalizer(b) {
 			return false
 		}
 	}
 	return true
+}
+
+func cloneStringSet(values map[string]struct{}) map[string]struct{} {
+	cloned := make(map[string]struct{}, len(values))
+	for value := range values {
+		cloned[value] = struct{}{}
+	}
+	return cloned
 }
 
 // Children returns beads with the given parent ID.

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/gastownhall/gascity/internal/beadmeta"
 )
 
 // ErrNotFound is returned when a bead ID does not exist in the store.
@@ -440,6 +442,36 @@ var readyBlockingDependencyTypes = map[string]bool{
 // bead from Ready() until the dependency target closes.
 func IsReadyBlockingDependencyType(t string) bool {
 	return readyBlockingDependencyTypes[t]
+}
+
+// IsReadyBlockingDependencySatisfied reports whether a blocking dependency
+// target permits its dependent to become ready. A failed control closes for
+// terminal accounting, but it must continue blocking downstream work.
+func IsReadyBlockingDependencySatisfied(blocker Bead) bool {
+	return blocker.Status == "closed" && blocker.Metadata[beadmeta.OutcomeMetadataKey] != beadmeta.OutcomeFail
+}
+
+// IsReadyBlockingDependencySatisfiedFor applies the terminalizer exception:
+// cleanup and workflow-finalize controls must run after their predecessor
+// closes even when that predecessor failed. Ordinary downstream work remains
+// blocked by a closed/fail target.
+func IsReadyBlockingDependencySatisfiedFor(dependent, blocker Bead) bool {
+	if blocker.Status != "closed" {
+		return false
+	}
+	if isReadyTerminalizer(dependent) {
+		return true
+	}
+	return IsReadyBlockingDependencySatisfied(blocker)
+}
+
+func isReadyTerminalizer(bead Bead) bool {
+	switch bead.Metadata[beadmeta.KindMetadataKey] {
+	case beadmeta.KindCleanup, beadmeta.KindWorkflowFinalize:
+		return true
+	default:
+		return false
+	}
 }
 
 // IsReadyExcludedType reports whether the bead type is excluded from
