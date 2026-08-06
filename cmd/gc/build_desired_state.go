@@ -4626,10 +4626,17 @@ func prepareTemplateResolution(bp *agentBuildParams, cfgAgent *config.Agent, qua
 	}
 	rigName := sessionSetupContextForAgent(bp.cityPath, bp.cityName, qualifiedName, cfgAgent, bp.rigs).Rig
 	materializeProviderOverlaysBeforeFingerprint(bp, cfgAgent, resolved, qualifiedName, rigName, workDir, stderr)
-	if ih := config.ResolveInstallHooks(cfgAgent, bp.workspace); len(ih) > 0 {
+	installHooks := config.ResolveInstallHooks(cfgAgent, bp.workspace)
+	if len(installHooks) > 0 {
 		resolver := func(name string) string { return config.BuiltinFamily(name, bp.providers) }
-		if hErr := hooks.InstallWithResolver(bp.fs, bp.cityPath, workDir, ih, resolver); hErr != nil {
+		if hErr := hooks.InstallWithResolver(bp.fs, bp.cityPath, workDir, installHooks, resolver); hErr != nil {
 			fmt.Fprintf(stderr, "agent %q: hooks: %v\n", qualifiedName, hErr) //nolint:errcheck
+		}
+	}
+	providers := hookProviderSet(hookFileProvidersForResolved(resolved, installHooks, bp.providers))
+	if providers["codex"] {
+		if hErr := hooks.FinalizeProjectedCodexHooks(bp.fs, bp.cityPath, workDir); hErr != nil {
+			fmt.Fprintf(stderr, "agent %q: finalize projected Codex hooks: %v\n", qualifiedName, hErr) //nolint:errcheck
 		}
 	}
 }
