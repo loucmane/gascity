@@ -451,6 +451,65 @@ scope = "rig"
 	}
 }
 
+func TestLoadWithIncludes_RigPatchTargetsGenericCityRigPool(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "city.toml", `
+[workspace]
+name = "test"
+
+[[rigs]]
+name = "blog"
+
+[rigs.imports.gc]
+source = "./packs/roles"
+
+[[rigs.patches]]
+agent = "builder"
+
+[rigs.patches.option_defaults]
+worklog_access = "classified-vault-and-blog-worktrees"
+`)
+	writeFile(t, dir, "pack.toml", `
+[pack]
+name = "city"
+schema = 2
+`)
+	writeFile(t, dir, "agents/builder/agent.toml", `
+scope = "rig"
+option_defaults = { worklog_access = "classified-vault" }
+`)
+	writeFile(t, dir, "packs/roles/pack.toml", `
+[pack]
+name = "roles"
+schema = 2
+`)
+	writeFile(t, dir, "packs/roles/agents/reviewer/agent.toml", `
+scope = "rig"
+`)
+
+	cfg, _, err := LoadWithIncludes(fsys.OSFS{}, filepath.Join(dir, "city.toml"))
+	if err != nil {
+		t.Fatalf("LoadWithIncludes rejected generic city-local rig pool override: %v", err)
+	}
+
+	var builder *Agent
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Name == "builder" && cfg.Agents[i].Dir == "" {
+			builder = &cfg.Agents[i]
+			break
+		}
+	}
+	if builder == nil {
+		t.Fatal("generic city-local builder not found")
+	}
+	if got := builder.OptionDefaults["worklog_access"]; got != "classified-vault" {
+		t.Fatalf("generic builder was mutated during config load: worklog_access = %q", got)
+	}
+	if len(cfg.Rigs) != 1 || len(cfg.Rigs[0].RigPatches) != 1 {
+		t.Fatalf("blog rig patch was not preserved for runtime binding: rigs=%+v", cfg.Rigs)
+	}
+}
+
 func TestLoadWithIncludes_ProvenanceUsesDeferredRigPatchFinalIdentity(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "city.toml", `
