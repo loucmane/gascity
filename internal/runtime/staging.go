@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gastownhall/gascity/internal/fsys"
+	"github.com/gastownhall/gascity/internal/hooks"
 	"github.com/gastownhall/gascity/internal/overlay"
 )
 
@@ -45,7 +47,40 @@ func StageSessionWorkDirWithWarnings(cfg Config, warnings io.Writer) error {
 			}
 		}
 	}
-	return stageCopyFiles(cfg.WorkDir, cfg.CopyFiles)
+	if err := stageCopyFiles(cfg.WorkDir, cfg.CopyFiles); err != nil {
+		return err
+	}
+	return FinalizeSessionWorkDir(cfg)
+}
+
+// FinalizeSessionWorkDir applies managed-file normalization after every local
+// overlay and copy writer has run. Production managed sessions always carry
+// GC_CITY_PATH; legacy/runtime-only callers without that city binding retain
+// their historical staging behavior.
+func FinalizeSessionWorkDir(cfg Config) error {
+	if !sessionStagesCodexHooks(cfg) || cfg.WorkDir == "" {
+		return nil
+	}
+	cityDir := strings.TrimSpace(cfg.Env["GC_CITY_PATH"])
+	if cityDir == "" {
+		return nil
+	}
+	if err := hooks.FinalizeProjectedCodexHooks(fsys.OSFS{}, cityDir, cfg.WorkDir); err != nil {
+		return fmt.Errorf("finalizing managed session hooks: %w", err)
+	}
+	return nil
+}
+
+func sessionStagesCodexHooks(cfg Config) bool {
+	if strings.TrimSpace(cfg.ProviderName) == "codex" {
+		return true
+	}
+	for _, provider := range EffectiveOverlayProviderNames(cfg) {
+		if provider == "codex" {
+			return true
+		}
+	}
+	return false
 }
 
 // EffectiveOverlayProviderNames returns the provider overlay slots to stage for

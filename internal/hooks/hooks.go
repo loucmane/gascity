@@ -653,6 +653,37 @@ func writeCodexHooksManaged(fs fsys.FS, cityDir, dst string, data []byte, gcExec
 	return writeManagedData(fs, dst, data)
 }
 
+// FinalizeProjectedCodexHooks makes the installed-binary managed rewrite the
+// last writer after provider overlays and session copy projection have
+// finished. Only recognizable Gas City managed commands are normalized and
+// deduplicated; user-owned hook entries remain untouched. A missing hook file
+// is a no-op because not every Codex session opts into hooks.
+func FinalizeProjectedCodexHooks(fs fsys.FS, cityDir, workDir string) error {
+	if strings.TrimSpace(workDir) == "" {
+		return nil
+	}
+	dst := filepath.Join(workDir, ".codex", "hooks.json")
+	existing, err := fs.ReadFile(dst)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reading projected Codex hooks %s: %w", dst, err)
+	}
+	gcExecutable, err := invokingGCExecutable()
+	if err != nil {
+		return err
+	}
+	upgraded, changed, err := upgradeCodexHooks(existing, nil, cityDir, gcExecutable)
+	if err != nil {
+		return fmt.Errorf("normalizing projected Codex hooks %s: %w", dst, err)
+	}
+	if !changed {
+		return nil
+	}
+	return writeManagedData(fs, dst, upgraded)
+}
+
 func writeManagedData(fs fsys.FS, dst string, data []byte) error {
 	dir := filepath.Dir(dst)
 	if err := fs.MkdirAll(dir, 0o755); err != nil {

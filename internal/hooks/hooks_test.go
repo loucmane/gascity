@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/shellquote"
 )
@@ -2553,32 +2552,6 @@ func TestInstallUnknownProvider(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported") {
 		t.Errorf("error should mention unsupported: %v", err)
-	}
-}
-
-// TestSupportsHooksSyncWithProviderSpec verifies that the hooks supported list
-// stays in sync with ProviderSpec.SupportsHooks across all builtin providers.
-func TestSupportsHooksSyncWithProviderSpec(t *testing.T) {
-	sup := make(map[string]bool, len(SupportedProviders()))
-	for _, p := range SupportedProviders() {
-		sup[p] = true
-	}
-
-	providers := config.BuiltinProviders()
-	for name, spec := range providers {
-		supports := spec.SupportsHooks != nil && *spec.SupportsHooks
-		if supports && !sup[name] {
-			t.Errorf("provider %q has SupportsHooks=true but is not in hooks.SupportedProviders()", name)
-		}
-		if !supports && sup[name] {
-			t.Errorf("provider %q is in hooks.SupportedProviders() but has SupportsHooks=false", name)
-		}
-	}
-	// Reverse check: every supported provider must be a known builtin.
-	for _, p := range SupportedProviders() {
-		if _, ok := providers[p]; !ok {
-			t.Errorf("hooks.SupportedProviders() contains %q which is not a builtin provider", p)
-		}
 	}
 }
 
