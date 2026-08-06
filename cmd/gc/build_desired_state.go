@@ -1000,6 +1000,7 @@ func reconciliationCityWithExpandedGenericRigPools(cfg *config.City, suspendedRi
 			if _, exists := explicit[bound.QualifiedName()]; exists {
 				continue
 			}
+			mergeGenericRigPoolOptionDefaults(cfg, &bound, &rig)
 			expanded = append(expanded, bound)
 		}
 	}
@@ -1009,6 +1010,37 @@ func reconciliationCityWithExpandedGenericRigPools(cfg *config.City, suspendedRi
 	effective := *cfg
 	effective.Agents = expanded
 	return &effective
+}
+
+// mergeGenericRigPoolOptionDefaults applies the narrow rig override surface
+// accepted by config loading to the concrete copy created for that rig. A
+// pack-stamped agent with the same unqualified name owns the override under
+// the longstanding pack semantics, so the generic pool must not consume it a
+// second time.
+func mergeGenericRigPoolOptionDefaults(cfg *config.City, bound *config.Agent, rig *config.Rig) {
+	if cfg == nil || bound == nil || rig == nil {
+		return
+	}
+	for i := range cfg.Agents {
+		candidate := &cfg.Agents[i]
+		if candidate.Dir == rig.Name && candidate.Name == bound.Name {
+			return
+		}
+	}
+	overrides := make([]config.AgentOverride, 0, len(rig.Overrides)+len(rig.RigPatches))
+	overrides = append(overrides, rig.Overrides...)
+	overrides = append(overrides, rig.RigPatches...)
+	for _, override := range overrides {
+		if override.Agent != bound.Name {
+			continue
+		}
+		if bound.OptionDefaults == nil {
+			bound.OptionDefaults = make(map[string]string, len(override.OptionDefaults))
+		}
+		for key, value := range override.OptionDefaults {
+			bound.OptionDefaults[key] = value
+		}
+	}
 }
 
 func buildSuspendedRigPathsForCity(cfg *config.City, cityPath string) map[string]bool {

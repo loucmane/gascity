@@ -510,6 +510,19 @@ scope = "rig"
 	}
 }
 
+func TestGenericRigPoolOptionDefaultsTargetRejectsMixedMutation(t *testing.T) {
+	suspended := true
+	agents := []Agent{{Name: "builder", Scope: "rig"}}
+	override := AgentOverride{
+		Agent:          "builder",
+		Suspended:      &suspended,
+		OptionDefaults: map[string]string{"worklog_access": "classified-vault-and-blog-worktrees"},
+	}
+	if genericRigPoolOptionDefaultsTarget(agents, &override) {
+		t.Fatal("generic rig pool fallback accepted a non-option mutation")
+	}
+}
+
 func TestLoadWithIncludes_ProvenanceUsesDeferredRigPatchFinalIdentity(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "city.toml", `
