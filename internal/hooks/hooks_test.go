@@ -50,6 +50,38 @@ func codexHookCommand(t *testing.T, data []byte, event string) string {
 	return entries[0].Hooks[0].Command
 }
 
+func codexHookExecutableToken(t *testing.T, command string) string {
+	t.Helper()
+	tokens := shellquote.Split(command)
+	for len(tokens) > 0 && strings.Contains(tokens[0], "=") && !strings.HasPrefix(tokens[0], "=") {
+		tokens = tokens[1:]
+	}
+	if len(tokens) == 0 {
+		t.Fatalf("Codex hook command has no executable token: %q", command)
+	}
+	return tokens[0]
+}
+
+func assertManagedCodexHooksUseExecutable(t *testing.T, data []byte, executable string) {
+	t.Helper()
+	for _, event := range []string{"SessionStart", "PreCompact", "UserPromptSubmit"} {
+		entries := claudeHookEntries(t, data, event)
+		if len(entries) == 0 {
+			t.Fatalf("missing managed Codex %s hook", event)
+		}
+		for _, entry := range entries {
+			for _, hook := range entry.Hooks {
+				if strings.Contains(hook.Command, canonicalGCPathPrefix) {
+					t.Fatalf("managed Codex %s hook retained PATH-dependent prefix: %q", event, hook.Command)
+				}
+				if got := codexHookExecutableToken(t, hook.Command); got != executable {
+					t.Fatalf("managed Codex %s hook executable = %q, want installing executable %q; command: %q", event, got, executable, hook.Command)
+				}
+			}
+		}
+	}
+}
+
 func TestSupportedProviders(t *testing.T) {
 	got := SupportedProviders()
 	want := map[string]bool{
@@ -496,6 +528,69 @@ func TestInstallCodexBindsExplicitCity(t *testing.T) {
 	wantCity := `--city ` + shellquote.Quote(cityDir)
 	if !strings.Contains(got, wantCity) {
 		t.Fatalf("codex hooks missing explicit city binding %q:\n%s", wantCity, got)
+	}
+}
+
+func TestInstallCodexPinsEveryManagedHookToInstallingExecutable(t *testing.T) {
+	fs := fsys.NewFake()
+	if err := Install(fs, "/city", "/work", []string{"codex"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	assertManagedCodexHooksUseExecutable(t, fs.Files["/work/.codex/hooks.json"], executable)
+}
+
+func TestInstallCodexUpgradesCapturedPATHShadowingShapeToInstallingExecutable(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/work/.codex/hooks.json"] = []byte(`{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "startup",
+      "hooks": [{
+        "type": "command",
+        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart gc --city /city prime --hook --hook-format codex"
+      }]
+    }],
+    "PreCompact": [{
+      "hooks": [{
+        "type": "command",
+        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gc --city /city handoff --auto --hook-format codex \"context cycle\""
+      }]
+    }],
+    "UserPromptSubmit": [{
+      "hooks": [{
+        "type": "command",
+        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gc --city /city hook run --timeout 15s --timeout-exit-code 0 -- nudge drain --inject --hook-format codex"
+      }]
+    }, {
+      "hooks": [{
+        "type": "command",
+        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gc --city /city hook run --timeout 15s --timeout-exit-code 0 -- mail check --inject --hook-format codex"
+      }]
+    }, {
+      "hooks": [{
+        "type": "command",
+        "command": "printf user-owned"
+      }]
+    }]
+  }
+}`)
+
+	if err := Install(fs, "/city", "/work", []string{"codex"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	data := fs.Files["/work/.codex/hooks.json"]
+	assertManagedCodexHooksUseExecutable(t, data, executable)
+	if !strings.Contains(string(data), "printf user-owned") {
+		t.Fatalf("install removed user-owned Codex hook:\n%s", data)
 	}
 }
 
