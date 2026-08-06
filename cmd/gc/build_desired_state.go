@@ -47,6 +47,12 @@ type DesiredStateResult struct {
 	State            map[string]TemplateParams
 	BaseState        map[string]TemplateParams
 	ScaleCheckCounts map[string]int // nil when store is nil or scale_check not run
+	// EffectiveConfig is the single reconciliation configuration used to build
+	// State and demand. It may contain concrete per-rig copies of generic
+	// scope="rig" pools. Wake reconciliation must consume this exact pointer so
+	// creation and later awake/drain decisions cannot disagree about template
+	// identity.
+	EffectiveConfig *config.City
 	// ScaleCheckPartialTemplates records all templates whose bead-backed demand
 	// probe failed. PoolScaleCheckPartialTemplates drives generic pool retention;
 	// NamedScaleCheckPartialTemplates only protects configured named sessions.
@@ -103,6 +109,13 @@ type DesiredStateResult struct {
 
 func (r DesiredStateResult) snapshotQueryPartial() bool {
 	return r.StoreQueryPartial || r.SessionQueryPartial
+}
+
+func (r DesiredStateResult) reconciliationConfig(fallback *config.City) *config.City {
+	if r.EffectiveConfig != nil {
+		return r.EffectiveConfig
+	}
+	return fallback
 }
 
 type poolEvalWork struct {
@@ -936,6 +949,7 @@ func buildDesiredStateWithSessionBeads(
 		State:                              desired,
 		BaseState:                          baseDesired,
 		ScaleCheckCounts:                   scaleCheckCounts,
+		EffectiveConfig:                    cfg,
 		ScaleCheckPartialTemplates:         scaleCheckPartialTemplates,
 		PoolScaleCheckPartialTemplates:     poolScaleCheckPartialTemplates,
 		NamedScaleCheckPartialTemplates:    namedScaleCheckPartialTemplates,
@@ -1118,6 +1132,7 @@ func refreshDesiredStateWithSessionBeads(
 	sessionBeads *sessionBeadSnapshot,
 	stderr io.Writer,
 ) DesiredStateResult {
+	cfg = result.reconciliationConfig(cfg)
 	if cfg == nil || sessionBeads == nil {
 		return result
 	}
