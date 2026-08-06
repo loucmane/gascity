@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,20 @@ func codexHookExecutableToken(t *testing.T, command string) string {
 	return tokens[0]
 }
 
+func installingGCExecutableForTest(t *testing.T) string {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	return executable
+}
+
+func installingGCCommandForTest(t *testing.T, suffix string) string {
+	t.Helper()
+	return shellquote.Quote(installingGCExecutableForTest(t)) + " " + suffix
+}
+
 func assertManagedCodexHooksUseExecutable(t *testing.T, data []byte, executable string) {
 	t.Helper()
 	for _, event := range []string{"SessionStart", "PreCompact", "UserPromptSubmit"} {
@@ -69,8 +84,13 @@ func assertManagedCodexHooksUseExecutable(t *testing.T, data []byte, executable 
 		if len(entries) == 0 {
 			t.Fatalf("missing managed Codex %s hook", event)
 		}
+		managedCount := 0
 		for _, entry := range entries {
 			for _, hook := range entry.Hooks {
+				if !codexHookCommandLooksManaged(event, hook.Command, executable) {
+					continue
+				}
+				managedCount++
 				if strings.Contains(hook.Command, canonicalGCPathPrefix) {
 					t.Fatalf("managed Codex %s hook retained PATH-dependent prefix: %q", event, hook.Command)
 				}
@@ -78,6 +98,9 @@ func assertManagedCodexHooksUseExecutable(t *testing.T, data []byte, executable 
 					t.Fatalf("managed Codex %s hook executable = %q, want installing executable %q; command: %q", event, got, executable, hook.Command)
 				}
 			}
+		}
+		if managedCount == 0 {
+			t.Fatalf("managed Codex %s hook has no recognized managed command", event)
 		}
 	}
 }
@@ -376,7 +399,7 @@ func TestInstallCodexUpgradesGeneratedFileMissingHookFormat(t *testing.T) {
 	if !strings.Contains(got, `"PreCompact"`) {
 		t.Errorf("upgraded codex hooks missing PreCompact:\n%s", got)
 	}
-	if !strings.Contains(got, `gc --city '/city' handoff --auto --hook-format codex \"context cycle\"`) {
+	if !strings.Contains(got, installingGCCommandForTest(t, `--city '/city' handoff --auto --hook-format codex \"context cycle\"`)) {
 		t.Errorf("upgraded codex PreCompact missing auto handoff command:\n%s", got)
 	}
 }
@@ -405,7 +428,7 @@ func TestInstallCodexUpgradesSessionStartMissingManagedMarker(t *testing.T) {
 	if !strings.Contains(sessionStartCommand, "GC_HOOK_EVENT_NAME=SessionStart") {
 		t.Fatalf("upgraded codex SessionStart missing event marker: %s", sessionStartCommand)
 	}
-	if !strings.Contains(sessionStartCommand, "gc --city '/city' prime --hook --hook-format codex") {
+	if !strings.Contains(sessionStartCommand, installingGCCommandForTest(t, "--city '/city' prime --hook --hook-format codex")) {
 		t.Fatalf("upgraded codex SessionStart missing hook format: %s", sessionStartCommand)
 	}
 }
@@ -493,10 +516,10 @@ func TestInstallCodexUpgradesManagedFileMissingPreCompact(t *testing.T) {
 	if !strings.Contains(got, `"PreCompact"`) {
 		t.Errorf("upgraded codex hooks missing PreCompact:\n%s", got)
 	}
-	if !strings.Contains(got, `gc --city '/city' handoff --auto --hook-format codex \"context cycle\"`) {
+	if !strings.Contains(got, installingGCCommandForTest(t, `--city '/city' handoff --auto --hook-format codex \"context cycle\"`)) {
 		t.Errorf("upgraded codex PreCompact missing auto handoff command:\n%s", got)
 	}
-	if !strings.Contains(got, `gc --city '/city' hook run --timeout 15s --timeout-exit-code 0 -- mail check --inject --hook-format codex`) {
+	if !strings.Contains(got, installingGCCommandForTest(t, `--city '/city' hook run --timeout 15s --timeout-exit-code 0 -- mail check --inject --hook-format codex`)) {
 		t.Errorf("upgraded codex UserPromptSubmit missing bounded mail check command:\n%s", got)
 	}
 }
@@ -508,7 +531,7 @@ func TestInstallCodexWritesCanonicalHookBytes(t *testing.T) {
 	}
 
 	got := fs.Files["/work/.codex/hooks.json"]
-	normalized, changed, err := normalizeCodexHookCommands(got, "/city")
+	normalized, changed, err := normalizeCodexHookCommands(got, "/city", installingGCExecutableForTest(t))
 	if err != nil {
 		t.Fatalf("normalizeCodexHookCommands: %v", err)
 	}
@@ -637,7 +660,7 @@ func TestCodexHooksNeedManagedUpgrade(t *testing.T) {
 		t.Fatal("managed Codex hooks with stale city binding were not reported stale")
 	}
 
-	currentCity := []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart gc --city '/old/city' prime --hook --hook-format codex"}]}],"PreCompact":[{"hooks":[{"type":"command","command":"export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gc --city '/old/city' handoff --auto --hook-format codex \"context cycle\""}]}]}}`)
+	currentCity := []byte(fmt.Sprintf(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart %s --city '/old/city' prime --hook --hook-format codex"}]}],"PreCompact":[{"hooks":[{"type":"command","command":"%s --city '/old/city' handoff --auto --hook-format codex \"context cycle\""}]}]}}`, shellquote.Quote(installingGCExecutableForTest(t)), shellquote.Quote(installingGCExecutableForTest(t))))
 	if CodexHooksNeedManagedUpgrade(currentCity, "/old/city") {
 		t.Fatal("managed Codex hooks already bound to requested city were reported stale")
 	}
@@ -689,7 +712,7 @@ func TestInstallCodexUpgradePreservesCustomHooks(t *testing.T) {
 	if !strings.Contains(got, "--hook-format codex") {
 		t.Errorf("upgraded codex hooks missing Codex hook output format:\n%s", got)
 	}
-	if !strings.Contains(got, `gc --city '/city' prime --hook --hook-format codex`) {
+	if !strings.Contains(got, installingGCCommandForTest(t, `--city '/city' prime --hook --hook-format codex`)) {
 		t.Errorf("upgraded codex hooks missing explicit city binding:\n%s", got)
 	}
 	if !strings.Contains(got, "printf custom-codex-hook") {
@@ -718,13 +741,13 @@ func TestInstallCodexRebindsManagedHooksAndAddsPreCompact(t *testing.T) {
 	}
 
 	got := string(fs.Files["/work/.codex/hooks.json"])
-	if !strings.Contains(got, `gc --city '/new city' prime --hook --hook-format codex`) {
+	if !strings.Contains(got, installingGCCommandForTest(t, `--city '/new city' prime --hook --hook-format codex`)) {
 		t.Fatalf("SessionStart not rebound to current city:\n%s", got)
 	}
 	if !strings.Contains(got, `"PreCompact"`) {
 		t.Fatalf("managed codex upgrade missing PreCompact:\n%s", got)
 	}
-	if !strings.Contains(got, `gc --city '/new city' handoff --auto --hook-format codex \"context cycle\"`) {
+	if !strings.Contains(got, installingGCCommandForTest(t, `--city '/new city' handoff --auto --hook-format codex \"context cycle\"`)) {
 		t.Fatalf("PreCompact not added for current city:\n%s", got)
 	}
 	if strings.Contains(got, "/old/city") {
@@ -756,10 +779,10 @@ func TestInstallCodexRebindsManagedHooksToCurrentCity(t *testing.T) {
 	}
 
 	got := string(fs.Files["/work/.codex/hooks.json"])
-	if !strings.Contains(got, `gc --city '/new city' prime --hook --hook-format codex`) {
+	if !strings.Contains(got, installingGCCommandForTest(t, `--city '/new city' prime --hook --hook-format codex`)) {
 		t.Fatalf("SessionStart not rebound to current city:\n%s", got)
 	}
-	if !strings.Contains(got, `gc --city '/new city' handoff --auto --hook-format codex \"context cycle\"`) {
+	if !strings.Contains(got, installingGCCommandForTest(t, `--city '/new city' handoff --auto --hook-format codex \"context cycle\"`)) {
 		t.Fatalf("PreCompact not rebound to current city:\n%s", got)
 	}
 	if strings.Contains(got, "/old/city") {
@@ -831,7 +854,7 @@ func TestInstallCodexPreservesExtraEnvOnManagedHooks(t *testing.T) {
 	}
 
 	got := string(fs.Files["/work/.codex/hooks.json"])
-	if !strings.Contains(got, `FOO=1 GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart gc --city '/city' prime --hook --hook-format codex`) {
+	if !strings.Contains(got, `FOO=1 GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart `+installingGCCommandForTest(t, `--city '/city' prime --hook --hook-format codex`)) {
 		t.Fatalf("managed codex hook lost extra env prefix:\n%s", got)
 	}
 	if !strings.Contains(got, `"PreCompact"`) {
@@ -1774,7 +1797,7 @@ func TestInstallOverlayManagedProviders(t *testing.T) {
 	codexHooks := fs.Files["/work/.codex/hooks.json"]
 	codexHooksText := string(codexHooks)
 	sessionStartCommand := codexHookCommand(t, codexHooks, "SessionStart")
-	if !strings.Contains(sessionStartCommand, `gc --city '/city' prime --hook --hook-format codex`) {
+	if !strings.Contains(sessionStartCommand, installingGCCommandForTest(t, `--city '/city' prime --hook --hook-format codex`)) {
 		t.Fatalf("codex SessionStart hook command = %q, want city-bound gc prime --hook --hook-format codex", sessionStartCommand)
 	}
 	if !strings.Contains(sessionStartCommand, "GC_HOOK_EVENT_NAME=SessionStart") {
@@ -1786,12 +1809,12 @@ func TestInstallOverlayManagedProviders(t *testing.T) {
 	if !strings.Contains(codexHooksText, `"PreCompact"`) {
 		t.Error("codex hooks should include PreCompact")
 	}
-	if !strings.Contains(codexHooksText, `gc --city '/city' handoff --auto --hook-format codex \"context cycle\"`) {
+	if !strings.Contains(codexHooksText, installingGCCommandForTest(t, `--city '/city' handoff --auto --hook-format codex \"context cycle\"`)) {
 		t.Error("codex PreCompact should use auto handoff with Codex hook output format")
 	}
 	for _, want := range []string{
-		`gc --city '/city' hook run --timeout 15s --timeout-exit-code 0 -- nudge drain --inject --hook-format codex`,
-		`gc --city '/city' hook run --timeout 15s --timeout-exit-code 0 -- mail check --inject --hook-format codex`,
+		installingGCCommandForTest(t, `--city '/city' hook run --timeout 15s --timeout-exit-code 0 -- nudge drain --inject --hook-format codex`),
+		installingGCCommandForTest(t, `--city '/city' hook run --timeout 15s --timeout-exit-code 0 -- mail check --inject --hook-format codex`),
 	} {
 		if !strings.Contains(codexHooksText, want) {
 			t.Errorf("codex prompt hooks missing bounded command %q:\n%s", want, codexHooksText)
@@ -2473,8 +2496,12 @@ func TestInstallCodexWritesCanonicalJSON(t *testing.T) {
 	if bytes.Contains(data, []byte(`\u0026`)) {
 		t.Fatalf("codex hook escaped command operator:\n%s", data)
 	}
-	if !bytes.Contains(data, []byte(` && GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart gc --city '/city' prime`)) {
-		t.Fatalf("codex hook missing literal command operator:\n%s", data)
+	if bytes.Contains(data, []byte(canonicalGCPathPrefix)) {
+		t.Fatalf("codex hook retained PATH-dependent command prefix:\n%s", data)
+	}
+	wantSessionStart := `GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart ` + installingGCCommandForTest(t, `--city '/city' prime`)
+	if !bytes.Contains(data, []byte(wantSessionStart)) {
+		t.Fatalf("codex hook missing pinned installing executable:\n%s", data)
 	}
 	if !bytes.HasSuffix(data, []byte("\n")) {
 		t.Fatalf("codex hook missing trailing newline:\n%s", data)
