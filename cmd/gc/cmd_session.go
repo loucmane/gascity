@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/agentutil"
 	"github.com/gastownhall/gascity/internal/api"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/clock"
@@ -629,6 +630,9 @@ func resolveSessionTemplate(cfg *config.City, input, currentRigDir string) (conf
 			if a.QualifiedName() == input {
 				return a, true
 			}
+		}
+		if a, ok := agentutil.ResolveQualifiedRigScopedTemplate(cfg, input); ok {
+			return a, true
 		}
 		return config.Agent{}, false
 	}

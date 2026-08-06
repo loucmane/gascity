@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/agentutil"
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
@@ -348,11 +349,18 @@ func buildDesiredStateWithSessionBeads(
 		return DesiredStateResult{}
 	}
 
-	bp := newAgentBuildParams(cityName, cityPath, cfg, sp, beaconTime, store, stderr)
-	bp.sessionBeads = sessionBeads
-
 	// Pre-compute suspended rig paths (config + runtime state).
 	suspendedRigPaths := buildSuspendedRigPathsForCity(cfg, cityPath)
+	// City-local agent files can declare one generic scope="rig" pool that
+	// applies to every registered rig. Pack expansion already materializes
+	// rig-bound copies, but direct city agents remain generic in the loaded
+	// config. Reconciliation must operate on the same concrete identities that
+	// routing and worker hooks use (for example, blog/builder), otherwise a
+	// ready routed bead is invisible after its one-shot route nudge has passed.
+	cfg = reconciliationCityWithExpandedGenericRigPools(cfg, suspendedRigPaths)
+
+	bp := newAgentBuildParams(cityName, cityPath, cfg, sp, beaconTime, store, stderr)
+	bp.sessionBeads = sessionBeads
 
 	// Collect all open session Infos from all stores to correctly count
 	// running sessions for each pool. A partial/failed collection is logged,
@@ -941,6 +949,52 @@ func buildDesiredStateWithSessionBeads(
 		StoreQueryPartial:                  storePartial,
 		BeaconTime:                         beaconTime,
 	}
+}
+
+// reconciliationCityWithExpandedGenericRigPools returns a shallow city copy
+// whose agent slice replaces each unbound scope="rig" pool with one deep,
+// concrete copy per active registered rig. Explicit rig-bound agents win over
+// the generic template for their identity. The caller's config is never
+// mutated; maps and slices inside synthesized agents are deep-copied by
+// agentutil.DeepCopyAgent.
+func reconciliationCityWithExpandedGenericRigPools(cfg *config.City, suspendedRigPaths map[string]bool) *config.City {
+	if cfg == nil || len(cfg.Rigs) == 0 {
+		return cfg
+	}
+
+	explicit := make(map[string]struct{})
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Dir != "" {
+			explicit[cfg.Agents[i].QualifiedName()] = struct{}{}
+		}
+	}
+
+	expanded := make([]config.Agent, 0, len(cfg.Agents))
+	changed := false
+	for i := range cfg.Agents {
+		agent := &cfg.Agents[i]
+		if strings.TrimSpace(agent.Scope) != "rig" || agent.Dir != "" || !agent.SupportsGenericEphemeralSessions() {
+			expanded = append(expanded, *agent)
+			continue
+		}
+		changed = true
+		for _, rig := range cfg.Rigs {
+			if suspendedRigPaths[filepath.Clean(rig.Path)] {
+				continue
+			}
+			bound := agentutil.DeepCopyAgent(agent, agent.Name, rig.Name)
+			if _, exists := explicit[bound.QualifiedName()]; exists {
+				continue
+			}
+			expanded = append(expanded, bound)
+		}
+	}
+	if !changed {
+		return cfg
+	}
+	effective := *cfg
+	effective.Agents = expanded
+	return &effective
 }
 
 func buildSuspendedRigPathsForCity(cfg *config.City, cityPath string) map[string]bool {
