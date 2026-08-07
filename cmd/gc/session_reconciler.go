@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2447,6 +2448,13 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 						holdsClaim = has
 					}
 				}
+				if !exempt && holdsClaim {
+					if err := markProgressStalledClaimedWorkNeedsOperator(
+						cityPath, cfg, store, rigStores, infoByID[id], lastActivity, threshold, clk.Now(),
+					); err != nil {
+						fmt.Fprintf(stderr, "session reconciler: marking claimed work for progress-stall attention for %s: %v\n", name, err) //nolint:errcheck
+					}
+				}
 				providerHealthy := true
 				if !exempt && !holdsClaim && tp.ResolvedProvider != nil {
 					// Reuse the per-tick provider-health snapshot (#2962). Gate 1
@@ -3854,6 +3862,74 @@ func sessionHasOpenAssignedWorkForConfigInfo(store beads.Store, rigStores map[st
 // not suppress claim-less parked-session recovery.
 func sessionHasInProgressAssignedWorkForConfig(store beads.Store, rigStores map[string]beads.Store, info sessionpkg.Info, cfg *config.City) (bool, error) {
 	return sessionHasAssignedWorkInStoresForStatuses(store, rigStores, sessionAssignmentIdentifiersForConfigInfo(info, cfg), []string{"in_progress"})
+}
+
+// markProgressStalledClaimedWorkNeedsOperator turns a claimed-session stall
+// into durable operator-visible state without recycling the session or asking
+// the worker to report its own failure. Provider output and the worker's
+// mechanical bead heartbeat are the only progress sources: generic bead
+// UpdatedAt cannot be used because this controller update itself advances it.
+// The signature deduplicates unchanged ticks and naturally re-arms after a real
+// provider/heartbeat transition.
+func markProgressStalledClaimedWorkNeedsOperator(
+	cityPath string,
+	cfg *config.City,
+	store beads.Store,
+	rigStores map[string]beads.Store,
+	info sessionpkg.Info,
+	providerLastActivity time.Time,
+	threshold time.Duration,
+	now time.Time,
+) error {
+	assigned, err := collectSessionAssignedWorkInfo(cityPath, cfg, store, rigStores, info)
+	if err != nil {
+		return err
+	}
+	for _, item := range assigned {
+		if item.bead.Status != "in_progress" {
+			continue
+		}
+		lastProgress := providerLastActivity
+		if heartbeatAt, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(item.bead.Metadata[beadmeta.LastHeartbeatAtMetadataKey])); parseErr == nil && heartbeatAt.After(lastProgress) {
+			lastProgress = heartbeatAt
+		}
+		if lastProgress.IsZero() || now.Sub(lastProgress) <= threshold {
+			continue
+		}
+
+		fingerprint := strings.Join([]string{
+			info.ID,
+			item.bead.ID,
+			item.bead.Status,
+			item.bead.Assignee,
+			lastProgress.UTC().Format(time.RFC3339Nano),
+		}, "\x00")
+		signature := fmt.Sprintf("%x", sha256.Sum256([]byte(fingerprint)))
+		if item.bead.Metadata[beadmeta.ProgressStallSignatureMetadataKey] == signature {
+			continue
+		}
+
+		lastProgressText := lastProgress.UTC().Format(time.RFC3339Nano)
+		reason := fmt.Sprintf(
+			"claimed work has had no observable progress since %s; inspect session %s and decide whether to resume, repair, or stop",
+			lastProgressText,
+			strings.TrimSpace(info.SessionNameMetadata),
+		)
+		if err := item.store.Update(item.bead.ID, beads.UpdateOpts{
+			Labels: []string{"needs/operator"},
+			Metadata: map[string]string{
+				beadmeta.ControllerErrorMetadataKey:        reason,
+				beadmeta.FailureOwnerMetadataKey:           "gc.session-reconciler",
+				beadmeta.FailureReasonMetadataKey:          "progress_stall",
+				beadmeta.FailureSubjectMetadataKey:         info.ID,
+				beadmeta.ProgressStallSignatureMetadataKey: signature,
+				beadmeta.ProgressLastObservedMetadataKey:   lastProgressText,
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // sessionHasOpenAssignedWorkForReachableStore reports whether any open or

@@ -232,6 +232,7 @@ func TestReconcileSessionBeads_ProgressStallMarksClaimedWorkNeedsOperatorOnceAnd
 	if err := env.store.Update(work.ID, beads.UpdateOpts{Status: &status}); err != nil {
 		t.Fatalf("Update(work): %v", err)
 	}
+	initialLastProgress := env.clk.Now().Add(-time.Hour)
 
 	env.reconcileAtPath(t.TempDir(), []beads.Bead{session})
 
@@ -250,6 +251,12 @@ func TestReconcileSessionBeads_ProgressStallMarksClaimedWorkNeedsOperatorOnceAnd
 	}
 	if got := first.Metadata["gc.failure_subject"]; got != session.ID {
 		t.Fatalf("gc.failure_subject = %q, want session bead %q", got, session.ID)
+	}
+	if got := first.Metadata["gc.progress_last_observed_at"]; got != initialLastProgress.Format(time.RFC3339Nano) {
+		t.Fatalf("gc.progress_last_observed_at = %q, want %q", got, initialLastProgress.Format(time.RFC3339Nano))
+	}
+	if got := first.Metadata["gc.controller_error"]; !strings.Contains(got, "inspect session") {
+		t.Fatalf("gc.controller_error = %q, want an actionable operator decision", got)
 	}
 	firstSignature := first.Metadata["gc.progress_attention_signature"]
 	if firstSignature == "" {
@@ -284,6 +291,59 @@ func TestReconcileSessionBeads_ProgressStallMarksClaimedWorkNeedsOperatorOnceAnd
 	}
 	if rearmed.Revision <= firstRevision {
 		t.Fatalf("rearmed revision = %d, want > %d", rearmed.Revision, firstRevision)
+	}
+}
+
+func TestReconcileSessionBeads_ProgressStallHonorsRecentClaimHeartbeatWithoutHidingOtherStaleWork(t *testing.T) {
+	env, session, sessionName := newProgressStallTestEnv(t)
+	work, err := env.store.Create(beads.Bead{
+		Title:    "claimed work with a recent mechanical heartbeat",
+		Type:     "task",
+		Assignee: sessionName,
+	})
+	if err != nil {
+		t.Fatalf("Create(work): %v", err)
+	}
+	status := "in_progress"
+	heartbeatAt := env.clk.Now().Add(-time.Minute).Format(time.RFC3339Nano)
+	if err := env.store.Update(work.ID, beads.UpdateOpts{
+		Status: &status,
+		Metadata: map[string]string{
+			"gc.last_heartbeat_at": heartbeatAt,
+		},
+	}); err != nil {
+		t.Fatalf("Update(work): %v", err)
+	}
+	staleWork, err := env.store.Create(beads.Bead{
+		Title:    "other claimed work without a recent heartbeat",
+		Type:     "task",
+		Assignee: sessionName,
+	})
+	if err != nil {
+		t.Fatalf("Create(stale work): %v", err)
+	}
+	if err := env.store.Update(staleWork.ID, beads.UpdateOpts{Status: &status}); err != nil {
+		t.Fatalf("Update(stale work): %v", err)
+	}
+
+	env.reconcileAtPath(t.TempDir(), []beads.Bead{session})
+
+	if !env.sp.IsRunning(sessionName) {
+		t.Fatalf("session %q was recycled; recent claimed-work heartbeat must preserve it", sessionName)
+	}
+	got, err := env.store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("store.Get(%s): %v", work.ID, err)
+	}
+	if containsString(got.Labels, "needs/operator") {
+		t.Fatalf("work labels = %v, recent heartbeat must not request operator attention", got.Labels)
+	}
+	stale, err := env.store.Get(staleWork.ID)
+	if err != nil {
+		t.Fatalf("store.Get(%s): %v", staleWork.ID, err)
+	}
+	if !containsString(stale.Labels, "needs/operator") {
+		t.Fatalf("stale work labels = %v, want needs/operator despite sibling heartbeat", stale.Labels)
 	}
 }
 
