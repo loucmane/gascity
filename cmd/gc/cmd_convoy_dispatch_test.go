@@ -5052,6 +5052,66 @@ func TestRunControlDispatcherQuarantinesGenericControlFailure(t *testing.T) {
 	}
 }
 
+// TestRunControlDispatcherEscalatesHardFailureToWorkflowRoot reproduces the
+// live blog-arf/blog-sw2 failure shape: a hard control failure was quarantined
+// correctly, but the workflow root remained merely in_progress and therefore
+// never entered the dashboard's operator-decision queue.
+func TestRunControlDispatcherEscalatesHardFailureToWorkflowRoot(t *testing.T) {
+	clearGCEnv(t)
+
+	store := beads.NewMemStore()
+	root, err := store.Create(beads.Bead{
+		Title:  "Design lab integration",
+		Type:   "molecule",
+		Status: "in_progress",
+	})
+	if err != nil {
+		t.Fatalf("create workflow root: %v", err)
+	}
+	inProgress := "in_progress"
+	if err := store.Update(root.ID, beads.UpdateOpts{Status: &inProgress}); err != nil {
+		t.Fatalf("mark workflow root in progress: %v", err)
+	}
+	control, err := store.Create(beads.Bead{
+		Title: "Prepare integration worktree",
+		Type:  "task",
+		Metadata: map[string]string{
+			beadmeta.KindMetadataKey:       "unknown-control-kind",
+			beadmeta.RootBeadIDMetadataKey: root.ID,
+			beadmeta.StepRefMetadataKey:    "prepare-worktree",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create control: %v", err)
+	}
+
+	var stderr bytes.Buffer
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	if err := runControlDispatcherWithStoreAndConfig(t.TempDir(), t.TempDir(), store, control, control.ID, cfg, io.Discard, &stderr); err != nil {
+		t.Fatalf("runControlDispatcherWithStoreAndConfig: %v", err)
+	}
+
+	after, err := store.Get(root.ID)
+	if err != nil {
+		t.Fatalf("get workflow root: %v", err)
+	}
+	if after.Status != "in_progress" {
+		t.Fatalf("workflow root status = %q, want in_progress preserved", after.Status)
+	}
+	if !slices.Contains(after.Labels, "needs/operator") {
+		t.Fatalf("workflow root labels = %#v, want needs/operator", after.Labels)
+	}
+	if got := after.Metadata[beadmeta.FailureSubjectMetadataKey]; got != control.ID {
+		t.Fatalf("gc.failure_subject = %q, want failed control %q", got, control.ID)
+	}
+	if got := after.Metadata[beadmeta.FailureReasonMetadataKey]; got != "control_dispatch_error" {
+		t.Fatalf("gc.failure_reason = %q, want control_dispatch_error", got)
+	}
+	if got := after.Metadata[beadmeta.ControllerErrorMetadataKey]; !strings.Contains(got, "unsupported control bead kind") {
+		t.Fatalf("gc.controller_error = %q, want the exact control failure", got)
+	}
+}
+
 func TestRunWorkflowServeReturnsLegacyOversizedControlError(t *testing.T) {
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
