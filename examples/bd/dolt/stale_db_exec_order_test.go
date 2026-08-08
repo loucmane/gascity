@@ -3,7 +3,6 @@ package dolt_test
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,14 +66,9 @@ func TestStaleDBExecScriptHasNoAgentOrBeadLifecycle(t *testing.T) {
 			t.Errorf("mechanical script contains model/bead lifecycle %q", forbidden)
 		}
 	}
-	cmd := exec.Command("bash", "-n", path)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bash -n: %v\n%s", err, out)
-	}
 }
 
 func TestStaleDBExecNoWorkWritesDurableReportWithoutSession(t *testing.T) {
-	root := repoRoot(t)
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, "bin")
 	runtimeDir := filepath.Join(dir, "runtime")
@@ -94,17 +88,12 @@ case "$*" in
   *) echo "unexpected: $*" >&2; exit 64 ;;
 esac
 `, 0o755)
-	cmd := exec.Command("bash", filepath.Join(root, "assets", "scripts", "mol-dog-stale-db.sh"))
-	cmd.Env = append(filteredEnv("GC_BIN", "GC_CITY_PATH", "GC_CITY_RUNTIME_DIR", "GC_HOME", "GC_TEST_LOG", "PATH", "TMPDIR"),
-		"GC_BIN="+fakeGC,
-		"GC_CITY_PATH="+dir,
+	out, err := runDogScriptCommand(t, "mol-dog-stale-db.sh", binDir, dir, dir,
 		"GC_CITY_RUNTIME_DIR="+runtimeDir,
-		"GC_HOME="+filepath.Join(dir, "home"),
 		"GC_TEST_LOG="+logPath,
-		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"TMPDIR="+dir,
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if err != nil {
 		t.Fatalf("script: %v\n%s", err, out)
 	}
 	reportPath := filepath.Join(runtimeDir, "maintenance", "mol-dog-stale-db", "latest.json")
@@ -126,7 +115,6 @@ esac
 }
 
 func TestStaleDBExecApplyFailureIsLoudAndPreservesReport(t *testing.T) {
-	root := repoRoot(t)
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, "bin")
 	runtimeDir := filepath.Join(dir, "runtime")
@@ -151,17 +139,12 @@ case "$*" in
   *) echo "unexpected: $*" >&2; exit 64 ;;
 esac
 `, 0o755)
-	cmd := exec.Command("bash", filepath.Join(root, "assets", "scripts", "mol-dog-stale-db.sh"))
-	cmd.Env = append(filteredEnv("GC_BIN", "GC_CITY_PATH", "GC_CITY_RUNTIME_DIR", "GC_HOME", "GC_TEST_LOG", "PATH", "TMPDIR"),
-		"GC_BIN="+fakeGC,
-		"GC_CITY_PATH="+dir,
+	out, err := runDogScriptCommand(t, "mol-dog-stale-db.sh", binDir, dir, dir,
 		"GC_CITY_RUNTIME_DIR="+runtimeDir,
-		"GC_HOME="+filepath.Join(dir, "home"),
 		"GC_TEST_LOG="+logPath,
-		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"TMPDIR="+dir,
 	)
-	if out, err := cmd.CombinedOutput(); err == nil {
+	if err == nil {
 		t.Fatalf("apply failure returned success:\n%s", out)
 	}
 	report := string(mustReadFile(t, filepath.Join(runtimeDir, "maintenance", "mol-dog-stale-db", "latest.json")))
