@@ -44,7 +44,11 @@ emit() {
 }
 
 notify_human() {
-    gc mail send human -s "$1" -m "$2" >/dev/null 2>&1 || echo "stale-db: human notification failed" >&2
+    if gc mail send human -s "$1" -m "$2" >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "stale-db: human notification failed" >&2
+    return 1
 }
 
 write_report() {
