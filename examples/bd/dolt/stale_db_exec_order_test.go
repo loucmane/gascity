@@ -157,6 +157,40 @@ esac
 	}
 }
 
+func TestStaleDBExecThresholdNotificationFailureIsLoud(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	runtimeDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "gc.log")
+	writeTestFile(t, filepath.Join(binDir, "gc"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$GC_TEST_LOG"
+case "$*" in
+  *"dolt-cleanup --json --probe"*)
+    printf '%s\n' '{"schema":"gc.dolt.cleanup.v1","dropped":{"count":21,"skipped":[],"failed":[]},"purge":{"bytes_reclaimed":0},"reaped":{"count":0,"targets":[]},"summary":{"bytes_freed_disk":0,"bytes_freed_rss":0,"errors_total":0},"force_blockers":[]}'
+    ;;
+  *"event emit mol-dog-stale-db.scan"*|*"event emit mol-dog-stale-db.escalate"*|*"event emit mol-dog-stale-db.done"*) exit 0 ;;
+  *"mail send human"*) exit 23 ;;
+  *) echo "unexpected: $*" >&2; exit 64 ;;
+esac
+`, 0o755)
+	out, err := runDogScriptCommand(t, "mol-dog-stale-db.sh", binDir, dir, dir,
+		"GC_CITY_RUNTIME_DIR="+runtimeDir,
+		"GC_TEST_LOG="+logPath,
+		"TMPDIR="+dir,
+	)
+	if err == nil {
+		t.Fatalf("failed human escalation returned success:\n%s", out)
+	}
+	report := string(mustReadFile(t, filepath.Join(runtimeDir, "maintenance", "mol-dog-stale-db", "latest.json")))
+	if !strings.Contains(report, `"decision": "threshold-escalated"`) {
+		t.Fatalf("threshold report missing evidence:\n%s", report)
+	}
+}
+
 func mustReadFile(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)
