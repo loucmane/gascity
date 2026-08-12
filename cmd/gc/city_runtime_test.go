@@ -4772,6 +4772,93 @@ func TestCityRuntimeReloadSameRevisionIsNoOp(t *testing.T) {
 	}
 }
 
+func TestCityRuntimeReloadSiteBindingRefreshesExpandedRigPoolWorkDir(t *testing.T) {
+	cityPath := t.TempDir()
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	oldRigRoot := filepath.Join(cityPath, "protected-checkout")
+	newRigRoot := filepath.Join(cityPath, "hpfetcher-gc-main")
+	for _, dir := range []string{oldRigRoot, newRigRoot, filepath.Join(cityPath, ".gc")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q): %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(tomlPath, []byte(`[workspace]
+name = "test-city"
+
+[beads]
+provider = "file"
+
+[session]
+provider = "fake"
+
+[[rigs]]
+name = "hpfetcher"
+prefix = "hpf"
+
+[[agent]]
+name = "run-operator"
+scope = "rig"
+`), 0o644); err != nil {
+		t.Fatalf("write city config: %v", err)
+	}
+	writeSiteBinding := func(path string) {
+		t.Helper()
+		contents := fmt.Sprintf("[[rig]]\nname = %q\npath = %q\n", "hpfetcher", path)
+		if err := os.WriteFile(config.SiteBindingPath(cityPath), []byte(contents), 0o644); err != nil {
+			t.Fatalf("write site binding: %v", err)
+		}
+	}
+	writeSiteBinding(oldRigRoot)
+
+	cfg, configRev := loadCityRuntimeControllerConfig(t, cityPath)
+	sp := runtime.NewFake()
+	var stderr bytes.Buffer
+	cr := newTestCityRuntime(t, CityRuntimeParams{
+		CityPath:  cityPath,
+		CityName:  "test-city",
+		TomlPath:  tomlPath,
+		ConfigRev: configRev,
+		Cfg:       cfg,
+		SP:        sp,
+		BuildFn: func(*config.City, runtime.Provider, beads.Store) DesiredStateResult {
+			return DesiredStateResult{State: map[string]TemplateParams{}}
+		},
+		Dops:   newDrainOps(sp),
+		Rec:    events.Discard,
+		Stdout: io.Discard,
+		Stderr: &stderr,
+	})
+
+	writeSiteBinding(newRigRoot)
+	lastProviderName := "fake"
+	reply := cr.reloadConfigTraced(context.Background(), &lastProviderName, cityPath, nil, reloadSourceManual)
+	if reply.Outcome != reloadOutcomeApplied {
+		t.Fatalf("site-binding-only reload outcome = %q, want %q; error=%q stderr=%q", reply.Outcome, reloadOutcomeApplied, reply.Error, stderr.String())
+	}
+	if got := cr.cfg.Rigs[0].Path; got != newRigRoot {
+		t.Fatalf("controller rig path after reload = %q, want %q", got, newRigRoot)
+	}
+
+	effective := reconciliationCityWithExpandedGenericRigPools(cr.cfg, nil)
+	var pooled *config.Agent
+	for i := range effective.Agents {
+		if effective.Agents[i].QualifiedName() == "hpfetcher/run-operator" {
+			pooled = &effective.Agents[i]
+			break
+		}
+	}
+	if pooled == nil {
+		t.Fatalf("expanded config omitted hpfetcher/run-operator: %#v", effective.Agents)
+	}
+	workDir, err := resolveConfiguredWorkDir(cityPath, "test-city", pooled.QualifiedName(), pooled, effective.Rigs)
+	if err != nil {
+		t.Fatalf("resolve expanded pool work dir: %v", err)
+	}
+	if workDir != newRigRoot {
+		t.Fatalf("expanded pooled run-operator work dir = %q, want rebound path %q (stale path %q)", workDir, newRigRoot, oldRigRoot)
+	}
+}
+
 func TestCityRuntimeReloadSameRevisionRefreshesStoresWhenMetadataChanges(t *testing.T) {
 	cityPath := t.TempDir()
 	tomlPath := filepath.Join(cityPath, "city.toml")
