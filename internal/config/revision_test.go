@@ -81,6 +81,70 @@ name = "changed"
 	}
 }
 
+func TestRevision_IncludesLoadedSiteBindingSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	cityPath := filepath.Join(dir, "city.toml")
+	writeFile(t, dir, "city.toml", `[workspace]
+name = "test"
+
+[[rigs]]
+name = "hpfetcher"
+`)
+	writeFile(t, dir, ".gc/site.toml", `[[rig]]
+name = "hpfetcher"
+path = "/home/loucmane/dev/hpfetcher"
+`)
+
+	cfg, prov, err := LoadWithIncludes(fsys.OSFS{}, cityPath)
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	loadedRevision := Revision(fsys.OSFS{}, prov, cfg, dir)
+
+	writeFile(t, dir, ".gc/site.toml", `[[rig]]
+name = "hpfetcher"
+path = "/home/loucmane/dev/hpfetcher-gc-main"
+`)
+	if got := Revision(fsys.OSFS{}, prov, cfg, dir); got != loadedRevision {
+		t.Fatalf("loaded revision changed after site binding write; got %q, want loaded snapshot %q", got, loadedRevision)
+	}
+
+	reloadedCfg, reloadedProv, err := LoadWithIncludes(fsys.OSFS{}, cityPath)
+	if err != nil {
+		t.Fatalf("reloading config: %v", err)
+	}
+	if got := Revision(fsys.OSFS{}, reloadedProv, reloadedCfg, dir); got == loadedRevision {
+		t.Fatal("revision did not change after reloading a changed .gc/site.toml")
+	}
+}
+
+func TestWatchTargets_IncludesSiteBinding(t *testing.T) {
+	dir := t.TempDir()
+	cityPath := filepath.Join(dir, "city.toml")
+	writeFile(t, dir, "city.toml", `[workspace]
+name = "test"
+
+[[rigs]]
+name = "hpfetcher"
+`)
+	writeFile(t, dir, ".gc/site.toml", `[[rig]]
+name = "hpfetcher"
+path = "/home/loucmane/dev/hpfetcher"
+`)
+
+	cfg, prov, err := LoadWithIncludes(fsys.OSFS{}, cityPath)
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	want := SiteBindingPath(dir)
+	for _, target := range WatchTargets(prov, cfg, dir) {
+		if target.Path == want {
+			return
+		}
+	}
+	t.Fatalf("WatchTargets() omitted site binding %q", want)
+}
+
 func TestRevision_UsesLoadedSnapshotForResolvedInputs(t *testing.T) {
 	tests := []struct {
 		name   string
