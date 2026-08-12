@@ -4,8 +4,24 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"testing"
 )
+
+func TestRepoCacheLockOpenFlagsSeparateReadersFromWriters(t *testing.T) {
+	readFlags := repoCacheLockOpenFlags(false)
+	if readFlags != os.O_RDONLY {
+		t.Fatalf("read flags = %#x, want O_RDONLY", readFlags)
+	}
+	if readFlags&(os.O_CREATE|os.O_WRONLY|os.O_RDWR) != 0 {
+		t.Fatalf("read flags %#x request write or create access", readFlags)
+	}
+
+	writeFlags := repoCacheLockOpenFlags(true)
+	if writeFlags&(os.O_CREATE|os.O_RDWR) != os.O_CREATE|os.O_RDWR {
+		t.Fatalf("write flags = %#x, want O_CREATE|O_RDWR", writeFlags)
+	}
+}
 
 func TestRepoCacheLockPlatformImplementationsUseSharedOpenPolicy(t *testing.T) {
 	for _, path := range []string{"repo_cache_lock_unix.go", "repo_cache_lock_windows.go"} {
@@ -17,31 +33,24 @@ func TestRepoCacheLockPlatformImplementationsUseSharedOpenPolicy(t *testing.T) {
 			var matched bool
 			ast.Inspect(file, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
-				if !ok || len(call.Args) < 2 {
+				if !ok || len(call.Args) != 2 {
 					return true
 				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
+				fn, ok := call.Fun.(*ast.Ident)
+				if !ok || fn.Name != "openRepoCacheLockFile" {
+					return true
+				}
+				comparison, ok := call.Args[1].(*ast.BinaryExpr)
 				if !ok {
 					return true
 				}
-				pkg, pkgOK := sel.X.(*ast.Ident)
-				if !pkgOK || pkg.Name != "os" || sel.Sel.Name != "OpenFile" {
-					return true
-				}
-				flags, ok := call.Args[1].(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				policy, policyOK := flags.Fun.(*ast.Ident)
-				if !policyOK || policy.Name != "repoCacheLockOpenFlags" || len(flags.Args) != 1 {
-					return true
-				}
-				createRoot, ok := flags.Args[0].(*ast.Ident)
-				matched = ok && createRoot.Name == "createRoot"
+				mode, modeOK := comparison.X.(*ast.Ident)
+				exclusive, exclusiveOK := comparison.Y.(*ast.Ident)
+				matched = comparison.Op == token.EQL && modeOK && exclusiveOK && mode.Name == "mode" && exclusive.Name == "repoCacheLockExclusive"
 				return true
 			})
 			if !matched {
-				t.Fatalf("%s must derive os.OpenFile flags from repoCacheLockOpenFlags(createRoot)", path)
+				t.Fatalf("%s must open through openRepoCacheLockFile with the platform lock mode", path)
 			}
 		})
 	}
