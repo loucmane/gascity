@@ -471,14 +471,10 @@ func TestHookCommandClaimTokenlessRuntimeSkipsFence(t *testing.T) {
 	}
 }
 
-// TestHookCommandClaimAbsentSessionBeadDrainsStale proves a runtime whose session
-// bead is confirmed absent — GC_SESSION_ID names no bead in the store — is refused
-// as stale before the work query, not failed open into the claim path. A vanished
-// session bead is a definitive identity failure: the incarnation can no longer
-// prove it is the current one, so it must drain (action=drain,
-// reason=stale_session) and stop rather than adopt routed work ahead of the
-// reconciler terminating it.
-func TestHookCommandClaimAbsentSessionBeadDrainsStale(t *testing.T) {
+// TestHookCommandClaimAbsentSessionBeadReportsClaimsErrored proves a runtime
+// whose session bead stays absent through the bounded startup retry is refused
+// before the work query with an honest operational result, never no_work.
+func TestHookCommandClaimAbsentSessionBeadReportsClaimsErrored(t *testing.T) {
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS", "file")
@@ -496,26 +492,22 @@ func TestHookCommandClaimAbsentSessionBeadDrainsStale(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
 		t.Fatalf("stdout is not a JSON drain result: %v\n%s", err, stdout.String())
 	}
-	if result.Action != "drain" || result.Reason != hookClaimReasonStaleSession {
-		t.Fatalf("result = %+v, want action=drain reason=stale_session", result)
+	if result.Action != "drain" || result.Reason != hookClaimReasonClaimsErrored {
+		t.Fatalf("result = %+v, want action=drain reason=claims_errored", result)
 	}
-	if !strings.Contains(stderr.String(), "refusing stale session") ||
+	if !strings.Contains(stderr.String(), "session identity unavailable") ||
 		!strings.Contains(stderr.String(), "not found") {
-		t.Fatalf("stderr = %q, want stale refusal naming the missing bead", stderr.String())
+		t.Fatalf("stderr = %q, want exhausted identity diagnostic naming the missing bead", stderr.String())
 	}
 	if _, err := os.Stat(queryMarker); !os.IsNotExist(err) {
 		t.Fatalf("work query ran for a session with no bead; stat error = %v", err)
 	}
 }
 
-// TestHookCommandClaimFailsOpenOnSessionStoreError proves a GENUINE session-store
-// fault — here a corrupt/unreadable store file, so the fence's store open itself
-// fails — is NOT mislabeled as a stale session: the fence fails open and lets the
-// normal claim path run, which surfaces and escalates its own store errors. This
-// is the counterpart to the absent-bead case above: a confirmed-missing bead
-// drains stale, but an infrastructure fault must never refuse a possibly-healthy
-// worker.
-func TestHookCommandClaimFailsOpenOnSessionStoreError(t *testing.T) {
+// TestHookCommandClaimStoreErrorReportsClaimsErrored proves a genuine
+// session-store fault is retried and then surfaced as claims_errored without
+// entering the work query, whose compatibility probes can suppress read errors.
+func TestHookCommandClaimStoreErrorReportsClaimsErrored(t *testing.T) {
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS", "file")
@@ -532,17 +524,24 @@ func TestHookCommandClaimFailsOpenOnSessionStoreError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
 
-	if _, err := os.Stat(queryMarker); err != nil {
-		t.Fatalf("fail-open did not reach the work query: %v; stderr=%s", err, stderr.String())
+	if _, err := os.Stat(queryMarker); !os.IsNotExist(err) {
+		t.Fatalf("work query ran without readable session identity; stat error = %v", err)
 	}
 	if strings.Contains(stderr.String(), "refusing stale session") {
 		t.Fatalf("store fault was mislabeled as a stale session: %s", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "session fence unavailable") {
-		t.Fatalf("stderr = %q, want fence-unavailable diagnostic", stderr.String())
+	if !strings.Contains(stderr.String(), "session identity unavailable") {
+		t.Fatalf("stderr = %q, want exhausted identity diagnostic", stderr.String())
 	}
 	if code != 1 {
-		t.Fatalf("code = %d, want 1 (JSON no-work drain without --drain-ack)", code)
+		t.Fatalf("code = %d, want 1 (JSON claims-errored drain without --drain-ack)", code)
+	}
+	var result hookClaimJSONResult
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
+		t.Fatalf("stdout is not a JSON result: %v\n%s", err, stdout.String())
+	}
+	if result.Action != "drain" || result.Reason != hookClaimReasonClaimsErrored {
+		t.Fatalf("result = %+v, want action=drain reason=claims_errored", result)
 	}
 }
 
@@ -560,9 +559,9 @@ func TestClassifyHookClaimSessionLookupError(t *testing.T) {
 		wantMsg string
 	}{
 		{
-			name:    "confirmed absent bead is stale",
+			name:    "absent bead is retryable during startup",
 			err:     fmt.Errorf("loading session %q: %w", "s", beads.ErrNotFound),
-			want:    hookClaimSessionStale,
+			want:    hookClaimSessionStoreUnavailable,
 			wantMsg: "not found",
 		},
 		{

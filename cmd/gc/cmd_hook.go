@@ -473,51 +473,56 @@ const (
 	// terminal drain result instead of a bare exit 1 the startup wrapper retries.
 	hookClaimSessionStale
 	// hookClaimSessionStoreUnavailable: the session store could not be opened, or
-	// its read failed for a reason other than a confirmed-missing or non-session
-	// bead. That is a transient infrastructure fault, not a definitive
-	// ineligibility, so the caller fails open into the normal claim path (whose
-	// runner surfaces and escalates its own store errors) rather than mislabeling
-	// the fault as a stale session. A bead that is confirmed absent or resolves to
-	// a non-session bead is NOT this verdict — it is a definitive identity failure
-	// and classified stale.
+	// its identity bead is not yet readable. That is a retryable startup/store
+	// condition, not proof that the runtime is stale. The caller retries it before
+	// returning an honest claims_errored result; it must never enter the work query,
+	// whose compatibility probes intentionally suppress bd read errors and would
+	// otherwise launder this condition into no_work.
 	hookClaimSessionStoreUnavailable
+)
+
+const (
+	hookClaimSessionFenceAttempts = 5
+	hookClaimSessionFenceDelay    = 100 * time.Millisecond
 )
 
 // fenceHookClaimSession applies the runtime-identity fence that gates
 // gc hook --claim before it runs the work query. It returns (code, handled):
-// handled is true only for a definitively stale session, whose terminal drain
-// result the caller must return as-is. An un-fenceable context (no session id or
-// no instance token), an eligible session, or a transient session-store fault all
-// return handled=false so the normal claim path runs — the fence never turns an
-// infrastructure hiccup or an in-progress start into a false refusal.
+// handled is true for a definitively stale session and for identity reads that
+// remain unavailable after the bounded retry budget. An un-fenceable context
+// (no session id or no instance token) or an eligible session returns
+// handled=false so the normal claim path runs.
 func fenceHookClaimSession(cityPath string, cfg *config.City, sessionID string, opts hookCommandOptions, stdout, stderr io.Writer) (int, bool) {
 	instanceToken := strings.TrimSpace(os.Getenv("GC_INSTANCE_TOKEN"))
 	if sessionID == "" || instanceToken == "" {
 		return 0, false
 	}
-	switch verdict, reason := classifyHookClaimSession(cityPath, cfg, sessionID, instanceToken); verdict {
-	case hookClaimSessionStale:
-		fmt.Fprintf(stderr, "gc hook --claim: refusing stale session %s: %s\n", sessionID, reason) //nolint:errcheck
-		return writeHookClaimStaleSessionDrain(opts, stdout, stderr), true
-	case hookClaimSessionStoreUnavailable:
-		// Fail open: let the claim path run and surface/escalate its own store
-		// error rather than reporting a false stale session. Name the fault
-		// without the alarming "stale session" wording.
-		fmt.Fprintf(stderr, "gc hook --claim: session fence unavailable for %s: %s; proceeding to claim\n", sessionID, reason) //nolint:errcheck
-		return 0, false
-	default:
-		return 0, false
+	for attempt := 1; attempt <= hookClaimSessionFenceAttempts; attempt++ {
+		switch verdict, reason := classifyHookClaimSession(cityPath, cfg, sessionID, instanceToken); verdict {
+		case hookClaimSessionStale:
+			fmt.Fprintf(stderr, "gc hook --claim: refusing stale session %s: %s\n", sessionID, reason) //nolint:errcheck
+			return writeHookClaimStaleSessionDrain(opts, stdout, stderr), true
+		case hookClaimSessionStoreUnavailable:
+			if attempt < hookClaimSessionFenceAttempts {
+				timer := time.NewTimer(hookClaimSessionFenceDelay)
+				<-timer.C
+				continue
+			}
+			fmt.Fprintf(stderr, "gc hook --claim: session identity unavailable for %s after %d attempts: %s\n", sessionID, attempt, reason) //nolint:errcheck
+			return writeHookClaimDrain(hookClaimReasonClaimsErrored, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr), true
+		default:
+			return 0, false
+		}
 	}
+	return writeHookClaimDrain(hookClaimReasonClaimsErrored, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr), true
 }
 
 // classifyHookClaimSession loads the session bead named by sessionID and reports
 // whether the runtime holding instanceToken may claim. A confirmed identity
-// failure — the session bead is absent, or resolves to a non-session bead — is a
-// stale verdict: the incarnation can no longer prove its identity and must drain
-// rather than claim. Only a genuine store-open or read fault yields
-// hookClaimSessionStoreUnavailable (transient, fails open), so an infrastructure
-// hiccup is not mislabeled as staleness AND a vanished session is not laundered
-// into an infrastructure hiccup that lets a stale runtime reach the claim path.
+// failure from a loaded row (non-session bead, stale token/state) is stale. An
+// absent row is ambiguous during startup because the provider can become live
+// just before cache reconciliation projects its session bead, so absence and
+// genuine store-read faults are retryable unavailable verdicts.
 func classifyHookClaimSession(cityPath string, cfg *config.City, sessionID, instanceToken string) (hookClaimSessionVerdict, string) {
 	store, err := openCityStoreAt(cityPath)
 	if err != nil {
@@ -531,18 +536,15 @@ func classifyHookClaimSession(cityPath string, cfg *config.City, sessionID, inst
 }
 
 // classifyHookClaimSessionLookupError maps a session Store.Get error to a fence
-// verdict. session.Store.Get reports a CONFIRMED-absent id as the store not-found
-// error wrapped around beads.ErrNotFound, and a present-but-non-session id (the
-// id resolves to a bead that is not a session) as session.ErrSessionNotFound.
-// Both are definitive identity failures — the runtime's session no longer exists
-// in the store — so the incarnation is stale and must drain. Any other error is a
-// genuine store open/read fault the fence fails open on, letting the normal claim
-// path surface and escalate its own store error rather than refusing a healthy
-// worker over an infrastructure hiccup.
+// verdict. session.Store.Get reports an absent id as the store not-found error
+// wrapped around beads.ErrNotFound, and a present-but-non-session id as
+// session.ErrSessionNotFound. Absence is retryable because a newly started
+// provider can precede session-bead projection; a loaded non-session row is a
+// definitive stale identity. Other read faults are retryable too.
 func classifyHookClaimSessionLookupError(err error) (hookClaimSessionVerdict, string) {
 	switch {
 	case errors.Is(err, beads.ErrNotFound):
-		return hookClaimSessionStale, fmt.Sprintf("session bead not found: %v", err)
+		return hookClaimSessionStoreUnavailable, fmt.Sprintf("session bead not found: %v", err)
 	case errors.Is(err, session.ErrSessionNotFound):
 		return hookClaimSessionStale, fmt.Sprintf("session id resolves to a non-session bead: %v", err)
 	default:
