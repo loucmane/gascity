@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
 )
 
@@ -86,6 +89,223 @@ func setFenceClaimEnv(t *testing.T, cityDir, sessionID, instanceToken string) {
 	t.Setenv("GC_SESSION_NAME", "worker-1")
 	t.Setenv("GC_SESSION_ORIGIN", "ephemeral")
 	t.Setenv("GC_INSTANCE_TOKEN", instanceToken)
+}
+
+const (
+	claimIdentityRaceSessionID = "ci-a7u3"
+	claimIdentityRaceWorkID    = "ga-routed-work"
+	claimIdentityRaceRoute     = "hpfetcher/gc.implementation-worker"
+	claimIdentityRaceToken     = "fresh-instance-token"
+)
+
+// newClaimIdentityRaceFixture reproduces the provider-before-projection order
+// seen in ga-k4p. The runtime and all of its GC_* identity env exist, and the
+// backing store contains one open routed task, but the session bead is not
+// readable on the first `bd show`. In "appear" mode the cache-reconcile witness
+// becomes readable on the second identity lookup; in "never" mode it remains
+// unavailable; in "present" mode it exists from the first lookup.
+//
+// The fake bd intentionally returns a bare exit 1 for the missing session, the
+// exact error shape from the live witnesses. While identity is unavailable its
+// work reads fail too. The default work_query suppresses those errors and falls
+// through to [], pinning the layer that currently launders the failure into
+// benign no_work.
+func newClaimIdentityRaceFixture(t *testing.T, mode string) (string, string) {
+	t.Helper()
+	clearGCEnv(t)
+	disableManagedDoltRecoveryForTest(t)
+	t.Setenv("GC_BEADS_FORCE_FALLBACK", "1")
+
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := `[workspace]
+name = "test-city"
+
+[beads]
+provider = "bd"
+
+[[rigs]]
+name = "hpfetcher"
+path = "."
+
+[[agent]]
+name = "gc.implementation-worker"
+dir = "hpfetcher"
+max_active_sessions = 2
+`
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, ".beads", "config.yaml"), []byte("issue_prefix: ga\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stateDir := t.TempDir()
+	fakeBin := t.TempDir()
+	fakeBD := filepath.Join(fakeBin, "bd")
+	script := `#!/bin/sh
+set -eu
+session_json='[{"id":"` + claimIdentityRaceSessionID + `","title":"worker","status":"open","issue_type":"session","labels":["gc:session"],"metadata":{"session_name":"worker-1","template":"` + claimIdentityRaceRoute + `","state":"active","instance_token":"` + claimIdentityRaceToken + `"}}]'
+open_work='[{"id":"` + claimIdentityRaceWorkID + `","title":"routed work","status":"open","issue_type":"task","assignee":"","metadata":{"gc.routed_to":"` + claimIdentityRaceRoute + `","gc.session_id":"` + claimIdentityRaceSessionID + `","gc.session_name":"worker-1"}}]'
+claimed_work='[{"id":"` + claimIdentityRaceWorkID + `","title":"routed work","status":"in_progress","issue_type":"task","assignee":"worker-1","metadata":{"gc.routed_to":"` + claimIdentityRaceRoute + `","gc.session_id":"` + claimIdentityRaceSessionID + `","gc.session_name":"worker-1"}}]'
+identity_ready() {
+  case "$CLAIM_IDENTITY_MODE" in
+    present) return 0 ;;
+    appear) [ -f "$CLAIM_IDENTITY_READS" ] && [ "$(wc -c < "$CLAIM_IDENTITY_READS")" -ge 2 ] ;;
+    never) return 1 ;;
+  esac
+}
+case "${1:-}" in
+  show)
+    id="${3:-}"
+    if [ "$id" = "` + claimIdentityRaceSessionID + `" ]; then
+      if [ "$CLAIM_IDENTITY_MODE" = "appear" ]; then
+        printf x >> "$CLAIM_IDENTITY_READS"
+      fi
+      if identity_ready; then
+        printf '%s\n' "$session_json"
+        exit 0
+      fi
+      exit 1
+    fi
+    if [ "$id" = "` + claimIdentityRaceWorkID + `" ]; then
+      if [ -d "$CLAIM_LOCK" ]; then printf '%s\n' "$claimed_work"; else printf '%s\n' "$open_work"; fi
+      exit 0
+    fi
+    exit 1
+    ;;
+  list|query)
+    if identity_ready; then printf '[]\n'; else exit 1; fi
+    ;;
+  ready)
+    if ! identity_ready; then exit 1; fi
+    if [ -d "$CLAIM_LOCK" ]; then printf '[]\n'; else printf '%s\n' "$open_work"; fi
+    ;;
+  update)
+    if [ "${2:-}" = "` + claimIdentityRaceWorkID + `" ] && [ "${3:-}" = "--claim" ]; then
+      if mkdir "$CLAIM_LOCK" 2>/dev/null; then
+        printf '%s\n' "$claimed_work"
+        exit 0
+      fi
+      printf '%s\n' '{"error":"issue is already assigned to worker-1"}'
+      exit 1
+    fi
+    printf '%s\n' "$claimed_work"
+    ;;
+  *)
+    printf '[]\n'
+    ;;
+esac
+`
+	if err := os.WriteFile(fakeBD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	claimLock := filepath.Join(stateDir, "claim.lock")
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAIM_IDENTITY_MODE", mode)
+	t.Setenv("CLAIM_IDENTITY_READS", filepath.Join(stateDir, "identity-reads"))
+	t.Setenv("CLAIM_LOCK", claimLock)
+	setFenceClaimEnv(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken)
+	t.Setenv("GC_TEMPLATE", claimIdentityRaceRoute)
+	t.Setenv("GC_ALIAS", claimIdentityRaceRoute+"-1")
+	t.Setenv("GC_AGENT", claimIdentityRaceRoute+"-1")
+	t.Setenv("GC_SESSION_NAME", "worker-1")
+	t.Setenv("GC_SESSION_ORIGIN", "ephemeral")
+
+	sp := runtime.NewFake()
+	if err := sp.Start(context.Background(), "worker-1", runtime.Config{Env: map[string]string{
+		"GC_SESSION_ID":     claimIdentityRaceSessionID,
+		"GC_SESSION_NAME":   "worker-1",
+		"GC_TEMPLATE":       claimIdentityRaceRoute,
+		"GC_INSTANCE_TOKEN": claimIdentityRaceToken,
+	}}); err != nil {
+		t.Fatalf("register provider session: %v", err)
+	}
+	if !sp.IsRunning("worker-1") {
+		t.Fatal("provider session is not running")
+	}
+	return cityDir, claimLock
+}
+
+func decodeClaimIdentityRaceResult(t *testing.T, stdout *bytes.Buffer) hookClaimJSONResult {
+	t.Helper()
+	var result hookClaimJSONResult
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
+		t.Fatalf("stdout is not a JSON claim result: %v\n%s", err, stdout.String())
+	}
+	return result
+}
+
+func TestHookCommandClaimWaitsForSessionIdentityProjection(t *testing.T) {
+	_, claimLock := newClaimIdentityRaceFixture(t, "appear")
+
+	var stdout, stderr bytes.Buffer
+	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
+	result := decodeClaimIdentityRaceResult(t, &stdout)
+	if code != 0 || result.Action != "work" || result.Reason != "claimed" || result.BeadID != claimIdentityRaceWorkID {
+		_, claimErr := os.Stat(claimLock)
+		t.Fatalf("claim before session projection = code %d result %+v claim_lock=%v, want one claimed work result; stderr=%s",
+			code, result, claimErr, stderr.String())
+	}
+}
+
+func TestHookCommandClaimIdentityFailureIsNeverNoWork(t *testing.T) {
+	newClaimIdentityRaceFixture(t, "never")
+
+	var stdout, stderr bytes.Buffer
+	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
+	result := decodeClaimIdentityRaceResult(t, &stdout)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; result=%+v stderr=%s", code, result, stderr.String())
+	}
+	if result.Action != "drain" || result.Reason != hookClaimReasonClaimsErrored {
+		t.Fatalf("identity-read exhaustion = %+v, want drain/claims_errored (never no_work); stderr=%s", result, stderr.String())
+	}
+}
+
+func TestHookCommandConcurrentClaimsAcquireRoutedWorkOnce(t *testing.T) {
+	_, claimLock := newClaimIdentityRaceFixture(t, "present")
+
+	type outcome struct {
+		code   int
+		result hookClaimJSONResult
+		stderr string
+	}
+	start := make(chan struct{})
+	outcomes := make(chan outcome, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for range 2 {
+		go func() {
+			ready.Done()
+			<-start
+			var stdout, stderr bytes.Buffer
+			code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
+			outcomes <- outcome{code: code, result: decodeClaimIdentityRaceResult(t, &stdout), stderr: stderr.String()}
+		}()
+	}
+	ready.Wait()
+	close(start)
+
+	claimed := 0
+	for range 2 {
+		got := <-outcomes
+		if got.result.Action == "work" && got.result.Reason == "claimed" {
+			claimed++
+			if got.code != 0 || got.result.BeadID != claimIdentityRaceWorkID {
+				t.Fatalf("claimed outcome = %+v code=%d stderr=%s", got.result, got.code, got.stderr)
+			}
+		}
+	}
+	if claimed != 1 {
+		t.Fatalf("claimed outcomes = %d, want exactly 1", claimed)
+	}
+	if _, err := os.Stat(claimLock); err != nil {
+		t.Fatalf("claim mutation did not commit: %v", err)
+	}
 }
 
 // TestHookCommandClaimStaleSessionDrainsBeforeWorkQuery proves a definitively
