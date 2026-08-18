@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,11 +55,13 @@ func newFenceSessionBead(t *testing.T, cityDir string, state session.State, inst
 			"template":       "worker",
 			"state":          string(state),
 			"instance_token": instanceToken,
+			"generation":     "1",
 		},
 	})
 	if err != nil {
 		t.Fatalf("create session bead: %v", err)
 	}
+	writeClaimIdentityRaceProjection(t, cityDir, bead.ID, instanceToken, 1, state)
 	return bead.ID
 }
 
@@ -91,6 +93,7 @@ func setFenceClaimEnv(t *testing.T, cityDir, sessionID, instanceToken string) {
 	t.Setenv("GC_SESSION_NAME", "worker-1")
 	t.Setenv("GC_SESSION_ORIGIN", "ephemeral")
 	t.Setenv("GC_INSTANCE_TOKEN", instanceToken)
+	t.Setenv("GC_RUNTIME_EPOCH", "1")
 }
 
 const (
@@ -99,6 +102,45 @@ const (
 	claimIdentityRaceRoute     = "hpfetcher/gc.implementation-worker"
 	claimIdentityRaceToken     = "fresh-instance-token"
 )
+
+const claimIdentityRaceProjectionSchemaVersion = 1
+
+type claimIdentityRaceProjection struct {
+	SchemaVersion       int    `json:"schema_version"`
+	SessionID           string `json:"session_id"`
+	InstanceTokenSHA256 string `json:"instance_token_sha256"`
+	Generation          int    `json:"generation"`
+	State               string `json:"state"`
+	ProjectedAt         string `json:"projected_at"`
+}
+
+func claimIdentityRaceProjectionPath(cityDir, sessionID string) string {
+	return filepath.Join(cityDir, ".gc", "runtime", "session-fence", sessionID+".json")
+}
+
+func writeClaimIdentityRaceProjection(t *testing.T, cityDir, sessionID, token string, generation int, state session.State) string {
+	t.Helper()
+	path := claimIdentityRaceProjectionPath(cityDir, sessionID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(token))
+	data, err := json.Marshal(claimIdentityRaceProjection{
+		SchemaVersion:       claimIdentityRaceProjectionSchemaVersion,
+		SessionID:           sessionID,
+		InstanceTokenSHA256: fmt.Sprintf("%x", digest[:]),
+		Generation:          generation,
+		State:               string(state),
+		ProjectedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 // newClaimIdentityRaceFixture installs separate city and rig stores used by the
 // claim lifecycle tests. The city store exclusively owns session identity; the
@@ -192,6 +234,7 @@ case "${1:-}" in
   show)
     id="${3:-}"
     if [ "$id" = "` + claimIdentityRaceSessionID + `" ]; then
+	  printf '%s\n' "$*" >> "$CLAIM_SOCKET_ATTEMPT_LOG"
       if [ "$(store_scope)" = city ] && identity_ready; then
         printf '%s\n' "$session_json"
         exit 0
@@ -234,6 +277,7 @@ esac
 	}
 	workerProvider := filepath.Join(fakeBin, "gc-beads-bd")
 	if err := os.WriteFile(workerProvider, []byte(`#!/bin/sh
+printf '%s\n' "$*" >> "$CLAIM_SOCKET_ATTEMPT_LOG"
 case "${1:-}" in
   get)
     printf 'no issue found matching %s\n' "${2:-}" >&2
@@ -252,6 +296,7 @@ esac
 	t.Setenv("CLAIM_PROJECTION_READY", projectionReady)
 	t.Setenv("CLAIM_LOCK", claimLock)
 	t.Setenv("CLAIM_CALL_LOG", filepath.Join(stateDir, "claim-calls"))
+	t.Setenv("CLAIM_SOCKET_ATTEMPT_LOG", filepath.Join(stateDir, "socket-attempts"))
 	t.Setenv("CLAIM_CITY_BEADS_DIR", filepath.Join(cityDir, ".beads"))
 	t.Setenv("CLAIM_RIG_BEADS_DIR", filepath.Join(rigDir, ".beads"))
 	t.Setenv("BEADS_DIR", filepath.Join(rigDir, ".beads"))
@@ -259,11 +304,15 @@ esac
 	t.Setenv("GC_RIG", "hpfetcher")
 	t.Setenv("GC_RIG_ROOT", rigDir)
 	setFenceClaimEnv(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken)
+	t.Setenv("GC_RUNTIME_EPOCH", "1")
 	t.Setenv("GC_TEMPLATE", claimIdentityRaceRoute)
 	t.Setenv("GC_ALIAS", claimIdentityRaceRoute+"-1")
 	t.Setenv("GC_AGENT", claimIdentityRaceRoute+"-1")
 	t.Setenv("GC_SESSION_NAME", "worker-1")
 	t.Setenv("GC_SESSION_ORIGIN", "ephemeral")
+	if mode == "present" {
+		writeClaimIdentityRaceProjection(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken, 1, session.StateActive)
+	}
 
 	return cityDir, claimLock, projectionReady, workerProvider
 }
@@ -383,7 +432,7 @@ func (p *claimLifecycleStartProvider) snapshot() (starts, claimed, identityError
 }
 
 func TestPreparedSessionStartWaitsForClaimIdentityProjection(t *testing.T) {
-	cityDir, claimLock, projectionReady, _ := newClaimIdentityRaceFixture(t, "barrier")
+	cityDir, claimLock, _, _ := newClaimIdentityRaceFixture(t, "never")
 	backing := newDelayedSessionProjectionStore()
 	store := beads.NewCachingStoreForTest(backing, nil)
 
@@ -418,6 +467,7 @@ func TestPreparedSessionStartWaitsForClaimIdentityProjection(t *testing.T) {
 	}
 
 	provider := newClaimLifecycleStartProvider()
+	projectionPath := writeClaimIdentityRaceProjection(t, cityDir, created.ID, "superseded-token", 0, session.StateSuspended)
 	item := preparedStart{
 		candidate: startCandidate{
 			info: created,
@@ -457,9 +507,6 @@ func TestPreparedSessionStartWaitsForClaimIdentityProjection(t *testing.T) {
 		}
 		firstDone = nil
 	}
-	if err := os.WriteFile(projectionReady, []byte("ready\n"), 0o644); err != nil {
-		t.Fatalf("release hook-visible projection: %v", err)
-	}
 	close(backing.projected)
 	if firstDone != nil {
 		if result := <-firstDone; result.err != nil {
@@ -496,6 +543,16 @@ func TestPreparedSessionStartWaitsForClaimIdentityProjection(t *testing.T) {
 	if _, err := os.Stat(claimLock); err != nil {
 		t.Errorf("claim mutation did not commit: %v", err)
 	}
+	projectionBytes, err := os.ReadFile(projectionPath)
+	if err != nil {
+		t.Fatalf("read reconciled session-fence projection: %v", err)
+	}
+	if bytes.Contains(projectionBytes, []byte(claimIdentityRaceToken)) {
+		t.Fatalf("session-fence projection leaked raw instance token: %s", projectionBytes)
+	}
+	if bytes.Contains(projectionBytes, []byte("superseded-token")) {
+		t.Fatalf("boot reconciliation left superseded projection in place: %s", projectionBytes)
+	}
 }
 
 func TestHookCommandClaimIdentityFailureIsNeverNoWork(t *testing.T) {
@@ -516,12 +573,22 @@ func TestHookCommandClaimIdentityFailureIsNeverNoWork(t *testing.T) {
 }
 
 func TestHookCommandClaimUsesCityIdentityStoreAndRigWorkStore(t *testing.T) {
-	_, claimLock, _, workerProvider := newClaimIdentityRaceFixture(t, "present")
+	cityDir, claimLock, _, workerProvider := newClaimIdentityRaceFixture(t, "present")
 	// Reproduce the launched worker's ambient provider/store selection: its
 	// default handle is rig-scoped, while GC_CITY remains the explicit path to
 	// the separate city store that owns session identity beads.
 	t.Setenv("GC_BEADS", "exec:"+workerProvider)
 	t.Setenv("GC_BEADS_SCOPE_ROOT", "")
+	if err := os.Chmod(filepath.Join(cityDir, ".gc"), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(cityDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(cityDir, 0o755)
+		_ = os.Chmod(filepath.Join(cityDir, ".gc"), 0o755)
+	})
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -535,6 +602,9 @@ func TestHookCommandClaimUsesCityIdentityStoreAndRigWorkStore(t *testing.T) {
 	if strings.Contains(stderr.String(), "session identity unavailable") {
 		t.Fatalf("city session identity read drained under rig worker environment: %s", stderr.String())
 	}
+	if attempts, err := os.ReadFile(os.Getenv("CLAIM_SOCKET_ATTEMPT_LOG")); err == nil && len(bytes.TrimSpace(attempts)) > 0 {
+		t.Fatalf("claim fence attempted city-store/socket access: %q", attempts)
+	}
 	claimCalls, err := os.ReadFile(os.Getenv("CLAIM_CALL_LOG"))
 	if err != nil {
 		t.Fatalf("read claim call log: %v", err)
@@ -543,6 +613,90 @@ func TestHookCommandClaimUsesCityIdentityStoreAndRigWorkStore(t *testing.T) {
 	if len(lines) != 1 || !strings.Contains(lines[0], "scope=rig ") ||
 		!strings.Contains(lines[0], "beads_dir="+os.Getenv("CLAIM_RIG_BEADS_DIR")+" ") {
 		t.Fatalf("claim mutations = %q, want exactly one against the rig store", claimCalls)
+	}
+}
+
+func TestHookCommandClaimRejectsReplacedTokenAndAdmitsOnlyReplacement(t *testing.T) {
+	cityDir, claimLock, _, _ := newClaimIdentityRaceFixture(t, "never")
+	projectionPath := writeClaimIdentityRaceProjection(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken, 1, session.StateActive)
+	projectionBytes, err := os.ReadFile(projectionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(projectionBytes, []byte(claimIdentityRaceToken)) {
+		t.Fatalf("projection contains raw token: %s", projectionBytes)
+	}
+
+	writeClaimIdentityRaceProjection(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken, 1, session.StateSuspended)
+	replacementToken := "replacement-instance-token"
+	writeClaimIdentityRaceProjection(t, cityDir, claimIdentityRaceSessionID, replacementToken, 2, session.StateActive)
+
+	var staleStdout, staleStderr bytes.Buffer
+	staleCode := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &staleStdout, &staleStderr)
+	staleResult := decodeClaimIdentityRaceResult(t, &staleStdout)
+	if staleCode != 1 || staleResult.Reason != hookClaimReasonStaleSession {
+		t.Fatalf("superseded runtime = code %d result %+v stderr=%s, want stale refusal", staleCode, staleResult, staleStderr.String())
+	}
+
+	t.Setenv("GC_INSTANCE_TOKEN", replacementToken)
+	t.Setenv("GC_RUNTIME_EPOCH", "2")
+	var freshStdout, freshStderr bytes.Buffer
+	freshCode := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &freshStdout, &freshStderr)
+	freshResult := decodeClaimIdentityRaceResult(t, &freshStdout)
+	if freshCode != 0 || freshResult.Action != "work" || freshResult.BeadID != claimIdentityRaceWorkID {
+		t.Fatalf("replacement runtime = code %d result %+v stderr=%s, want one claim", freshCode, freshResult, freshStderr.String())
+	}
+	if _, err := os.Stat(claimLock); err != nil {
+		t.Fatalf("replacement did not commit rig-scoped claim: %v", err)
+	}
+}
+
+func TestHookCommandClaimRejectsIneligibleProjectedStates(t *testing.T) {
+	for _, state := range []session.State{session.StateClosed, session.StateSuspended, session.StateDraining, session.StateDrained} {
+		t.Run(string(state), func(t *testing.T) {
+			cityDir, claimLock, _, _ := newClaimIdentityRaceFixture(t, "never")
+			writeClaimIdentityRaceProjection(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken, 1, state)
+			var stdout, stderr bytes.Buffer
+			code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
+			result := decodeClaimIdentityRaceResult(t, &stdout)
+			if code != 1 || result.Reason != hookClaimReasonStaleSession {
+				t.Fatalf("state %q = code %d result %+v stderr=%s, want stale refusal", state, code, result, stderr.String())
+			}
+			if _, err := os.Stat(claimLock); !os.IsNotExist(err) {
+				t.Fatalf("state %q reached claim mutation: %v", state, err)
+			}
+		})
+	}
+}
+
+func TestHookCommandClaimMalformedProjectionReportsClaimsErrored(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(*testing.T, string)
+	}{
+		{name: "corrupt", write: func(t *testing.T, path string) { if err := os.WriteFile(path, []byte("{broken"), 0o644); err != nil { t.Fatal(err) } }},
+		{name: "oversized", write: func(t *testing.T, path string) { if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 65<<10), 0o644); err != nil { t.Fatal(err) } }},
+		{name: "symlink", write: func(t *testing.T, path string) {
+			target := filepath.Join(t.TempDir(), "projection.json")
+			if err := os.WriteFile(target, []byte(`{"schema_version":1}`), 0o644); err != nil { t.Fatal(err) }
+			if err := os.Symlink(target, path); err != nil { t.Fatal(err) }
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cityDir, claimLock, _, _ := newClaimIdentityRaceFixture(t, "never")
+			path := claimIdentityRaceProjectionPath(cityDir, claimIdentityRaceSessionID)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { t.Fatal(err) }
+			tc.write(t, path)
+			var stdout, stderr bytes.Buffer
+			code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
+			result := decodeClaimIdentityRaceResult(t, &stdout)
+			if code != 1 || result.Reason != hookClaimReasonClaimsErrored {
+				t.Fatalf("%s projection = code %d result %+v stderr=%s, want claims_errored", tc.name, code, result, stderr.String())
+			}
+			if _, err := os.Stat(claimLock); !os.IsNotExist(err) {
+				t.Fatalf("%s projection reached claim mutation: %v", tc.name, err)
+			}
+		})
 	}
 }
 
@@ -671,41 +825,33 @@ func TestHookCommandClaimEmptyLegacyStateReachesWorkQuery(t *testing.T) {
 	}
 }
 
-// TestHookCommandClaimTokenlessRuntimeSkipsFence proves the fence's empty-token
-// guard keeps a token-less (legacy/unmanaged) runtime out of the identity check:
-// with GC_INSTANCE_TOKEN unset the fence is skipped entirely and the work query
-// runs, even when the session bead is in a state the fence would otherwise refuse
-// as stale. This pins the deliberate compatibility escape hatch so a future
-// refactor cannot silently start fencing — and refusing — healthy legacy workers.
-func TestHookCommandClaimTokenlessRuntimeSkipsFence(t *testing.T) {
+// TestHookCommandClaimTokenlessRuntimeFailsClosed proves environment identity is
+// never trusted as a compatibility escape hatch. A managed runtime that names a
+// session but carries no token cannot validate the controller projection.
+func TestHookCommandClaimTokenlessRuntimeFailsClosed(t *testing.T) {
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS", "file")
 	cityDir := writeFenceTestCity(t)
-	// A failed-create bead would drain stale if the fence ran; the point is that a
-	// token-less runtime never reaches that classification.
-	sessionID := newFenceSessionBead(t, cityDir, session.StateFailedCreate, "legacy-token")
+	sessionID := newFenceSessionBead(t, cityDir, session.StateActive, "legacy-token")
 	queryMarker := installFenceWorkQueryProbe(t)
 	setFenceClaimEnv(t, cityDir, sessionID, "")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
 
-	if _, err := os.Stat(queryMarker); err != nil {
-		t.Fatalf("work query did not run for token-less runtime (fence should be skipped): %v; stderr=%s", err, stderr.String())
-	}
-	if strings.Contains(stderr.String(), "refusing stale session") {
-		t.Fatalf("token-less runtime was refused by the fence: %s", stderr.String())
+	if _, err := os.Stat(queryMarker); !os.IsNotExist(err) {
+		t.Fatalf("work query ran for token-less runtime: %v; stderr=%s", err, stderr.String())
 	}
 	if code != 1 {
-		t.Fatalf("code = %d, want 1 (JSON no-work drain without --drain-ack); stderr=%s", code, stderr.String())
+		t.Fatalf("code = %d, want 1; stderr=%s", code, stderr.String())
 	}
 	var result hookClaimJSONResult
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
 		t.Fatalf("stdout is not a JSON result: %v\n%s", err, stdout.String())
 	}
-	if result.Action != "drain" || result.Reason != hookClaimReasonNoWork {
-		t.Fatalf("result = %+v, want action=drain reason=no_work (probe returns no work)", result)
+	if result.Action != "drain" || result.Reason != hookClaimReasonClaimsErrored {
+		t.Fatalf("result = %+v, want action=drain reason=claims_errored", result)
 	}
 }
 
@@ -742,34 +888,29 @@ func TestHookCommandClaimAbsentSessionBeadReportsClaimsErrored(t *testing.T) {
 	}
 }
 
-// TestHookCommandClaimStoreErrorReportsClaimsErrored proves a genuine
-// session-store fault is retried and then surfaced as claims_errored without
-// entering the work query, whose compatibility probes can suppress read errors.
-func TestHookCommandClaimStoreErrorReportsClaimsErrored(t *testing.T) {
+// TestHookCommandClaimProjectionDoesNotOpenCityStore proves the readable
+// controller projection is the entire worker-side identity authority: even a
+// corrupt/unopenable city store cannot make the hook dial or query it.
+func TestHookCommandClaimProjectionDoesNotOpenCityStore(t *testing.T) {
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS", "file")
 	cityDir := writeFenceTestCity(t)
+	sessionID := newFenceSessionBead(t, cityDir, session.StateActive, "current-token")
 	queryMarker := installFenceWorkQueryProbe(t)
-	// Corrupt the file store so openCityStoreAt fails to parse it: a genuine
-	// store-open fault, distinct from an absent bead (a confirmed identity
-	// failure that drains stale).
 	if err := os.WriteFile(filepath.Join(cityDir, ".gc", "beads.json"), []byte("{ this is not valid json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	setFenceClaimEnv(t, cityDir, "worker-1", "any-token")
+	setFenceClaimEnv(t, cityDir, sessionID, "current-token")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
 
-	if _, err := os.Stat(queryMarker); !os.IsNotExist(err) {
-		t.Fatalf("work query ran without readable session identity; stat error = %v", err)
+	if _, err := os.Stat(queryMarker); err != nil {
+		t.Fatalf("work query did not run with a valid projection: %v", err)
 	}
-	if strings.Contains(stderr.String(), "refusing stale session") {
-		t.Fatalf("store fault was mislabeled as a stale session: %s", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "session identity unavailable") {
-		t.Fatalf("stderr = %q, want exhausted identity diagnostic", stderr.String())
+	if strings.Contains(stderr.String(), "session identity unavailable") {
+		t.Fatalf("projection reader attempted city store: %s", stderr.String())
 	}
 	if code != 1 {
 		t.Fatalf("code = %d, want 1 (JSON claims-errored drain without --drain-ack)", code)
@@ -778,151 +919,8 @@ func TestHookCommandClaimStoreErrorReportsClaimsErrored(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
 		t.Fatalf("stdout is not a JSON result: %v\n%s", err, stdout.String())
 	}
-	if result.Action != "drain" || result.Reason != hookClaimReasonClaimsErrored {
-		t.Fatalf("result = %+v, want action=drain reason=claims_errored", result)
-	}
-}
-
-// TestClassifyHookClaimSessionLookupError exercises the error taxonomy that
-// decides whether a failed session lookup is a definitive identity failure
-// (stale, drain) or a transient store fault (unavailable, fail open). The two
-// confirmed-identity errors mirror the documented session.Store.Get contract: a
-// confirmed-absent id wraps beads.ErrNotFound, a present-but-non-session id is
-// session.ErrSessionNotFound.
-func TestClassifyHookClaimSessionLookupError(t *testing.T) {
-	cases := []struct {
-		name    string
-		err     error
-		want    hookClaimSessionVerdict
-		wantMsg string
-	}{
-		{
-			name:    "absent bead is retryable during startup",
-			err:     fmt.Errorf("loading session %q: %w", "s", beads.ErrNotFound),
-			want:    hookClaimSessionStoreUnavailable,
-			wantMsg: "not found",
-		},
-		{
-			name:    "present but non-session bead is stale",
-			err:     fmt.Errorf("%w: %s", session.ErrSessionNotFound, "s"),
-			want:    hookClaimSessionStale,
-			wantMsg: "non-session",
-		},
-		{
-			name:    "genuine store read fault fails open",
-			err:     fmt.Errorf("loading session %q: %w", "s", errors.New("dial tcp: connection refused")),
-			want:    hookClaimSessionStoreUnavailable,
-			wantMsg: "loading session bead",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			verdict, msg := classifyHookClaimSessionLookupError(tc.err)
-			if verdict != tc.want {
-				t.Fatalf("verdict = %d, want %d (msg=%q)", verdict, tc.want, msg)
-			}
-			if !strings.Contains(msg, tc.wantMsg) {
-				t.Fatalf("msg = %q, want substring %q", msg, tc.wantMsg)
-			}
-		})
-	}
-}
-
-// TestHookClaimSessionEligibility exercises the pure eligibility decision over a
-// session Info snapshot for every branch of the fence.
-func TestHookClaimSessionEligibility(t *testing.T) {
-	const token = "current-token"
-	cases := []struct {
-		name    string
-		info    session.Info
-		token   string
-		want    hookClaimSessionVerdict
-		wantMsg string
-	}{
-		{
-			name:    "closed",
-			info:    session.Info{ID: "s", Closed: true, InstanceToken: token},
-			token:   token,
-			want:    hookClaimSessionStale,
-			wantMsg: "closed",
-		},
-		{
-			name:    "superseded token",
-			info:    session.Info{ID: "s", MetadataState: string(session.StateActive), InstanceToken: "replacement-token"},
-			token:   "stale-runtime-token",
-			want:    hookClaimSessionStale,
-			wantMsg: "token",
-		},
-		{
-			name:    "empty stored token",
-			info:    session.Info{ID: "s", MetadataState: string(session.StateActive), InstanceToken: ""},
-			token:   token,
-			want:    hookClaimSessionStale,
-			wantMsg: "token",
-		},
-		{
-			name:    "failed-create",
-			info:    session.Info{ID: "s", MetadataState: string(session.StateFailedCreate), InstanceToken: token},
-			token:   token,
-			want:    hookClaimSessionStale,
-			wantMsg: "failed-create",
-		},
-		{
-			name:    "drained",
-			info:    session.Info{ID: "s", MetadataState: string(session.StateDrained), InstanceToken: token},
-			token:   token,
-			want:    hookClaimSessionStale,
-			wantMsg: "drained",
-		},
-		{
-			name:  "active",
-			info:  session.Info{ID: "s", MetadataState: string(session.StateActive), InstanceToken: token},
-			token: token,
-			want:  hookClaimSessionEligible,
-		},
-		{
-			name:  "awake",
-			info:  session.Info{ID: "s", MetadataState: string(session.StateAwake), InstanceToken: token},
-			token: token,
-			want:  hookClaimSessionEligible,
-		},
-		{
-			name:  "creating",
-			info:  session.Info{ID: "s", MetadataState: string(session.StateCreating), InstanceToken: token},
-			token: token,
-			want:  hookClaimSessionEligible,
-		},
-		{
-			name:  "start-pending",
-			info:  session.Info{ID: "s", MetadataState: string(session.StateStartPending), InstanceToken: token},
-			token: token,
-			want:  hookClaimSessionEligible,
-		},
-		{
-			// A pre-metadata legacy bead mid-upgrade carries an empty MetadataState
-			// (session.StateNone). With Closed=false and a matching instance token it
-			// is the live current incarnation, and the session lifecycle canonicalizes
-			// empty state to active, so the fence must admit it rather than drain a
-			// healthy upgraded legacy worker before it claims its routed work.
-			name:  "empty legacy state admitted as active",
-			info:  session.Info{ID: "s", MetadataState: string(session.StateNone), InstanceToken: token},
-			token: token,
-			want:  hookClaimSessionEligible,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			verdict, reason := hookClaimSessionEligibility(tc.info, tc.token)
-			if verdict != tc.want {
-				t.Fatalf("verdict = %d, want %d (reason=%q)", verdict, tc.want, reason)
-			}
-			if tc.want == hookClaimSessionEligible && reason != "" {
-				t.Fatalf("eligible verdict carried reason %q, want empty", reason)
-			}
-			if tc.wantMsg != "" && !strings.Contains(reason, tc.wantMsg) {
-				t.Fatalf("reason = %q, want substring %q", reason, tc.wantMsg)
-			}
-		})
+	if result.Action != "drain" || result.Reason != hookClaimReasonNoWork {
+		t.Fatalf("result = %+v, want action=drain reason=no_work", result)
 	}
 }
 
