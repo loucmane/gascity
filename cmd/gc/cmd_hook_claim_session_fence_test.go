@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/runtime"
@@ -92,17 +94,15 @@ func setFenceClaimEnv(t *testing.T, cityDir, sessionID, instanceToken string) {
 }
 
 const (
-	claimIdentityRaceSessionID = "ci-a7u3"
+	claimIdentityRaceSessionID = "gc-1"
 	claimIdentityRaceWorkID    = "ga-routed-work"
 	claimIdentityRaceRoute     = "hpfetcher/gc.implementation-worker"
 	claimIdentityRaceToken     = "fresh-instance-token"
 )
 
-// newClaimIdentityRaceFixture reproduces the provider-before-projection order
-// seen in ga-k4p. The runtime and all of its GC_* identity env exist, and the
-// backing store contains one open routed task, but the session bead is not
-// readable on the first `bd show`. In "appear" mode the cache-reconcile witness
-// becomes readable on the second identity lookup; in "never" mode it remains
+// newClaimIdentityRaceFixture installs the hook-side store used by the claim
+// lifecycle tests. In "barrier" mode the session becomes readable only when
+// the lifecycle test releases the projection gate; in "never" mode it remains
 // unavailable; in "present" mode it exists from the first lookup.
 //
 // The fake bd intentionally returns a bare exit 1 for the missing session, the
@@ -110,7 +110,7 @@ const (
 // work reads fail too. The default work_query suppresses those errors and falls
 // through to [], pinning the layer that currently launders the failure into
 // benign no_work.
-func newClaimIdentityRaceFixture(t *testing.T, mode string) (string, string) {
+func newClaimIdentityRaceFixture(t *testing.T, mode string) (string, string, string) {
 	t.Helper()
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
@@ -153,7 +153,7 @@ claimed_work='[{"id":"` + claimIdentityRaceWorkID + `","title":"routed work","st
 identity_ready() {
   case "$CLAIM_IDENTITY_MODE" in
     present) return 0 ;;
-    appear) [ -f "$CLAIM_IDENTITY_READS" ] && [ "$(wc -c < "$CLAIM_IDENTITY_READS")" -ge 2 ] ;;
+    barrier) [ -f "$CLAIM_PROJECTION_READY" ] ;;
     never) return 1 ;;
   esac
 }
@@ -161,9 +161,6 @@ case "${1:-}" in
   show)
     id="${3:-}"
     if [ "$id" = "` + claimIdentityRaceSessionID + `" ]; then
-      if [ "$CLAIM_IDENTITY_MODE" = "appear" ]; then
-        printf x >> "$CLAIM_IDENTITY_READS"
-      fi
       if identity_ready; then
         printf '%s\n' "$session_json"
         exit 0
@@ -204,9 +201,10 @@ esac
 	}
 
 	claimLock := filepath.Join(stateDir, "claim.lock")
+	projectionReady := filepath.Join(stateDir, "projection.ready")
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CLAIM_IDENTITY_MODE", mode)
-	t.Setenv("CLAIM_IDENTITY_READS", filepath.Join(stateDir, "identity-reads"))
+	t.Setenv("CLAIM_PROJECTION_READY", projectionReady)
 	t.Setenv("CLAIM_LOCK", claimLock)
 	setFenceClaimEnv(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken)
 	t.Setenv("GC_TEMPLATE", claimIdentityRaceRoute)
@@ -215,19 +213,7 @@ esac
 	t.Setenv("GC_SESSION_NAME", "worker-1")
 	t.Setenv("GC_SESSION_ORIGIN", "ephemeral")
 
-	sp := runtime.NewFake()
-	if err := sp.Start(context.Background(), "worker-1", runtime.Config{Env: map[string]string{
-		"GC_SESSION_ID":     claimIdentityRaceSessionID,
-		"GC_SESSION_NAME":   "worker-1",
-		"GC_TEMPLATE":       claimIdentityRaceRoute,
-		"GC_INSTANCE_TOKEN": claimIdentityRaceToken,
-	}}); err != nil {
-		t.Fatalf("register provider session: %v", err)
-	}
-	if !sp.IsRunning("worker-1") {
-		t.Fatal("provider session is not running")
-	}
-	return cityDir, claimLock
+	return cityDir, claimLock, projectionReady
 }
 
 func decodeClaimIdentityRaceResult(t *testing.T, stdout *bytes.Buffer) hookClaimJSONResult {
@@ -239,16 +225,219 @@ func decodeClaimIdentityRaceResult(t *testing.T, stdout *bytes.Buffer) hookClaim
 	return result
 }
 
-func TestHookCommandClaimWaitsForSessionIdentityProjection(t *testing.T) {
-	_, claimLock := newClaimIdentityRaceFixture(t, "appear")
+type delayedSessionProjectionStore struct {
+	*beads.MemStore
+	projected      chan struct{}
+	projectionRead chan struct{}
+}
 
-	var stdout, stderr bytes.Buffer
-	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
-	result := decodeClaimIdentityRaceResult(t, &stdout)
-	if code != 0 || result.Action != "work" || result.Reason != "claimed" || result.BeadID != claimIdentityRaceWorkID {
-		_, claimErr := os.Stat(claimLock)
-		t.Fatalf("claim before session projection = code %d result %+v claim_lock=%v, want one claimed work result; stderr=%s",
-			code, result, claimErr, stderr.String())
+func newDelayedSessionProjectionStore() *delayedSessionProjectionStore {
+	return &delayedSessionProjectionStore{
+		MemStore:       beads.NewMemStore(),
+		projected:      make(chan struct{}),
+		projectionRead: make(chan struct{}, 8),
+	}
+}
+
+func (s *delayedSessionProjectionStore) Get(id string) (beads.Bead, error) {
+	if id == claimIdentityRaceSessionID {
+		select {
+		case s.projectionRead <- struct{}{}:
+		default:
+		}
+		select {
+		case <-s.projected:
+		default:
+			return beads.Bead{}, fmt.Errorf("projecting session %q: %w", id, beads.ErrNotFound)
+		}
+	}
+	return s.MemStore.Get(id)
+}
+
+type claimLifecycleStartProvider struct {
+	*runtime.Fake
+	started        chan struct{}
+	startCalls     atomic.Int32
+	mu             sync.Mutex
+	results        []hookClaimJSONResult
+	resultErrors   []error
+	identityErrors int
+}
+
+func newClaimLifecycleStartProvider() *claimLifecycleStartProvider {
+	return &claimLifecycleStartProvider{
+		Fake:    runtime.NewFake(),
+		started: make(chan struct{}, 4),
+	}
+}
+
+func (p *claimLifecycleStartProvider) Start(ctx context.Context, name string, cfg runtime.Config) error {
+	p.startCalls.Add(1)
+	if err := p.Fake.Start(ctx, name, cfg); err != nil {
+		return err
+	}
+	p.started <- struct{}{}
+
+	type hookOutcome struct {
+		result        hookClaimJSONResult
+		err           error
+		identityError bool
+	}
+	outcomes := make(chan hookOutcome, 2)
+	for range 2 {
+		go func() {
+			var stdout, stderr bytes.Buffer
+			code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
+			var result hookClaimJSONResult
+			err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result)
+			if err == nil && code != 0 && result.Reason != hookClaimReasonNoWork && result.Reason != hookClaimReasonClaimsErrored {
+				err = fmt.Errorf("claim hook code=%d result=%+v stderr=%s", code, result, stderr.String())
+			}
+			outcomes <- hookOutcome{
+				result:        result,
+				err:           err,
+				identityError: strings.Contains(stderr.String(), "session identity unavailable"),
+			}
+		}()
+	}
+
+	identityErrors := 0
+	p.mu.Lock()
+	for range 2 {
+		outcome := <-outcomes
+		p.results = append(p.results, outcome.result)
+		p.resultErrors = append(p.resultErrors, outcome.err)
+		if outcome.identityError {
+			identityErrors++
+		}
+	}
+	p.identityErrors += identityErrors
+	p.mu.Unlock()
+	if identityErrors > 0 {
+		_ = p.Fake.Stop(name)
+	}
+	return nil
+}
+
+func (p *claimLifecycleStartProvider) snapshot() (starts, claimed, identityErrors int, errs []error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, result := range p.results {
+		if result.Action == "work" && result.Reason == "claimed" && result.BeadID == claimIdentityRaceWorkID {
+			claimed++
+		}
+	}
+	return int(p.startCalls.Load()), claimed, p.identityErrors, append([]error(nil), p.resultErrors...)
+}
+
+func TestPreparedSessionStartWaitsForClaimIdentityProjection(t *testing.T) {
+	cityDir, claimLock, projectionReady := newClaimIdentityRaceFixture(t, "barrier")
+	backing := newDelayedSessionProjectionStore()
+	store := beads.NewCachingStoreForTest(backing, nil)
+
+	created, err := session.NewStore(beads.SessionStore{Store: store}).CreateSessionInfo(session.CreateSpec{
+		Title:     "worker",
+		AgentName: claimIdentityRaceRoute,
+		Metadata: map[string]string{
+			"session_name":         "worker-1",
+			"template":             claimIdentityRaceRoute,
+			"state":                string(session.StateStartPending),
+			"provider":             "fake",
+			"command":              "test-provider-command",
+			"instance_token":       claimIdentityRaceToken,
+			"generation":           "1",
+			"continuation_epoch":   "1",
+			"pending_create_claim": "true",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create pending session: %v", err)
+	}
+	if created.ID != claimIdentityRaceSessionID {
+		t.Fatalf("created session id = %q, want %q", created.ID, claimIdentityRaceSessionID)
+	}
+	// CachingStore.Create performs one authoritative refresh immediately after
+	// the write. Consume that known-missing projection read so the next signal is
+	// specifically the pre-provider readiness barrier.
+	select {
+	case <-backing.projectionRead:
+	case <-time.After(3 * time.Second):
+		t.Fatal("session create did not exercise the delayed authoritative projection")
+	}
+
+	provider := newClaimLifecycleStartProvider()
+	item := preparedStart{
+		candidate: startCandidate{
+			info: created,
+			tp:   TemplateParams{TemplateName: claimIdentityRaceRoute},
+		},
+		cfg: runtime.Config{Command: "test-provider-command"},
+	}
+	startOnce := func() <-chan startResult {
+		done := make(chan startResult, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			done <- runPreparedStartCandidate(ctx, item, cityDir, provider, store, nil, 2*time.Second, nil, nil)
+		}()
+		return done
+	}
+
+	firstDone := startOnce()
+	providerStartedBeforeProjection := false
+	select {
+	case <-backing.projectionRead:
+		select {
+		case <-provider.started:
+			providerStartedBeforeProjection = true
+		default:
+		}
+	case <-provider.started:
+		providerStartedBeforeProjection = true
+	}
+	if providerStartedBeforeProjection {
+		// Keep projection unavailable until the doomed hook finishes. This makes
+		// the old ordering reproduce the real claims_errored drain instead of
+		// allowing its bounded retry loop to hide the race.
+		result := <-firstDone
+		if result.err != nil {
+			t.Fatalf("first provider start: %v", result.err)
+		}
+		firstDone = nil
+	}
+	if err := os.WriteFile(projectionReady, []byte("ready\n"), 0o644); err != nil {
+		t.Fatalf("release hook-visible projection: %v", err)
+	}
+	close(backing.projected)
+	if firstDone != nil {
+		if result := <-firstDone; result.err != nil {
+			t.Fatalf("first provider start: %v", result.err)
+		}
+	}
+	if result := <-startOnce(); result.err != nil {
+		t.Fatalf("converged provider start: %v", result.err)
+	}
+
+	starts, claimed, identityErrors, resultErrs := provider.snapshot()
+	for _, resultErr := range resultErrs {
+		if resultErr != nil {
+			t.Errorf("claim hook result: %v", resultErr)
+		}
+	}
+	if providerStartedBeforeProjection {
+		t.Error("provider started before its session identity was durably readable")
+	}
+	if claimed != 1 {
+		t.Errorf("claimed routed bead %d times, want exactly once", claimed)
+	}
+	if identityErrors != 0 {
+		t.Errorf("identity-error drains = %d, want zero", identityErrors)
+	}
+	if starts != 1 {
+		t.Errorf("provider starts = %d, want one initial start and zero respawns", starts)
+	}
+	if _, err := os.Stat(claimLock); err != nil {
+		t.Errorf("claim mutation did not commit: %v", err)
 	}
 }
 
@@ -263,48 +452,6 @@ func TestHookCommandClaimIdentityFailureIsNeverNoWork(t *testing.T) {
 	}
 	if result.Action != "drain" || result.Reason != hookClaimReasonClaimsErrored {
 		t.Fatalf("identity-read exhaustion = %+v, want drain/claims_errored (never no_work); stderr=%s", result, stderr.String())
-	}
-}
-
-func TestHookCommandConcurrentClaimsAcquireRoutedWorkOnce(t *testing.T) {
-	_, claimLock := newClaimIdentityRaceFixture(t, "present")
-
-	type outcome struct {
-		code   int
-		result hookClaimJSONResult
-		stderr string
-	}
-	start := make(chan struct{})
-	outcomes := make(chan outcome, 2)
-	var ready sync.WaitGroup
-	ready.Add(2)
-	for range 2 {
-		go func() {
-			ready.Done()
-			<-start
-			var stdout, stderr bytes.Buffer
-			code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
-			outcomes <- outcome{code: code, result: decodeClaimIdentityRaceResult(t, &stdout), stderr: stderr.String()}
-		}()
-	}
-	ready.Wait()
-	close(start)
-
-	claimed := 0
-	for range 2 {
-		got := <-outcomes
-		if got.result.Action == "work" && got.result.Reason == "claimed" {
-			claimed++
-			if got.code != 0 || got.result.BeadID != claimIdentityRaceWorkID {
-				t.Fatalf("claimed outcome = %+v code=%d stderr=%s", got.result, got.code, got.stderr)
-			}
-		}
-	}
-	if claimed != 1 {
-		t.Fatalf("claimed outcomes = %d, want exactly 1", claimed)
-	}
-	if _, err := os.Stat(claimLock); err != nil {
-		t.Fatalf("claim mutation did not commit: %v", err)
 	}
 }
 
