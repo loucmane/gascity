@@ -185,6 +185,9 @@ store_scope() {
     *) printf unknown ;;
   esac
 }
+if [ "${1:-}" = "--dolt-auto-commit" ]; then
+  shift 2
+fi
 case "${1:-}" in
   show)
     id="${3:-}"
@@ -210,6 +213,7 @@ case "${1:-}" in
     if [ -d "$CLAIM_LOCK" ]; then printf '[]\n'; else printf '%s\n' "$open_work"; fi
     ;;
   update)
+	printf 'scope=%s beads_dir=%s args=%s\n' "$(store_scope)" "$BEADS_DIR" "$*" >> "$CLAIM_CALL_LOG"
     if [ "$(store_scope)" = rig ] && [ "${2:-}" = "` + claimIdentityRaceWorkID + `" ] && [ "${3:-}" = "--claim" ]; then
       if mkdir "$CLAIM_LOCK" 2>/dev/null; then
         printf '%s\n' "$claimed_work"
@@ -247,6 +251,7 @@ esac
 	t.Setenv("CLAIM_IDENTITY_MODE", mode)
 	t.Setenv("CLAIM_PROJECTION_READY", projectionReady)
 	t.Setenv("CLAIM_LOCK", claimLock)
+	t.Setenv("CLAIM_CALL_LOG", filepath.Join(stateDir, "claim-calls"))
 	t.Setenv("CLAIM_CITY_BEADS_DIR", filepath.Join(cityDir, ".beads"))
 	t.Setenv("CLAIM_RIG_BEADS_DIR", filepath.Join(rigDir, ".beads"))
 	t.Setenv("BEADS_DIR", filepath.Join(rigDir, ".beads"))
@@ -494,7 +499,7 @@ func TestPreparedSessionStartWaitsForClaimIdentityProjection(t *testing.T) {
 }
 
 func TestHookCommandClaimIdentityFailureIsNeverNoWork(t *testing.T) {
-	newClaimIdentityRaceFixture(t, "never")
+	_, claimLock, _, _ := newClaimIdentityRaceFixture(t, "never")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -504,6 +509,9 @@ func TestHookCommandClaimIdentityFailureIsNeverNoWork(t *testing.T) {
 	}
 	if result.Action != "drain" || result.Reason != hookClaimReasonClaimsErrored {
 		t.Fatalf("identity-read exhaustion = %+v, want drain/claims_errored (never no_work); stderr=%s", result, stderr.String())
+	}
+	if _, err := os.Stat(claimLock); !os.IsNotExist(err) {
+		t.Fatalf("claim mutation committed without city session identity; stat error = %v", err)
 	}
 }
 
@@ -520,11 +528,21 @@ func TestHookCommandClaimUsesCityIdentityStoreAndRigWorkStore(t *testing.T) {
 	result := decodeClaimIdentityRaceResult(t, &stdout)
 	if code != 0 || result.Action != "work" || result.Reason != "claimed" || result.BeadID != claimIdentityRaceWorkID {
 		_, claimErr := os.Stat(claimLock)
-		t.Fatalf("split-store claim = code %d result %+v claim_lock=%v, want one claimed rig work result; stderr=%s",
-			code, result, claimErr, stderr.String())
+		claimCalls, _ := os.ReadFile(os.Getenv("CLAIM_CALL_LOG"))
+		t.Fatalf("split-store claim = code %d result %+v claim_lock=%v calls=%q, want one claimed rig work result; stderr=%s",
+			code, result, claimErr, claimCalls, stderr.String())
 	}
 	if strings.Contains(stderr.String(), "session identity unavailable") {
 		t.Fatalf("city session identity read drained under rig worker environment: %s", stderr.String())
+	}
+	claimCalls, err := os.ReadFile(os.Getenv("CLAIM_CALL_LOG"))
+	if err != nil {
+		t.Fatalf("read claim call log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(claimCalls)), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], "scope=rig ") ||
+		!strings.Contains(lines[0], "beads_dir="+os.Getenv("CLAIM_RIG_BEADS_DIR")+" ") {
+		t.Fatalf("claim mutations = %q, want exactly one against the rig store", claimCalls)
 	}
 }
 

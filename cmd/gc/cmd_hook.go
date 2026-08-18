@@ -497,8 +497,9 @@ func fenceHookClaimSession(cityPath string, cfg *config.City, sessionID string, 
 	if sessionID == "" || instanceToken == "" {
 		return 0, false
 	}
+	identityStore, identityStoreErr := openHookClaimSessionIdentityStore(cityPath, cfg)
 	for attempt := 1; attempt <= hookClaimSessionFenceAttempts; attempt++ {
-		switch verdict, reason := classifyHookClaimSession(cityPath, cfg, sessionID, instanceToken); verdict {
+		switch verdict, reason := classifyHookClaimSession(identityStore, identityStoreErr, sessionID, instanceToken); verdict {
 		case hookClaimSessionStale:
 			fmt.Fprintf(stderr, "gc hook --claim: refusing stale session %s: %s\n", sessionID, reason) //nolint:errcheck
 			return writeHookClaimStaleSessionDrain(opts, stdout, stderr), true
@@ -517,18 +518,36 @@ func fenceHookClaimSession(cityPath string, cfg *config.City, sessionID string, 
 	return writeHookClaimDrain(hookClaimReasonClaimsErrored, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr), true
 }
 
-// classifyHookClaimSession loads the session bead named by sessionID and reports
-// whether the runtime holding instanceToken may claim. A confirmed identity
-// failure from a loaded row (non-session bead, stale token/state) is stale. An
-// absent row is ambiguous during startup because the provider can become live
-// just before cache reconciliation projects its session bead, so absence and
-// genuine store-read faults are retryable unavailable verdicts.
-func classifyHookClaimSession(cityPath string, cfg *config.City, sessionID, instanceToken string) (hookClaimSessionVerdict, string) {
-	store, err := openCityStoreAt(cityPath)
+// openHookClaimSessionIdentityStore binds the claim fence to the explicit city
+// scope that owns session identity beads. A launched rig worker carries an
+// ambient rig-scoped provider and BEADS_DIR for its product-work queries; an
+// authoritative city open prevents those worker defaults from selecting the
+// rig store for the identity read. The returned handle is opened once and
+// reused across the bounded projection retries. Work discovery and claiming
+// continue to use the separately composed rig-scoped hookStore list.
+func openHookClaimSessionIdentityStore(cityPath string, cfg *config.City) (*session.Store, error) {
+	store, err := openAuthoritativeStoreAtForCity(cityPath, cityPath)
 	if err != nil {
-		return hookClaimSessionStoreUnavailable, fmt.Sprintf("opening session store: %v", err)
+		return nil, fmt.Errorf("opening city session store: %w", err)
 	}
-	info, err := cliSessionFrontDoor(store, cfg, cityPath).Get(sessionID)
+	return cliSessionFrontDoor(store, cfg, cityPath), nil
+}
+
+// classifyHookClaimSession loads the session bead named by sessionID through
+// the fence's explicit city-scoped handle and reports whether the runtime
+// holding instanceToken may claim. A confirmed identity failure from a loaded
+// row (non-session bead, stale token/state) is stale. An absent row is ambiguous
+// during startup because the provider can become live just before cache
+// reconciliation projects its session bead, so absence and genuine store-read
+// faults are retryable unavailable verdicts.
+func classifyHookClaimSession(identityStore *session.Store, identityStoreErr error, sessionID, instanceToken string) (hookClaimSessionVerdict, string) {
+	if identityStoreErr != nil {
+		return hookClaimSessionStoreUnavailable, identityStoreErr.Error()
+	}
+	if identityStore == nil {
+		return hookClaimSessionStoreUnavailable, "city session store handle is unavailable"
+	}
+	info, err := identityStore.Get(sessionID)
 	if err != nil {
 		return classifyHookClaimSessionLookupError(err)
 	}
