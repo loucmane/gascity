@@ -418,7 +418,7 @@ func (p *claimLifecycleStartProvider) Start(ctx context.Context, name string, cf
 	p.identityErrors += identityErrors
 	p.mu.Unlock()
 	if identityErrors > 0 {
-		_ = p.Fake.Stop(name)
+		_ = p.Stop(name)
 	}
 	return nil
 }
@@ -626,6 +626,200 @@ func TestReconcileSessionBeads_AdoptedLiveUpgradePublishesClaimFence(t *testing.
 	}
 }
 
+func TestReconcileSessionBeads_AdoptedLiveIneligibleFenceDoesNotStrandTeardown(t *testing.T) {
+	tests := []struct {
+		name           string
+		persistedState session.State
+		metadata       func(time.Time) map[string]string
+	}{
+		{
+			name: "draining",
+			// A live drain is acknowledged in provider state before the
+			// reconciler commits drain-ack-stop-pending to the bead. The
+			// preserved tombstone is what makes this active snapshot
+			// lifecycle-ineligible for claims during that handoff.
+			persistedState: session.StateActive,
+			metadata: func(time.Time) map[string]string {
+				return nil
+			},
+		},
+		{
+			name:           "suspended",
+			persistedState: session.StateSuspended,
+			metadata: func(now time.Time) map[string]string {
+				return map[string]string{
+					"held_until":   now.Add(2 * time.Hour).UTC().Format(time.RFC3339),
+					"sleep_intent": "user-hold",
+				}
+			},
+		},
+		{
+			name:           "quarantined",
+			persistedState: session.StateQuarantined,
+			metadata: func(now time.Time) map[string]string {
+				return map[string]string{
+					"quarantined_until": now.Add(2 * time.Hour).UTC().Format(time.RFC3339),
+					"sleep_reason":      "quarantine",
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cityDir := t.TempDir()
+			store := beads.NewMemStore()
+			provider := runtime.NewFake()
+			clk := &clock.Fake{Time: time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)}
+			metadata := map[string]string{
+				"session_name":   "worker-1",
+				"agent_name":     "worker-1",
+				"template":       "worker",
+				"state":          string(tc.persistedState),
+				"instance_token": claimIdentityRaceToken,
+				"generation":     "1",
+			}
+			for key, value := range tc.metadata(clk.Now()) {
+				metadata[key] = value
+			}
+			bead, err := store.Create(beads.Bead{
+				ID:       claimIdentityRaceSessionID,
+				Title:    "worker-1",
+				Type:     session.BeadType,
+				Labels:   []string{"gc:session", "agent:worker-1"},
+				Metadata: metadata,
+			})
+			if err != nil {
+				t.Fatalf("create %s session bead: %v", tc.name, err)
+			}
+			if err := session.TombstoneSessionFenceProjection(cityDir, bead.ID, claimIdentityRaceToken, 1); err != nil {
+				t.Fatalf("tombstone %s claim fence: %v", tc.name, err)
+			}
+			if err := provider.Start(context.Background(), "worker-1", runtime.Config{Command: "test-cmd"}); err != nil {
+				t.Fatalf("seed %s live provider: %v", tc.name, err)
+			}
+			if err := provider.SetMeta("worker-1", "GC_SESSION_ID", bead.ID); err != nil {
+				t.Fatalf("set %s session id: %v", tc.name, err)
+			}
+			if err := provider.SetMeta("worker-1", "GC_INSTANCE_TOKEN", claimIdentityRaceToken); err != nil {
+				t.Fatalf("set %s instance token: %v", tc.name, err)
+			}
+
+			desired := map[string]TemplateParams{
+				"worker-1": {
+					Command:      "test-cmd",
+					SessionName:  "worker-1",
+					TemplateName: "worker",
+				},
+			}
+			cfg := &config.City{Agents: []config.Agent{{Name: "worker"}}}
+			drainOps := newFakeDrainOps()
+			if err := drainOps.setDrainAck("worker-1"); err != nil {
+				t.Fatalf("ack %s drain: %v", tc.name, err)
+			}
+			drains := newDrainTracker()
+			asyncStops := &asyncStartTracker{}
+			var stdout, stderr bytes.Buffer
+			reconcileSessionBeadsAtPath(
+				context.Background(), cityDir, []beads.Bead{bead}, desired,
+				configuredSessionNames(cfg, "", store), cfg, provider, store, drainOps, nil, nil,
+				nil, drains, map[string]int{}, false, nil, "", nil, clk,
+				events.Discard, 0, 0, &stdout, &stderr,
+				withAsyncDrainAckStopTracker(asyncStops),
+				withStartStabilityWaiter(immediateStartStabilityWaiter),
+				withSessionStaleKeyDetectionWaiter(immediateSessionStaleKeyDetectionWaiter),
+			)
+			projection, err := session.LoadSessionFenceProjection(cityDir, bead.ID)
+			if err != nil {
+				t.Fatalf("load %s claim fence after drain tick: %v", tc.name, err)
+			}
+			if projection.State != "tombstoned" || projection.ClaimEligible() {
+				t.Fatalf("%s claim fence after drain tick = state %q eligible=%t, want preserved tombstone", tc.name, projection.State, projection.ClaimEligible())
+			}
+			if strings.Contains(stderr.String(), "publishing adopted live session claim fence") {
+				t.Fatalf("%s expected claim-fence refusal was treated as a publish failure: %s", tc.name, stderr.String())
+			}
+			if !asyncStops.wait(time.Second) {
+				t.Fatalf("%s drain-ack stop did not complete; stderr=%s", tc.name, stderr.String())
+			}
+			if provider.IsRunning("worker-1") {
+				t.Fatalf("%s live runtime remained stranded after drain-ack; stderr=%s", tc.name, stderr.String())
+			}
+			current, err := store.Get(bead.ID)
+			if err != nil {
+				t.Fatalf("reload %s session after stop: %v", tc.name, err)
+			}
+			if current.Metadata["state"] != string(session.StateDraining) {
+				t.Fatalf("%s state after drain-ack = %q, want draining", tc.name, current.Metadata["state"])
+			}
+			if current.Metadata["state_reason"] != session.DrainAckStopPendingReason {
+				t.Fatalf("%s state reason after drain-ack = %q, want %q", tc.name, current.Metadata["state_reason"], session.DrainAckStopPendingReason)
+			}
+			projection, err = session.LoadSessionFenceProjection(cityDir, bead.ID)
+			if err != nil {
+				t.Fatalf("load %s claim fence after stop tick: %v", tc.name, err)
+			}
+			if projection.State != "tombstoned" || projection.ClaimEligible() {
+				t.Fatalf("%s claim fence after stop tick = state %q eligible=%t, want preserved tombstone", tc.name, projection.State, projection.ClaimEligible())
+			}
+		})
+	}
+}
+
+func TestReconcileSessionBeads_AdoptedLiveEligiblePublishFailureRemainsFailClosed(t *testing.T) {
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc", "runtime"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, ".gc", "runtime", "session-fence"), []byte("blocks projection directory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := beads.NewMemStore()
+	bead, err := store.Create(beads.Bead{
+		ID:     claimIdentityRaceSessionID,
+		Title:  "worker-1",
+		Type:   session.BeadType,
+		Labels: []string{"gc:session", "agent:worker-1"},
+		Metadata: map[string]string{
+			"session_name":   "worker-1",
+			"agent_name":     "worker-1",
+			"template":       "worker",
+			"state":          string(session.StateActive),
+			"instance_token": claimIdentityRaceToken,
+			"generation":     "1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create eligible session bead: %v", err)
+	}
+	provider := runtime.NewFake()
+	if err := provider.Start(context.Background(), "worker-1", runtime.Config{Command: "test-cmd"}); err != nil {
+		t.Fatalf("seed eligible live provider: %v", err)
+	}
+	desired := map[string]TemplateParams{
+		"worker-1": {Command: "test-cmd", SessionName: "worker-1", TemplateName: "worker"},
+	}
+	cfg := &config.City{Agents: []config.Agent{{Name: "worker"}}}
+	drains := newDrainTracker()
+	var stdout, stderr bytes.Buffer
+	reconcileSessionBeadsAtPath(
+		context.Background(), cityDir, []beads.Bead{bead}, desired,
+		configuredSessionNames(cfg, "", store), cfg, provider, store, nil, nil, nil,
+		nil, drains, map[string]int{}, false, nil, "", nil,
+		&clock.Fake{Time: time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)},
+		events.Discard, 0, 0, &stdout, &stderr,
+	)
+	if drain := drains.get(bead.ID); drain != nil {
+		t.Fatalf("eligible session entered teardown after an unexpected projection failure: %+v", drain)
+	}
+	if !provider.IsRunning("worker-1") {
+		t.Fatal("eligible session runtime stopped after an unexpected projection failure")
+	}
+	if !strings.Contains(stderr.String(), "publishing adopted live session claim fence") {
+		t.Fatalf("stderr = %q, want fail-closed projection diagnostic", stderr.String())
+	}
+}
+
 func TestHookCommandClaimIdentityFailureIsNeverNoWork(t *testing.T) {
 	_, claimLock, _, _ := newClaimIdentityRaceFixture(t, "never")
 
@@ -745,18 +939,32 @@ func TestHookCommandClaimMalformedProjectionReportsClaimsErrored(t *testing.T) {
 		name  string
 		write func(*testing.T, string)
 	}{
-		{name: "corrupt", write: func(t *testing.T, path string) { if err := os.WriteFile(path, []byte("{broken"), 0o644); err != nil { t.Fatal(err) } }},
-		{name: "oversized", write: func(t *testing.T, path string) { if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 65<<10), 0o644); err != nil { t.Fatal(err) } }},
+		{name: "corrupt", write: func(t *testing.T, path string) {
+			if err := os.WriteFile(path, []byte("{broken"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "oversized", write: func(t *testing.T, path string) {
+			if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 65<<10), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
 		{name: "symlink", write: func(t *testing.T, path string) {
 			target := filepath.Join(t.TempDir(), "projection.json")
-			if err := os.WriteFile(target, []byte(`{"schema_version":1}`), 0o644); err != nil { t.Fatal(err) }
-			if err := os.Symlink(target, path); err != nil { t.Fatal(err) }
+			if err := os.WriteFile(target, []byte(`{"schema_version":1}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cityDir, claimLock, _, _ := newClaimIdentityRaceFixture(t, "never")
 			path := claimIdentityRaceProjectionPath(cityDir, claimIdentityRaceSessionID)
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { t.Fatal(err) }
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			tc.write(t, path)
 			var stdout, stderr bytes.Buffer
 			code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
