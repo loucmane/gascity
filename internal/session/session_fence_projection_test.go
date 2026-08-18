@@ -49,6 +49,17 @@ type fenceProjectionObservingProvider struct {
 	stopState      string
 }
 
+type quarantineCommitFailStore struct {
+	*beads.MemStore
+}
+
+func (s *quarantineCommitFailStore) SetMetadataBatch(id string, kvs map[string]string) error {
+	if kvs["state"] == string(StateQuarantined) {
+		return fmt.Errorf("injected quarantine commit failure")
+	}
+	return s.MemStore.SetMetadataBatch(id, kvs)
+}
+
 func (p *fenceProjectionObservingProvider) Start(ctx context.Context, name string, cfg runtime.Config) error {
 	sessionID := cfg.Env["GC_SESSION_ID"]
 	path := fenceProjectionFixturePath(p.cityPath, sessionID)
@@ -135,6 +146,9 @@ func TestManagerTombstonesFenceProjectionBeforeLifecycleTeardown(t *testing.T) {
 	}{
 		{name: "suspend", mutate: func(m *Manager, id string) error { return m.Suspend(id) }},
 		{name: "drain", mutate: func(m *Manager, id string) error { return m.BeginDrain(id, "test") }},
+		{name: "quarantine", mutate: func(m *Manager, id string) error {
+			return m.Quarantine(id, time.Now().UTC().Add(time.Hour), 1)
+		}},
 		{name: "close", mutate: func(m *Manager, id string) error { return m.Close(id) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -153,5 +167,44 @@ func TestManagerTombstonesFenceProjectionBeforeLifecycleTeardown(t *testing.T) {
 				t.Fatalf("provider Stop observed projection state %q, want tombstoned", provider.stopState)
 			}
 		})
+	}
+}
+
+// TestManagerQuarantineTombstonesFenceBeforeFailedStateCommit proves the
+// fail-closed ordering independently of the successful transition: even when
+// the authoritative quarantine write fails, the already-running worker must
+// lose claim eligibility before that commit is attempted.
+func TestManagerQuarantineTombstonesFenceBeforeFailedStateCommit(t *testing.T) {
+	cityPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := &quarantineCommitFailStore{MemStore: beads.NewMemStore()}
+	provider := &fenceProjectionObservingProvider{Fake: runtime.NewFake(), cityPath: cityPath}
+	manager := NewManagerWithOptions(store, provider, WithCityPath(cityPath))
+	info, err := manager.CreateSession(context.Background(), CreateOptions{
+		Template: "worker",
+		Title:    "worker",
+		Command:  "test-provider",
+		Provider: "fake",
+	})
+	if err != nil {
+		t.Fatalf("create projected session: %v", err)
+	}
+
+	err = manager.Quarantine(info.ID, time.Now().UTC().Add(time.Hour), 1)
+	if err == nil {
+		t.Fatal("Quarantine succeeded, want injected state-commit failure")
+	}
+	projection, _ := readFenceProjectionFixture(t, cityPath, info.ID)
+	if projection.State != sessionFenceProjectionStateTombstone {
+		t.Fatalf("projection state after failed quarantine commit = %q, want tombstoned", projection.State)
+	}
+	persisted, getErr := store.Get(info.ID)
+	if getErr != nil {
+		t.Fatalf("get session after failed quarantine commit: %v", getErr)
+	}
+	if got := persisted.Metadata["state"]; got != string(StateActive) {
+		t.Fatalf("persisted state after failed quarantine commit = %q, want active", got)
 	}
 }

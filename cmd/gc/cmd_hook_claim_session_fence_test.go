@@ -16,6 +16,9 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/clock"
+	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
 )
@@ -552,6 +555,74 @@ func TestPreparedSessionStartWaitsForClaimIdentityProjection(t *testing.T) {
 	}
 	if bytes.Contains(projectionBytes, []byte("superseded-token")) {
 		t.Fatalf("boot reconciliation left superseded projection in place: %s", projectionBytes)
+	}
+}
+
+// TestReconcileSessionBeads_AdoptedLiveUpgradePublishesClaimFence reproduces
+// the supervisor-upgrade boundary: the provider already owns a live worker and
+// the city store already owns its active session bead, but the old binary never
+// wrote a worker-readable claim-fence projection. Reconciliation must publish
+// that projection without restarting the adopted runtime, so its first hook
+// under the new binary can claim rig-scoped work normally.
+func TestReconcileSessionBeads_AdoptedLiveUpgradePublishesClaimFence(t *testing.T) {
+	cityDir, claimLock, projectionReady, _ := newClaimIdentityRaceFixture(t, "barrier")
+	if err := os.WriteFile(projectionReady, []byte("ready\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := beads.NewMemStore()
+	bead, err := store.Create(beads.Bead{
+		ID:     claimIdentityRaceSessionID,
+		Title:  "worker-1",
+		Type:   session.BeadType,
+		Labels: []string{"gc:session", "agent:worker-1"},
+		Metadata: map[string]string{
+			"session_name":   "worker-1",
+			"agent_name":     "worker-1",
+			"template":       claimIdentityRaceRoute,
+			"state":          string(session.StateActive),
+			"instance_token": claimIdentityRaceToken,
+			"generation":     "1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create adopted session bead: %v", err)
+	}
+	provider := runtime.NewFake()
+	if err := provider.Start(context.Background(), "worker-1", runtime.Config{Command: "test-cmd"}); err != nil {
+		t.Fatalf("seed already-live provider: %v", err)
+	}
+	startsBefore := provider.CountCalls("Start", "worker-1")
+	desired := map[string]TemplateParams{
+		"worker-1": {
+			Command:      "test-cmd",
+			SessionName:  "worker-1",
+			TemplateName: claimIdentityRaceRoute,
+		},
+	}
+	cfg := &config.City{Agents: []config.Agent{{Name: claimIdentityRaceRoute}}}
+	var reconcileStdout, reconcileStderr bytes.Buffer
+	reconcileSessionBeadsAtPath(
+		context.Background(), cityDir, []beads.Bead{bead}, desired,
+		configuredSessionNames(cfg, "", store), cfg, provider, store, nil, nil, nil,
+		nil, newDrainTracker(), map[string]int{claimIdentityRaceRoute: 1}, false, nil,
+		"", nil, &clock.Fake{Time: time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)},
+		events.Discard, 0, 0, &reconcileStdout, &reconcileStderr,
+		withStartStabilityWaiter(immediateStartStabilityWaiter),
+		withSessionStaleKeyDetectionWaiter(immediateSessionStaleKeyDetectionWaiter),
+	)
+	if got := provider.CountCalls("Start", "worker-1"); got != startsBefore {
+		t.Fatalf("provider Start calls = %d, want %d (live runtime must be adopted, not restarted); stderr=%s", got, startsBefore, reconcileStderr.String())
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
+	result := decodeClaimIdentityRaceResult(t, &stdout)
+	if code != 0 || result.Action != "work" || result.Reason != "claimed" || result.BeadID != claimIdentityRaceWorkID {
+		t.Fatalf("adopted worker first claim = code %d result %+v stderr=%s; want routed work claimed without claims_errored", code, result, stderr.String())
+	}
+	if _, err := os.Stat(claimLock); err != nil {
+		t.Fatalf("adopted worker claim did not commit: %v", err)
 	}
 }
 
