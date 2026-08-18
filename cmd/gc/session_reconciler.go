@@ -2147,6 +2147,20 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 			// alive) by name, enabling zombie (present && !alive) expression.
 			shadowTick.captureRuntime(id, "observeRuntimeProviderLiveness", name, triFromBool(running), triFromBool(alive))
 		}
+		// A runtime can survive a supervisor binary upgrade even though the old
+		// binary never wrote its worker-readable claim fence. Publish the identity
+		// as soon as this tick observes the adopted runtime alive, before any later
+		// branch can respawn its agent in place. Failure is fail-closed: skip all
+		// lifecycle actions for this worker rather than launch an agent whose first
+		// claim would drain with claims_errored.
+		if alive {
+			if err := sessionpkg.WithSessionMutationLock(id, func() error {
+				return sessionpkg.PublishLiveSessionFenceProjection(cityPath, infoByID[id])
+			}); err != nil {
+				fmt.Fprintf(stderr, "session reconciler: publishing adopted live session claim fence for %s: %v\n", name, err) //nolint:errcheck
+				continue
+			}
+		}
 		peek := cachedSessionPeek(cityPath, store, sp, cfg, id, tp.Hints.ProcessNames)
 		recordResetStallIfDue(infoByID[id], tp.TemplateName, name, alive, startupTimeout, clk.Now().UTC(), dt, rec, stderr, trace)
 
@@ -5686,12 +5700,30 @@ func relaunchAgentForLaunchDrift(
 		fmt.Fprintf(stderr, "session reconciler: launch-drift relaunch for %s minted a speculative resume key (no prior conversation); falling back to full restart\n", name) //nolint:errcheck
 		return false, relaunchAbortResidueFold(preparedInfo, sessFront, hadResumeKeyBeforePrepare)
 	}
-	if err := r.Relaunch(ctx, name, prepared.cfg); err != nil {
+	// Preparation can mutate the session identity (most notably by minting an
+	// instance token on legacy rows). Publish the post-prepare identity directly
+	// before the provider respawns the agent, even though the tick's adopted-live
+	// pass already refreshed the pre-prepare projection. A publication failure
+	// falls back to the full restart path, whose Provider.Start is independently
+	// gated by waitForStartIdentityReadable.
+	projectionPublished := false
+	relaunchErr := sessionpkg.WithSessionMutationLock(preparedInfo.ID, func() error {
+		if err := sessionpkg.PublishLiveSessionFenceProjection(cityPath, preparedInfo); err != nil {
+			return err
+		}
+		projectionPublished = true
+		return r.Relaunch(ctx, name, prepared.cfg)
+	})
+	if relaunchErr != nil {
+		if !projectionPublished {
+			fmt.Fprintf(stderr, "session reconciler: publishing claim fence before relaunching %s: %v; falling back to full restart\n", name, relaunchErr) //nolint:errcheck
+			return false, relaunchAbortResidueFold(preparedInfo, sessFront, hadResumeKeyBeforePrepare)
+		}
 		// ErrRelaunchUnsupported (a wrapper whose backend cannot relaunch) or a
 		// genuine failure (e.g. the warm box vanished → ErrSessionNotFound). Fall
 		// back to the full restart so the launch change is still applied.
-		if !errors.Is(err, runtime.ErrRelaunchUnsupported) {
-			fmt.Fprintf(stderr, "session reconciler: relaunch %s: %v; falling back to full restart\n", name, err) //nolint:errcheck
+		if !errors.Is(relaunchErr, runtime.ErrRelaunchUnsupported) {
+			fmt.Fprintf(stderr, "session reconciler: relaunch %s: %v; falling back to full restart\n", name, relaunchErr) //nolint:errcheck
 		}
 		return false, relaunchAbortResidueFold(preparedInfo, sessFront, hadResumeKeyBeforePrepare)
 	}

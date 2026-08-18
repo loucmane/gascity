@@ -1480,6 +1480,13 @@ func (m *Manager) Quarantine(id string, until time.Time, cycle int) error {
 		if err != nil {
 			return err
 		}
+		b, err := m.store.Get(id)
+		if err != nil {
+			return fmt.Errorf("loading session before claim-fence tombstone: %w", err)
+		}
+		if err := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"])); err != nil {
+			return fmt.Errorf("tombstoning claim-fence projection before quarantine: %w", err)
+		}
 		if !cmdLegal {
 			return nil // idempotent: already quarantined
 		}

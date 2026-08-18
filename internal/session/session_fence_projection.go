@@ -227,6 +227,52 @@ func TombstoneSessionFenceProjection(cityPath, sessionID, token string, generati
 	return writeSessionFenceProjection(cityPath, sessionID, token, generation, State(sessionFenceProjectionStateTombstone), time.Now())
 }
 
+// PublishLiveSessionFenceProjection publishes the current controller-owned
+// identity for a runtime the reconciler has observed alive. Callers must hold
+// the session mutation lock so a lifecycle tombstone cannot race this refresh.
+// Empty city paths remain a compatibility no-op for isolated SDK use.
+func PublishLiveSessionFenceProjection(cityPath string, info Info) error {
+	if strings.TrimSpace(cityPath) == "" {
+		return nil
+	}
+	if strings.TrimSpace(info.ID) == "" {
+		return fmt.Errorf("live session has no id for claim-fence projection")
+	}
+	if strings.TrimSpace(info.InstanceToken) == "" {
+		return fmt.Errorf("live session %q has no instance token for claim-fence projection", info.ID)
+	}
+	state := info.State
+	if projection := (SessionFenceProjection{State: string(state)}); !projection.ClaimEligible() {
+		// A surviving runtime can be paired with stale asleep metadata until the
+		// reconciler's later heal commits active. The live observation is enough to
+		// bridge that one recovery state; explicit blockers remain fail-closed.
+		if state != StateAsleep {
+			return fmt.Errorf("live session %q state %q is not claim-eligible", info.ID, state)
+		}
+		state = StateActive
+	}
+	generation := sessionFenceGeneration(info.Generation)
+	if current, err := LoadSessionFenceProjection(cityPath, info.ID); err == nil &&
+		current.SessionID == info.ID &&
+		current.Generation == generation &&
+		current.MatchesInstanceToken(info.InstanceToken) {
+		if current.State == sessionFenceProjectionStateTombstone {
+			return fmt.Errorf("live session %q claim-fence projection is tombstoned", info.ID)
+		}
+		if current.State == string(state) {
+			return nil
+		}
+	}
+	return writeSessionFenceProjection(
+		cityPath,
+		info.ID,
+		info.InstanceToken,
+		generation,
+		state,
+		time.Now(),
+	)
+}
+
 func sessionFenceGeneration(raw string) int {
 	generation, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || generation <= 0 {

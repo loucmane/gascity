@@ -163,7 +163,7 @@ func TestManagerTombstonesFenceProjectionBeforeLifecycleTeardown(t *testing.T) {
 			if bytes.Contains(data, []byte(info.InstanceToken)) {
 				t.Fatalf("tombstone leaked raw token after %s: %s", tc.name, data)
 			}
-			if tc.name != "drain" && provider.stopState != "tombstoned" {
+			if tc.name != "drain" && tc.name != "quarantine" && provider.stopState != "tombstoned" {
 				t.Fatalf("provider Stop observed projection state %q, want tombstoned", provider.stopState)
 			}
 		})
@@ -206,5 +206,23 @@ func TestManagerQuarantineTombstonesFenceBeforeFailedStateCommit(t *testing.T) {
 	}
 	if got := persisted.Metadata["state"]; got != string(StateActive) {
 		t.Fatalf("persisted state after failed quarantine commit = %q, want active", got)
+	}
+}
+
+func TestPublishLiveSessionFenceProjectionDoesNotReviveQuarantineTombstone(t *testing.T) {
+	manager, _, staleActive, cityPath := newProjectedSessionFixture(t)
+	if err := manager.Quarantine(staleActive.ID, time.Now().UTC().Add(time.Hour), 1); err != nil {
+		t.Fatalf("Quarantine: %v", err)
+	}
+
+	err := WithSessionMutationLock(staleActive.ID, func() error {
+		return PublishLiveSessionFenceProjection(cityPath, staleActive)
+	})
+	if err == nil {
+		t.Fatal("stale active projection refresh succeeded after quarantine tombstone")
+	}
+	projection, _ := readFenceProjectionFixture(t, cityPath, staleActive.ID)
+	if projection.State != sessionFenceProjectionStateTombstone {
+		t.Fatalf("projection state after stale live refresh = %q, want tombstoned", projection.State)
 	}
 }
