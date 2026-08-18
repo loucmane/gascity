@@ -100,24 +100,30 @@ const (
 	claimIdentityRaceToken     = "fresh-instance-token"
 )
 
-// newClaimIdentityRaceFixture installs the hook-side store used by the claim
-// lifecycle tests. In "barrier" mode the session becomes readable only when
-// the lifecycle test releases the projection gate; in "never" mode it remains
-// unavailable; in "present" mode it exists from the first lookup.
+// newClaimIdentityRaceFixture installs separate city and rig stores used by the
+// claim lifecycle tests. The city store exclusively owns session identity; the
+// rig store exclusively owns routed product work, and the worker's ambient
+// store environment points at that rig. In "barrier" mode the city session
+// becomes readable only when the lifecycle test releases the projection gate;
+// in "never" mode it remains unavailable; in "present" mode it exists from the
+// first city-scoped lookup.
 //
 // The fake bd intentionally returns a bare exit 1 for the missing session, the
-// exact error shape from the live witnesses. While identity is unavailable its
-// work reads fail too. The default work_query suppresses those errors and falls
-// through to [], pinning the layer that currently launders the failure into
-// benign no_work.
-func newClaimIdentityRaceFixture(t *testing.T, mode string) (string, string, string) {
+// exact error shape from the live witnesses. Its scope checks make a city
+// identity read from the rig store fail and make a work read outside the rig
+// store return empty, pinning both halves of the production topology.
+func newClaimIdentityRaceFixture(t *testing.T, mode string) (string, string, string, string) {
 	t.Helper()
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS_FORCE_FALLBACK", "1")
 
 	cityDir := t.TempDir()
+	rigDir := filepath.Join(cityDir, "rigs", "hpfetcher")
 	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cityToml := `[workspace]
@@ -128,7 +134,7 @@ provider = "bd"
 
 [[rigs]]
 name = "hpfetcher"
-path = "."
+path = "rigs/hpfetcher"
 
 [[agent]]
 name = "gc.implementation-worker"
@@ -140,6 +146,21 @@ max_active_sessions = 2
 	}
 	if err := os.WriteFile(filepath.Join(cityDir, ".beads", "config.yaml"), []byte("issue_prefix: ga\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigDir, ".beads", "config.yaml"), []byte("issue_prefix: ga\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []struct {
+		dir       string
+		projectID string
+	}{
+		{dir: cityDir, projectID: "city-store"},
+		{dir: rigDir, projectID: "rig-store"},
+	} {
+		metadata := fmt.Sprintf("{\"backend\":\"doltlite\",\"database\":\"doltlite\",\"dolt_database\":\"gascity\",\"project_id\":%q}\n", scope.projectID)
+		if err := os.WriteFile(filepath.Join(scope.dir, ".beads", "metadata.json"), []byte(metadata), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	stateDir := t.TempDir()
@@ -157,31 +178,39 @@ identity_ready() {
     never) return 1 ;;
   esac
 }
+store_scope() {
+  case "$BEADS_DIR" in
+    "$CLAIM_CITY_BEADS_DIR") printf city ;;
+    "$CLAIM_RIG_BEADS_DIR") printf rig ;;
+    *) printf unknown ;;
+  esac
+}
 case "${1:-}" in
   show)
     id="${3:-}"
     if [ "$id" = "` + claimIdentityRaceSessionID + `" ]; then
-      if identity_ready; then
+      if [ "$(store_scope)" = city ] && identity_ready; then
         printf '%s\n' "$session_json"
         exit 0
       fi
       exit 1
     fi
     if [ "$id" = "` + claimIdentityRaceWorkID + `" ]; then
+      [ "$(store_scope)" = rig ] || exit 1
       if [ -d "$CLAIM_LOCK" ]; then printf '%s\n' "$claimed_work"; else printf '%s\n' "$open_work"; fi
       exit 0
     fi
     exit 1
     ;;
   list|query)
-    if identity_ready; then printf '[]\n'; else exit 1; fi
+    printf '[]\n'
     ;;
   ready)
-    if ! identity_ready; then exit 1; fi
+    [ "$(store_scope)" = rig ] || { printf '[]\n'; exit 0; }
     if [ -d "$CLAIM_LOCK" ]; then printf '[]\n'; else printf '%s\n' "$open_work"; fi
     ;;
   update)
-    if [ "${2:-}" = "` + claimIdentityRaceWorkID + `" ] && [ "${3:-}" = "--claim" ]; then
+    if [ "$(store_scope)" = rig ] && [ "${2:-}" = "` + claimIdentityRaceWorkID + `" ] && [ "${3:-}" = "--claim" ]; then
       if mkdir "$CLAIM_LOCK" 2>/dev/null; then
         printf '%s\n' "$claimed_work"
         exit 0
@@ -199,6 +228,18 @@ esac
 	if err := os.WriteFile(fakeBD, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	workerProvider := filepath.Join(fakeBin, "gc-beads-bd")
+	if err := os.WriteFile(workerProvider, []byte(`#!/bin/sh
+case "${1:-}" in
+  get)
+    printf 'no issue found matching %s\n' "${2:-}" >&2
+    exit 1
+    ;;
+  *) exit 2 ;;
+esac
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	claimLock := filepath.Join(stateDir, "claim.lock")
 	projectionReady := filepath.Join(stateDir, "projection.ready")
@@ -206,6 +247,12 @@ esac
 	t.Setenv("CLAIM_IDENTITY_MODE", mode)
 	t.Setenv("CLAIM_PROJECTION_READY", projectionReady)
 	t.Setenv("CLAIM_LOCK", claimLock)
+	t.Setenv("CLAIM_CITY_BEADS_DIR", filepath.Join(cityDir, ".beads"))
+	t.Setenv("CLAIM_RIG_BEADS_DIR", filepath.Join(rigDir, ".beads"))
+	t.Setenv("BEADS_DIR", filepath.Join(rigDir, ".beads"))
+	t.Setenv("GC_BEADS_SCOPE_ROOT", rigDir)
+	t.Setenv("GC_RIG", "hpfetcher")
+	t.Setenv("GC_RIG_ROOT", rigDir)
 	setFenceClaimEnv(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken)
 	t.Setenv("GC_TEMPLATE", claimIdentityRaceRoute)
 	t.Setenv("GC_ALIAS", claimIdentityRaceRoute+"-1")
@@ -213,7 +260,7 @@ esac
 	t.Setenv("GC_SESSION_NAME", "worker-1")
 	t.Setenv("GC_SESSION_ORIGIN", "ephemeral")
 
-	return cityDir, claimLock, projectionReady
+	return cityDir, claimLock, projectionReady, workerProvider
 }
 
 func decodeClaimIdentityRaceResult(t *testing.T, stdout *bytes.Buffer) hookClaimJSONResult {
@@ -331,7 +378,7 @@ func (p *claimLifecycleStartProvider) snapshot() (starts, claimed, identityError
 }
 
 func TestPreparedSessionStartWaitsForClaimIdentityProjection(t *testing.T) {
-	cityDir, claimLock, projectionReady := newClaimIdentityRaceFixture(t, "barrier")
+	cityDir, claimLock, projectionReady, _ := newClaimIdentityRaceFixture(t, "barrier")
 	backing := newDelayedSessionProjectionStore()
 	store := beads.NewCachingStoreForTest(backing, nil)
 
@@ -457,6 +504,27 @@ func TestHookCommandClaimIdentityFailureIsNeverNoWork(t *testing.T) {
 	}
 	if result.Action != "drain" || result.Reason != hookClaimReasonClaimsErrored {
 		t.Fatalf("identity-read exhaustion = %+v, want drain/claims_errored (never no_work); stderr=%s", result, stderr.String())
+	}
+}
+
+func TestHookCommandClaimUsesCityIdentityStoreAndRigWorkStore(t *testing.T) {
+	_, claimLock, _, workerProvider := newClaimIdentityRaceFixture(t, "present")
+	// Reproduce the launched worker's ambient provider/store selection: its
+	// default handle is rig-scoped, while GC_CITY remains the explicit path to
+	// the separate city store that owns session identity beads.
+	t.Setenv("GC_BEADS", "exec:"+workerProvider)
+	t.Setenv("GC_BEADS_SCOPE_ROOT", "")
+
+	var stdout, stderr bytes.Buffer
+	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
+	result := decodeClaimIdentityRaceResult(t, &stdout)
+	if code != 0 || result.Action != "work" || result.Reason != "claimed" || result.BeadID != claimIdentityRaceWorkID {
+		_, claimErr := os.Stat(claimLock)
+		t.Fatalf("split-store claim = code %d result %+v claim_lock=%v, want one claimed rig work result; stderr=%s",
+			code, result, claimErr, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "session identity unavailable") {
+		t.Fatalf("city session identity read drained under rig worker environment: %s", stderr.String())
 	}
 }
 
