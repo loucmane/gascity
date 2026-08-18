@@ -9,12 +9,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/session"
@@ -472,12 +472,10 @@ const (
 	// incarnation must stop rather than claim, so the caller emits a structured
 	// terminal drain result instead of a bare exit 1 the startup wrapper retries.
 	hookClaimSessionStale
-	// hookClaimSessionStoreUnavailable: the session store could not be opened, or
-	// its identity bead is not yet readable. That is a retryable startup/store
-	// condition, not proof that the runtime is stale. The caller retries it before
-	// returning an honest claims_errored result; it must never enter the work query,
-	// whose compatibility probes intentionally suppress bd read errors and would
-	// otherwise launder this condition into no_work.
+	// hookClaimSessionStoreUnavailable: the controller projection is absent or
+	// unreadable. That is a retryable startup/filesystem condition, not proof that
+	// the runtime is stale. The caller retries it before returning an honest
+	// claims_errored result and never enters the work query.
 	hookClaimSessionStoreUnavailable
 )
 
@@ -488,18 +486,23 @@ const (
 
 // fenceHookClaimSession applies the runtime-identity fence that gates
 // gc hook --claim before it runs the work query. It returns (code, handled):
-// handled is true for a definitively stale session and for identity reads that
-// remain unavailable after the bounded retry budget. An un-fenceable context
-// (no session id or no instance token) or an eligible session returns
+// handled is true for a definitively stale session, incomplete runtime
+// identity, and projection reads that remain unavailable after the bounded
+// retry budget. A context with no session ID or an eligible projection returns
 // handled=false so the normal claim path runs.
-func fenceHookClaimSession(cityPath string, cfg *config.City, sessionID string, opts hookCommandOptions, stdout, stderr io.Writer) (int, bool) {
-	instanceToken := strings.TrimSpace(os.Getenv("GC_INSTANCE_TOKEN"))
-	if sessionID == "" || instanceToken == "" {
+func fenceHookClaimSession(cityPath string, _ *config.City, sessionID string, opts hookCommandOptions, stdout, stderr io.Writer) (int, bool) {
+	if sessionID == "" {
 		return 0, false
 	}
-	identityStore, identityStoreErr := openHookClaimSessionIdentityStore(cityPath, cfg)
+	instanceToken := os.Getenv("GC_INSTANCE_TOKEN")
+	generation, generationErr := strconv.Atoi(strings.TrimSpace(os.Getenv("GC_RUNTIME_EPOCH")))
+	if strings.TrimSpace(instanceToken) == "" || generationErr != nil || generation <= 0 {
+		reason := "runtime identity environment is incomplete"
+		fmt.Fprintf(stderr, "gc hook --claim: session identity unavailable for %s: %s\n", sessionID, reason) //nolint:errcheck
+		return writeHookClaimDrain(hookClaimReasonClaimsErrored, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr), true
+	}
 	for attempt := 1; attempt <= hookClaimSessionFenceAttempts; attempt++ {
-		switch verdict, reason := classifyHookClaimSession(identityStore, identityStoreErr, sessionID, instanceToken); verdict {
+		switch verdict, reason := classifyHookClaimSessionProjection(cityPath, sessionID, instanceToken, generation); verdict {
 		case hookClaimSessionStale:
 			fmt.Fprintf(stderr, "gc hook --claim: refusing stale session %s: %s\n", sessionID, reason) //nolint:errcheck
 			return writeHookClaimStaleSessionDrain(opts, stdout, stderr), true
@@ -518,87 +521,28 @@ func fenceHookClaimSession(cityPath string, cfg *config.City, sessionID string, 
 	return writeHookClaimDrain(hookClaimReasonClaimsErrored, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr), true
 }
 
-// openHookClaimSessionIdentityStore binds the claim fence to the explicit city
-// scope that owns session identity beads. A launched rig worker carries an
-// ambient rig-scoped provider and BEADS_DIR for its product-work queries; an
-// authoritative city open prevents those worker defaults from selecting the
-// rig store for the identity read. The returned handle is opened once and
-// reused across the bounded projection retries. Work discovery and claiming
-// continue to use the separately composed rig-scoped hookStore list.
-func openHookClaimSessionIdentityStore(cityPath string, cfg *config.City) (*session.Store, error) {
-	store, err := openAuthoritativeStoreAtForCity(cityPath, cityPath)
+// classifyHookClaimSessionProjection validates the controller-owned projection
+// without opening a bead store or dialing a socket. Operational file failures
+// are retryable; a well-formed projection that proves a different incarnation
+// or an ineligible lifecycle state is definitively stale.
+func classifyHookClaimSessionProjection(cityPath, sessionID, instanceToken string, generation int) (hookClaimSessionVerdict, string) {
+	projection, err := session.LoadSessionFenceProjection(cityPath, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("opening city session store: %w", err)
+		return hookClaimSessionStoreUnavailable, err.Error()
 	}
-	return cliSessionFrontDoor(store, cfg, cityPath), nil
-}
-
-// classifyHookClaimSession loads the session bead named by sessionID through
-// the fence's explicit city-scoped handle and reports whether the runtime
-// holding instanceToken may claim. A confirmed identity failure from a loaded
-// row (non-session bead, stale token/state) is stale. An absent row is ambiguous
-// during startup because the provider can become live just before cache
-// reconciliation projects its session bead, so absence and genuine store-read
-// faults are retryable unavailable verdicts.
-func classifyHookClaimSession(identityStore *session.Store, identityStoreErr error, sessionID, instanceToken string) (hookClaimSessionVerdict, string) {
-	if identityStoreErr != nil {
-		return hookClaimSessionStoreUnavailable, identityStoreErr.Error()
+	if projection.SessionID != sessionID {
+		return hookClaimSessionStale, "projected session ID does not match the runtime session"
 	}
-	if identityStore == nil {
-		return hookClaimSessionStoreUnavailable, "city session store handle is unavailable"
+	if projection.Generation != generation {
+		return hookClaimSessionStale, "projected generation does not match the runtime generation"
 	}
-	info, err := identityStore.Get(sessionID)
-	if err != nil {
-		return classifyHookClaimSessionLookupError(err)
+	if !projection.MatchesInstanceToken(instanceToken) {
+		return hookClaimSessionStale, "runtime instance token does not match the controller projection"
 	}
-	return hookClaimSessionEligibility(info, instanceToken)
-}
-
-// classifyHookClaimSessionLookupError maps a session Store.Get error to a fence
-// verdict. session.Store.Get reports an absent id as the store not-found error
-// wrapped around beads.ErrNotFound, and a present-but-non-session id as
-// session.ErrSessionNotFound. Absence is retryable because a newly started
-// provider can precede session-bead projection; a loaded non-session row is a
-// definitive stale identity. Other read faults are retryable too.
-func classifyHookClaimSessionLookupError(err error) (hookClaimSessionVerdict, string) {
-	switch {
-	case errors.Is(err, beads.ErrNotFound):
-		return hookClaimSessionStoreUnavailable, fmt.Sprintf("session bead not found: %v", err)
-	case errors.Is(err, session.ErrSessionNotFound):
-		return hookClaimSessionStale, fmt.Sprintf("session id resolves to a non-session bead: %v", err)
-	default:
-		return hookClaimSessionStoreUnavailable, fmt.Sprintf("loading session bead: %v", err)
+	if !projection.ClaimEligible() {
+		return hookClaimSessionStale, fmt.Sprintf("session state %q is not claim-eligible", projection.State)
 	}
-}
-
-// hookClaimSessionEligibility is the pure eligibility decision over a session Info
-// snapshot. The instance-token arm proves whether this is the current
-// incarnation; the state arm then admits only the states in which a live worker
-// legitimately claims: active/awake plus the in-startup states creating/
-// start-pending that the deferred-start path passes through before its async
-// active commit lands (refusing those rejects a healthy first claim). An empty
-// MetadataState (session.StateNone) is a pre-metadata legacy bead mid-upgrade,
-// not a dormant state: the session lifecycle canonicalizes empty state to
-// StateActive (canonicalLifecycleState in internal/session/manager.go), so once
-// Closed is false and the instance token matches — proving this is the live
-// current incarnation — it is admitted with the active states, or a healthy
-// upgraded legacy runtime would be drained before claiming its routed work.
-// Every other state — failed-create, draining, drained, asleep, suspended,
-// archived, quarantined — is dormant or terminal and classified stale.
-func hookClaimSessionEligibility(info session.Info, instanceToken string) (hookClaimSessionVerdict, string) {
-	if info.Closed {
-		return hookClaimSessionStale, "session bead is closed"
-	}
-	storedToken := strings.TrimSpace(info.InstanceToken)
-	if storedToken == "" || storedToken != strings.TrimSpace(instanceToken) {
-		return hookClaimSessionStale, "runtime instance token does not match the session bead"
-	}
-	switch state := session.State(strings.TrimSpace(info.MetadataState)); state {
-	case session.StateNone, session.StateActive, session.StateAwake, session.StateCreating, session.StateStartPending:
-		return hookClaimSessionEligible, ""
-	default:
-		return hookClaimSessionStale, fmt.Sprintf("session state %q is not claim-eligible", state)
-	}
+	return hookClaimSessionEligible, ""
 }
 
 // claimHookWork claims routed work for gc hook --claim from the federated store

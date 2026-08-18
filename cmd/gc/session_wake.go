@@ -37,6 +37,7 @@ func preWakeCommit(
 	info sessions.Info,
 	sessFront *sessions.Store,
 	clk clock.Clock,
+	cityPaths ...string,
 ) (newGen int, token string, fold sessions.MetadataPatch, err error) {
 	name := info.SessionNameMetadata
 	if !sessions.IsSessionNameSyntaxValid(name) {
@@ -45,6 +46,13 @@ func preWakeCommit(
 
 	gen, _ := strconv.Atoi(info.Generation)
 	newGen = gen + 1
+	cityPath := ""
+	if len(cityPaths) > 0 {
+		cityPath = cityPaths[0]
+	}
+	if err := sessions.TombstoneSessionFenceProjection(cityPath, info.ID, info.InstanceToken, gen); err != nil {
+		return 0, "", nil, fmt.Errorf("pre-wake claim-fence tombstone: %w", err)
+	}
 	token = sessions.NewInstanceToken()
 	continuationEpoch, _ := strconv.Atoi(info.ContinuationEpoch)
 	if continuationEpoch <= 0 {

@@ -15,9 +15,9 @@ const sessionIdentityProjectionPollInterval = 50 * time.Millisecond
 // waitForStartIdentityReadable gates provider startup on the authoritative
 // store projection of the session identity. Manager lifecycle reads normally
 // use the controller's write-through cache, which can contain a just-created
-// session before a separately opened hook-side store can read it. The live
-// handle bypasses that cache, so Provider.Start cannot launch a process whose
-// first gc hook --claim is doomed to miss its own identity row.
+// session before the live store has committed it. The live handle bypasses
+// that cache; once the row is readable, the controller publishes the
+// worker-readable claim-fence projection before Provider.Start.
 //
 // A missing row is the asynchronous projection case and waits under the
 // caller's existing startup context. Other read failures fail the start
@@ -43,11 +43,20 @@ func (m *Manager) waitForStartIdentityReadable(ctx context.Context, id, instance
 				return fmt.Errorf("session %q identity resolved to non-session bead type %q", id, b.Type)
 			case b.Status == "closed":
 				return fmt.Errorf("%w: %s", ErrSessionClosed, id)
-			case strings.TrimSpace(instanceToken) != "" && strings.TrimSpace(b.Metadata["instance_token"]) != strings.TrimSpace(instanceToken):
+			case strings.TrimSpace(instanceToken) == "":
+				return fmt.Errorf("session %q has no instance token before provider start", id)
+			case b.Metadata["instance_token"] != instanceToken:
 				return fmt.Errorf("session %q identity changed before provider start", id)
-			default:
-				return nil
 			}
+			projectionState := State(b.Metadata["state"])
+			projection := SessionFenceProjection{State: string(projectionState)}
+			if !projection.ClaimEligible() {
+				projectionState = StateCreating
+			}
+			if err := m.publishSessionFenceProjection(id, instanceToken, sessionFenceGeneration(b.Metadata["generation"]), projectionState); err != nil {
+				return fmt.Errorf("publishing session %q claim-fence projection: %w", id, err)
+			}
+			return nil
 		}
 		if !errors.Is(err, beads.ErrNotFound) {
 			return fmt.Errorf("reading session %q identity from live store: %w", id, err)

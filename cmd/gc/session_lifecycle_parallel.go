@@ -844,7 +844,7 @@ func prepareStartCandidateForCity(
 			// byte-coherent with the persisted state without a second Get. It shares
 			// preWakeCommit's error contract: a failed re-read already returned above,
 			// so the twin is never folded from a stale/rejected bead.
-			_, _, fold, err := preWakeCommit(current, sessFront, clk)
+			_, _, fold, err := preWakeCommit(current, sessFront, clk, cityPath)
 			if err != nil {
 				return err
 			}
@@ -853,7 +853,7 @@ func prepareStartCandidateForCity(
 		}); err != nil {
 			return nil, err
 		}
-	} else if _, _, fold, err := preWakeCommit(candidate.info, sessionFrontDoor(store), clk); err != nil {
+	} else if _, _, fold, err := preWakeCommit(candidate.info, sessionFrontDoor(store), clk, cityPath); err != nil {
 		return nil, err
 	} else {
 		candidate.info = candidate.info.ApplyPatch(fold)
@@ -1131,6 +1131,9 @@ func buildPreparedStartWithWorkDirResolver(
 	}
 	instanceToken := candidate.info.InstanceToken
 	if instanceToken == "" {
+		if err := sessionpkg.TombstoneSessionFenceProjection(cityPath, candidate.info.ID, instanceToken, generation); err != nil {
+			return nil, candidate.info, fmt.Errorf("tombstoning claim-fence projection before token replacement: %w", err)
+		}
 		instanceToken = sessionpkg.NewInstanceToken()
 		if err := sessionFrontDoor(store).SetMarker(candidate.info.ID, "instance_token", instanceToken); err != nil {
 			return nil, candidate.info, err
@@ -1575,7 +1578,7 @@ func enqueuePreparedStartWaveForCity(
 				defer release()
 			}
 			result := runPreparedStartCandidate(ctx, item, cityPath, sp, store, cfg, startupTimeout, stabilityWaiter, sessionStaleKeyDetectionWaiter)
-			commitAsyncStartResultWithContext(ctx, result, sp, store, clk, rec, wave, stdout, stderr, trace)
+			commitAsyncStartResultWithContext(ctx, result, sp, store, clk, rec, wave, stdout, stderr, trace, cityPath)
 			if asyncFollowUp != nil {
 				asyncFollowUp()
 			}
@@ -1598,7 +1601,12 @@ func commitAsyncStartResultWithContext(
 	wave int,
 	stdout, stderr io.Writer,
 	trace *sessionReconcilerTraceCycle,
+	cityPaths ...string,
 ) (committed bool) {
+	cityPath := ""
+	if len(cityPaths) > 0 {
+		cityPath = cityPaths[0]
+	}
 	name := result.prepared.candidate.name()
 	template := result.prepared.candidate.tp.TemplateName
 	// Session front door constructed once from the same store; nil when store
@@ -1639,7 +1647,7 @@ func commitAsyncStartResultWithContext(
 		// start_call / post_start_observe; only commit_refresh was
 		// stamped above. No restore needed.
 		if cleanupRuntime {
-			stopStaleAsyncStartRuntime(result, sp, stderr)
+			stopStaleAsyncStartRuntime(result, sp, stderr, cityPath)
 		}
 		outcome := "stale_async_start"
 		if releaseInFlight {
@@ -1659,7 +1667,7 @@ func commitAsyncStartResultWithContext(
 			return commitStartResultTraced(refreshed, sessFront, clk, rec, wave, stdout, stderr, trace)
 		}
 		if refreshed.err == nil && shouldRollbackPendingCreateInfo(refreshed.prepared.candidate.info) {
-			stopStaleAsyncStartRuntime(refreshed, sp, stderr)
+			stopStaleAsyncStartRuntime(refreshed, sp, stderr, cityPath)
 			rollbackPendingCreate(refreshed.prepared.candidate.info, sessFront, clk.Now().UTC(), stderr)
 		}
 		logLifecycleOutcome(stderr, "start", wave, name, template, "context_canceled", refreshed.started, time.Now(), ctx.Err(), refreshed.phases)
@@ -1736,13 +1744,22 @@ func clearPendingStartInFlightLease(handle string, sessFront *sessionpkg.Store, 
 	setMeta(sessFront, handle, "last_woke_at", "", stderr) //nolint:errcheck
 }
 
-func stopStaleAsyncStartRuntime(result startResult, sp runtime.Provider, stderr io.Writer) {
+func stopStaleAsyncStartRuntime(result startResult, sp runtime.Provider, stderr io.Writer, cityPaths ...string) {
 	if sp == nil || strings.TrimSpace(result.prepared.candidate.info.ID) == "" {
 		return
 	}
 	name := result.prepared.candidate.name()
 	if !runningSessionMatchesPendingCreateInfo(result.prepared.candidate.info, name, sp) {
 		return
+	}
+	cityPath := ""
+	if len(cityPaths) > 0 {
+		cityPath = cityPaths[0]
+	}
+	info := result.prepared.candidate.info
+	generation, _ := strconv.Atoi(strings.TrimSpace(info.Generation))
+	if err := sessionpkg.TombstoneSessionFenceProjection(cityPath, info.ID, info.InstanceToken, generation); err != nil {
+		fmt.Fprintf(stderr, "session reconciler: tombstoning stale async start runtime %s: %v\n", name, err) //nolint:errcheck
 	}
 	if err := sp.Stop(name); err != nil && !runtime.IsSessionGone(err) {
 		fmt.Fprintf(stderr, "session reconciler: stopping stale async start runtime %s: %v\n", name, err) //nolint:errcheck
@@ -1819,6 +1836,10 @@ func startPreparedStartCandidate(
 			// zombie — so recycle it: stop the stale session and fall
 			// through to a fresh start.
 			recycleBegin := time.Now()
+			generation, _ := strconv.Atoi(strings.TrimSpace(item.candidate.info.Generation))
+			if err := sessionpkg.TombstoneSessionFenceProjection(cityPath, item.candidate.info.ID, item.candidate.info.InstanceToken, generation); err != nil {
+				return false, fmt.Errorf("tombstoning zombie session %q before recycle: %w", name, err)
+			}
 			stopErr := sp.Stop(name)
 			if phases != nil {
 				phases.ZombieRecycle = time.Since(recycleBegin)
