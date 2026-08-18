@@ -764,7 +764,7 @@ func TestCreateWithProviderWithoutProcessScannerStillStarts(t *testing.T) {
 	}
 }
 
-func TestRuntimeStartCallSitesCleanOrphansFirst(t *testing.T) {
+func TestRuntimeStartCallSitesCleanOrphansAndFenceIdentityFirst(t *testing.T) {
 	tests := []struct {
 		file   string
 		idExpr string
@@ -792,6 +792,9 @@ func TestRuntimeStartCallSitesCleanOrphansFirst(t *testing.T) {
 				if !orphanCleanupPrecedes(lines, i, tt.idExpr) {
 					t.Errorf("%s:%d Start is not preceded by orphan cleanup using %s", tt.file, i+1, tt.idExpr)
 				}
+				if !identityReadinessPrecedes(lines, i, tt.idExpr) {
+					t.Errorf("%s:%d Start is not preceded by durable identity readiness using %s", tt.file, i+1, tt.idExpr)
+				}
 			}
 			if starts == 0 {
 				t.Fatalf("%s contains no m.sp.Start(ctx, sessName, cfg) call sites", tt.file)
@@ -803,10 +806,26 @@ func TestRuntimeStartCallSitesCleanOrphansFirst(t *testing.T) {
 // orphanCleanupPrecedes reports whether m.killExistingOrphans(ctx, idExpr)
 // appears within the short window of non-blank lines preceding the Start at
 // index before. The window keeps the "every Start is guarded by orphan
-// cleanup" invariant while tolerating the gate wrapper that consumes the
-// cleanup's error.
+// cleanup" invariant while tolerating both gate wrappers that consume the
+// cleanup and durable-identity errors.
 func orphanCleanupPrecedes(lines []string, before int, idExpr string) bool {
 	needle := "m.killExistingOrphans(ctx, " + idExpr + ")"
+	const window = 20
+	seen := 0
+	for i := before - 1; i >= 0 && seen < window; i-- {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
+		seen++
+		if strings.Contains(lines[i], needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func identityReadinessPrecedes(lines []string, before int, idExpr string) bool {
+	needle := "m.waitForStartIdentityReadable(ctx, " + idExpr + ","
 	const window = 10
 	seen := 0
 	for i := before - 1; i >= 0 && seen < window; i-- {

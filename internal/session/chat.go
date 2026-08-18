@@ -219,6 +219,12 @@ func (m *Manager) retryFreshStartAfterStaleKey(
 		}
 		return false, fmt.Errorf("pre-start orphan cleanup: %w", orphanErr)
 	}
+	if err := m.waitForStartIdentityReadable(ctx, id, b.Metadata["instance_token"]); err != nil {
+		if unroute != nil {
+			unroute()
+		}
+		return false, err
+	}
 	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
 		if unroute != nil {
 			unroute()
@@ -398,6 +404,12 @@ func (m *Manager) ensureRunning(ctx context.Context, id string, b beads.Bead, se
 		}
 		return fmt.Errorf("pre-start orphan cleanup: %w", orphanErr)
 	}
+	if err := m.waitForStartIdentityReadable(ctx, id, b.Metadata["instance_token"]); err != nil {
+		if unroute != nil {
+			unroute()
+		}
+		return err
+	}
 	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
 		if errors.Is(err, runtime.ErrSessionDiedDuringStartup) && b.Metadata["session_key"] != "" {
 			retried, err := m.retryFreshStartAfterStaleKey(ctx, id, &b, sessName, resumeCommand, cfg, unroute)
@@ -517,6 +529,12 @@ func (m *Manager) ensureRunningRuntimeOnly(ctx context.Context, id string, b bea
 			unroute()
 		}
 		return fmt.Errorf("pre-start orphan cleanup: %w", orphanErr)
+	}
+	if err := m.waitForStartIdentityReadable(ctx, id, b.Metadata["instance_token"]); err != nil {
+		if unroute != nil {
+			unroute()
+		}
+		return err
 	}
 	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
 		switch {

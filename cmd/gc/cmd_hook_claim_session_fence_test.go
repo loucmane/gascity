@@ -414,8 +414,13 @@ func TestPreparedSessionStartWaitsForClaimIdentityProjection(t *testing.T) {
 			t.Fatalf("first provider start: %v", result.err)
 		}
 	}
-	if result := <-startOnce(); result.err != nil {
-		t.Fatalf("converged provider start: %v", result.err)
+	// A drained identity-error worker is absent on the next reconciliation and
+	// therefore gets respawned. A healthy first start remains live and never
+	// enters the start path again.
+	if !provider.IsRunning(created.SessionName) {
+		if result := <-startOnce(); result.err != nil {
+			t.Fatalf("converged provider start: %v", result.err)
+		}
 	}
 
 	starts, claimed, identityErrors, resultErrs := provider.snapshot()

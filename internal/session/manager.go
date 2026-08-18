@@ -989,6 +989,12 @@ func (m *Manager) createStarted(ctx context.Context, spec CreateOptions) (Info, 
 			}
 			return fmt.Errorf("pre-start orphan cleanup: %w", orphanErr)
 		}
+		if err := m.waitForStartIdentityReadable(ctx, b.ID, meta["instance_token"]); err != nil {
+			if rbErr := rollbackFailedCreate(); rbErr != nil {
+				return errors.Join(err, rbErr)
+			}
+			return err
+		}
 		if err := m.sp.Start(ctx, sessName, cfg); err != nil {
 			if runtimeSessionMatchesBead(m.sp, sessName, b.ID, meta["instance_token"]) {
 				if metaErr := m.confirmStartedRuntimeMetadata(b.ID, &b); metaErr != nil {
