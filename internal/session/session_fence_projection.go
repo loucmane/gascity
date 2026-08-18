@@ -25,10 +25,14 @@ const (
 	sessionFenceProjectionStateTombstone = "tombstoned"
 )
 
+// ErrLiveSessionFenceProjectionRefused marks an expected refusal to publish an
+// ineligible session state or overwrite a matching lifecycle tombstone.
+var ErrLiveSessionFenceProjectionRefused = errors.New("live session fence projection refused")
+
 // SessionFenceProjection is the controller-authored, worker-readable identity
 // record used to fence hook claims without giving a sandboxed worker access to
 // the city task store. InstanceTokenSHA256 is a digest, never the raw token.
-type SessionFenceProjection struct {
+type SessionFenceProjection struct { //nolint:revive // explicit public name distinguishes the worker claim-fence projection from other session projections
 	SchemaVersion       int    `json:"schema_version"`
 	SessionID           string `json:"session_id"`
 	InstanceTokenSHA256 string `json:"instance_token_sha256"`
@@ -247,7 +251,7 @@ func PublishLiveSessionFenceProjection(cityPath string, info Info) error {
 		// reconciler's later heal commits active. The live observation is enough to
 		// bridge that one recovery state; explicit blockers remain fail-closed.
 		if state != StateAsleep {
-			return fmt.Errorf("live session %q state %q is not claim-eligible", info.ID, state)
+			return fmt.Errorf("%w: live session %q state %q is not claim-eligible", ErrLiveSessionFenceProjectionRefused, info.ID, state)
 		}
 		state = StateActive
 	}
@@ -257,7 +261,7 @@ func PublishLiveSessionFenceProjection(cityPath string, info Info) error {
 		current.Generation == generation &&
 		current.MatchesInstanceToken(info.InstanceToken) {
 		if current.State == sessionFenceProjectionStateTombstone {
-			return fmt.Errorf("live session %q claim-fence projection is tombstoned", info.ID)
+			return fmt.Errorf("%w: live session %q claim-fence projection is tombstoned", ErrLiveSessionFenceProjectionRefused, info.ID)
 		}
 		if current.State == string(state) {
 			return nil

@@ -2150,15 +2150,23 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 		// A runtime can survive a supervisor binary upgrade even though the old
 		// binary never wrote its worker-readable claim fence. Publish the identity
 		// as soon as this tick observes the adopted runtime alive, before any later
-		// branch can respawn its agent in place. Failure is fail-closed: skip all
-		// lifecycle actions for this worker rather than launch an agent whose first
-		// claim would drain with claims_errored.
-		if alive {
+		// branch can respawn its agent in place. Explicit lifecycle blockers are
+		// intentionally not publishable; asleep is the one recovery state that a
+		// live observation may bridge back to active.
+		fenceState := infoByID[id].State
+		fenceClaimEligible := (sessionpkg.SessionFenceProjection{State: string(fenceState)}).ClaimEligible()
+		if alive && (fenceClaimEligible || fenceState == sessionpkg.StateAsleep) {
 			if err := sessionpkg.WithSessionMutationLock(id, func() error {
 				return sessionpkg.PublishLiveSessionFenceProjection(cityPath, infoByID[id])
 			}); err != nil {
-				fmt.Fprintf(stderr, "session reconciler: publishing adopted live session claim fence for %s: %v\n", name, err) //nolint:errcheck
-				continue
+				// A matching tombstone is an expected refusal: preserve it and let
+				// drain/stop reconciliation finish. Every other failure remains
+				// fail-closed so an eligible runtime cannot respawn before its claim
+				// identity is readable.
+				if !errors.Is(err, sessionpkg.ErrLiveSessionFenceProjectionRefused) {
+					fmt.Fprintf(stderr, "session reconciler: publishing adopted live session claim fence for %s: %v\n", name, err) //nolint:errcheck
+					continue
+				}
 			}
 		}
 		peek := cachedSessionPeek(cityPath, store, sp, cfg, id, tp.Hints.ProcessNames)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,7 +76,7 @@ func (p *fenceProjectionObservingProvider) Start(ctx context.Context, name strin
 }
 
 func (p *fenceProjectionObservingProvider) Stop(name string) error {
-	for _, call := range p.Fake.Calls {
+	for _, call := range p.Calls {
 		if call.Method != "Start" {
 			continue
 		}
@@ -220,6 +221,9 @@ func TestPublishLiveSessionFenceProjectionDoesNotReviveQuarantineTombstone(t *te
 	})
 	if err == nil {
 		t.Fatal("stale active projection refresh succeeded after quarantine tombstone")
+	}
+	if !errors.Is(err, ErrLiveSessionFenceProjectionRefused) {
+		t.Fatalf("stale active projection refresh error = %v, want expected refusal", err)
 	}
 	projection, _ := readFenceProjectionFixture(t, cityPath, staleActive.ID)
 	if projection.State != sessionFenceProjectionStateTombstone {
