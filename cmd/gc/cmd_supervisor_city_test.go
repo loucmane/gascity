@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -1442,7 +1443,7 @@ func TestReconcileCitiesUnregisterEventUsesManagedCityName(t *testing.T) {
 
 	reg := supervisor.NewRegistry(supervisor.RegistryPath())
 	var stdout, stderr bytes.Buffer
-	reconcileCities(reg, registry, supervisor.PublicationConfig{}, &stdout, &stderr)
+	reconcileCities(reg, registry, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 
 	recorded := supRec.Events
 	if len(recorded) != 1 {
@@ -1464,6 +1465,44 @@ func TestReconcileCitiesUnregisterEventUsesManagedCityName(t *testing.T) {
 	}
 	if payload.RequestID != "req-test-unregister" {
 		t.Fatalf("payload.RequestID = %q, want req-test-unregister", payload.RequestID)
+	}
+}
+
+func TestReconcileCitiesQuiescesCityServerBeforeManagedCityTeardown(t *testing.T) {
+	t.Setenv("GC_HOME", t.TempDir())
+	cityPath := filepath.Join(t.TempDir(), "lifecycle-city")
+	if err := os.MkdirAll(cityPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	quiesced := make(chan struct{})
+	cancelObservedQuiescence := make(chan bool, 1)
+	done := make(chan struct{})
+	close(done)
+	registry := newCityRegistry()
+	registry.Add(cityPath, &managedCity{
+		name:    "lifecycle-city",
+		started: true,
+		cancel: func() {
+			select {
+			case <-quiesced:
+				cancelObservedQuiescence <- true
+			default:
+				cancelObservedQuiescence <- false
+			}
+		},
+		done: done,
+	})
+
+	reg := supervisor.NewRegistry(supervisor.RegistryPath())
+	var stdout, stderr bytes.Buffer
+	reconcileCities(reg, registry, supervisor.PublicationConfig{}, func(context.Context, string) error {
+		close(quiesced)
+		return nil
+	}, &stdout, &stderr)
+
+	if !<-cancelObservedQuiescence {
+		t.Fatal("managed city teardown started before its cached Server quiesced")
 	}
 }
 
@@ -1523,7 +1562,7 @@ func TestReconcileCitiesEmitsCityCreateFailureForPendingConfigLoadError(t *testi
 	}
 
 	var stdout, stderr bytes.Buffer
-	reconcileCities(reg, registry, supervisor.PublicationConfig{}, &stdout, &stderr)
+	reconcileCities(reg, registry, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 
 	recorded := supRec.Events
 	if len(recorded) != 1 {
@@ -1578,7 +1617,7 @@ func TestReconcileCitiesUnregisterSkipsRequestResultWithoutPendingRequestID(t *t
 
 	reg := supervisor.NewRegistry(supervisor.RegistryPath())
 	var stdout, stderr bytes.Buffer
-	reconcileCities(reg, registry, supervisor.PublicationConfig{}, &stdout, &stderr)
+	reconcileCities(reg, registry, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 
 	if len(supRec.Events) != 0 {
 		t.Fatalf("recorded %d supervisor events without pending request_id, want 0: %#v", len(supRec.Events), supRec.Events)
@@ -1828,7 +1867,7 @@ func TestReconcileCitiesNameDriftStopsBeadsProvider(t *testing.T) {
 	})
 	var stdout, stderr bytes.Buffer
 
-	reconcileCities(reg, registry, supervisor.PublicationConfig{}, &stdout, &stderr)
+	reconcileCities(reg, registry, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 
 	ops := readOpLog(t, logFile)
 	assertSingleStopWithBenignNoise(t, ops)
@@ -1871,7 +1910,7 @@ shutdown_timeout = "100ms"
 
 	cr := newCityRegistry()
 	var stdout, stderr bytes.Buffer
-	reconcileCities(reg, cr, supervisor.PublicationConfig{}, &stdout, &stderr)
+	reconcileCities(reg, cr, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 
 	sockPath := filepath.Join(canonicalTestPath(cityPath), ".gc", "controller.sock")
 	if _, err := os.Stat(sockPath); err != nil {
@@ -2084,7 +2123,7 @@ func TestReconcileCitiesSkipsCityAlreadyInitializing(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	reconcileCities(reg, registry, supervisor.PublicationConfig{}, &stdout, &stderr)
+	reconcileCities(reg, registry, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 
 	registry.ReadCallback(func(
 		_ map[string]*managedCity,
@@ -2115,7 +2154,7 @@ func TestReconcileCitiesAutoUnregistersAbsentDirectory(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
 	for i := 0; i < staleCityDirAbsentThreshold; i++ {
-		reconcileCities(reg, registry, supervisor.PublicationConfig{}, &stdout, &stderr)
+		reconcileCities(reg, registry, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 	}
 
 	entries, err := reg.List()
@@ -2146,7 +2185,7 @@ func TestReconcileCitiesDoesNotUnregisterBeforeThreshold(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
 	for i := 0; i < staleCityDirAbsentThreshold-1; i++ {
-		reconcileCities(reg, registry, supervisor.PublicationConfig{}, &stdout, &stderr)
+		reconcileCities(reg, registry, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 	}
 
 	entries, err := reg.List()
@@ -2178,13 +2217,13 @@ func TestReconcileCitiesResetsAbsentCounterWhenDirectoryReappears(t *testing.T) 
 	var stdout, stderr bytes.Buffer
 
 	for i := 0; i < staleCityDirAbsentThreshold-1; i++ {
-		reconcileCities(reg, registry, supervisor.PublicationConfig{}, &stdout, &stderr)
+		reconcileCities(reg, registry, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 	}
 
 	if err := os.MkdirAll(cityPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	reconcileCities(reg, registry, supervisor.PublicationConfig{}, &stdout, &stderr)
+	reconcileCities(reg, registry, supervisor.PublicationConfig{}, nil, &stdout, &stderr)
 
 	var dirAbsent int
 	registry.ReadCallback(func(

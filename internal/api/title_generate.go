@@ -24,8 +24,11 @@ Message: `
 // short title from the user's message, then updates the bead. On failure
 // (unsupported provider, timeout, subprocess error) it falls back to a
 // truncated version of the message.
-func generateAndSetTitle(store beads.SessionStore, beadID string, provider *config.ResolvedProvider, message, workDir string) {
-	title := generateTitle(provider, message, workDir)
+func generateAndSetTitle(ctx context.Context, store beads.SessionStore, beadID string, provider *config.ResolvedProvider, message, workDir string) {
+	title := generateTitleWithContext(ctx, provider, message, workDir)
+	if ctx.Err() != nil {
+		return
+	}
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return
@@ -36,7 +39,11 @@ func generateAndSetTitle(store beads.SessionStore, beadID string, provider *conf
 // generateTitle invokes the provider in one-shot mode and returns a title.
 // Falls back to truncating the message if the provider doesn't support
 // PrintArgs or the subprocess fails.
-func generateTitle(provider *config.ResolvedProvider, message, workDir string) string {
+func generateTitle(provider *config.ResolvedProvider, message string) string {
+	return generateTitleWithContext(context.Background(), provider, message, "")
+}
+
+func generateTitleWithContext(ctx context.Context, provider *config.ResolvedProvider, message, workDir string) string {
 	if provider == nil || len(provider.PrintArgs) == 0 {
 		return truncateTitle(message)
 	}
@@ -50,7 +57,7 @@ func generateTitle(provider *config.ResolvedProvider, message, workDir string) s
 	args = append(args, provider.PrintArgs...)
 	args = append(args, titlePrompt+message)
 
-	ctx, cancel := context.WithTimeout(context.Background(), titleGenerateTimeout)
+	ctx, cancel := context.WithTimeout(ctx, titleGenerateTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, provider.Command, args...)
@@ -103,24 +110,45 @@ func truncateTitle(message string) string {
 // exiting; long-lived servers can ignore it.
 func MaybeGenerateTitleAsync(store beads.SessionStore, beadID, userTitle, message string, provider *config.ResolvedProvider, workDir string, stderr func(string, ...any)) <-chan struct{} {
 	done := make(chan struct{})
-	message = strings.TrimSpace(message)
-	if message == "" || userTitle != "" {
+	if !titleGenerationNeeded(userTitle, message) {
 		close(done)
 		return done
 	}
+	message = strings.TrimSpace(message)
+	setImmediateGeneratedTitle(store, beadID, message)
+	go func() {
+		defer close(done)
+		defer recoverTitleGeneration(stderr)
+		generateAndSetTitle(context.Background(), store, beadID, provider, message, workDir)
+	}()
+	return done
+}
+
+func titleGenerationNeeded(userTitle, message string) bool {
+	message = strings.TrimSpace(message)
+	return message != "" && userTitle == ""
+}
+
+func maybeGenerateTitle(ctx context.Context, store beads.SessionStore, beadID, userTitle, message string, provider *config.ResolvedProvider, workDir string, stderr func(string, ...any)) {
+	if !titleGenerationNeeded(userTitle, message) || ctx.Err() != nil {
+		return
+	}
+	message = strings.TrimSpace(message)
+	defer recoverTitleGeneration(stderr)
+	setImmediateGeneratedTitle(store, beadID, message)
+	generateAndSetTitle(ctx, store, beadID, provider, message, workDir)
+}
+
+func setImmediateGeneratedTitle(store beads.SessionStore, beadID, message string) {
 	// Set the truncated message as immediate title so there's something
 	// meaningful before the model responds.
 	if truncated := truncateTitle(message); truncated != "" {
 		_ = store.Update(beadID, beads.UpdateOpts{Title: &truncated})
 	}
-	go func() {
-		defer close(done)
-		defer func() {
-			if r := recover(); r != nil {
-				stderr("title generation panic: %v", r)
-			}
-		}()
-		generateAndSetTitle(store, beadID, provider, message, workDir)
-	}()
-	return done
+}
+
+func recoverTitleGeneration(stderr func(string, ...any)) {
+	if r := recover(); r != nil {
+		stderr("title generation panic: %v", r)
+	}
 }

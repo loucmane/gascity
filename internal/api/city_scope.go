@@ -282,12 +282,21 @@ func cityScopeName[I any](input *I) string {
 // Server for the named city. Returns nil when the city is not known
 // or not running; callers should translate nil into a 404.
 func (sm *SupervisorMux) resolveCityServer(name string) *Server {
+	cityMu := sm.cityCacheMutex(name)
+	cityMu.Lock()
+	defer cityMu.Unlock()
+
 	state := sm.resolver.CityState(name)
 	if state == nil {
-		sm.cacheMu.Lock()
-		delete(sm.cache, name)
-		sm.cacheMu.Unlock()
+		_ = sm.quiesceCityLocked(context.Background(), name)
 		return nil
 	}
-	return sm.getCityServer(name, state)
+
+	sm.cacheMu.RLock()
+	cached, ok := sm.cache[name]
+	sm.cacheMu.RUnlock()
+	if ok && cached.state == state {
+		return cached.srv
+	}
+	return sm.installCityServerLocked(name, state, sm.newCityServer(state))
 }
