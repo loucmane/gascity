@@ -3,13 +3,28 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/session"
 )
+
+type fenceProjectionRelaunchProvider struct {
+	*runtime.Fake
+	cityPath       string
+	projectionSeen session.SessionFenceProjection
+	projectionErr  error
+}
+
+func (p *fenceProjectionRelaunchProvider) Relaunch(ctx context.Context, name string, cfg runtime.Config) error {
+	p.projectionSeen, p.projectionErr = session.LoadSessionFenceProjection(p.cityPath, cfg.Env["GC_SESSION_ID"])
+	return p.Fake.Relaunch(ctx, name, cfg)
+}
 
 // setupLaunchDriftResumeEnv builds a reconciler env whose alive "worker" session
 // carries a session_key and a resume-capable provider, with a stored baseline
@@ -93,6 +108,39 @@ func TestReconcileSessionBeads_LaunchDriftRelaunchResumesTrackedConversation(t *
 	// The runtime env the durable hash-form config lacked is present.
 	if got := rc.Env["GC_SESSION_ID"]; got == "" {
 		t.Errorf("Relaunch Env[GC_SESSION_ID] empty, want session-context env merged")
+	}
+}
+
+// TestReconcileSessionBeads_LaunchDriftPublishesClaimFenceBeforeRelaunch pins
+// the warm-box respawn boundary. A live session adopted from an older binary
+// can have no projection at all; Relaunch replaces the agent process in that
+// same runtime, so the current identity must be published before the provider
+// starts the replacement agent.
+func TestReconcileSessionBeads_LaunchDriftPublishesClaimFenceBeforeRelaunch(t *testing.T) {
+	env, _, sessionBead := setupLaunchDriftResumeEnv(t)
+	cityPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fenceProjectionRelaunchProvider{Fake: env.sp, cityPath: cityPath}
+
+	reconcileSessionBeadsAtPath(
+		context.Background(), cityPath, []beads.Bead{sessionBead}, env.desiredState,
+		configuredSessionNames(env.cfg, "", env.store), env.cfg, provider, env.store,
+		nil, nil, nil, nil, env.dt, map[string]int{"worker": 1}, false, nil, "",
+		nil, env.clk, env.rec, 0, 0, &env.stdout, &env.stderr, env.startOptions...,
+	)
+
+	if got := provider.CountCalls("Relaunch", "worker"); got != 1 {
+		t.Fatalf("Relaunch calls = %d, want 1; stderr=%s", got, env.stderr.String())
+	}
+	if provider.projectionErr != nil {
+		t.Fatalf("claim-fence projection was not readable before Relaunch: %v", provider.projectionErr)
+	}
+	if provider.projectionSeen.SessionID != sessionBead.ID ||
+		!provider.projectionSeen.MatchesInstanceToken(sessionBead.Metadata["instance_token"]) ||
+		!provider.projectionSeen.ClaimEligible() {
+		t.Fatalf("projection observed before Relaunch = %+v, want current claim-eligible identity", provider.projectionSeen)
 	}
 }
 

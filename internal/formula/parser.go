@@ -875,14 +875,16 @@ func (p *Parser) winningAssetPath(rawPath string) (string, bool) {
 }
 
 // resolveCheckPaths walks steps (and their children and loop bodies) and
-// rewrites each ralph check path written in the documented
-// "../assets/scripts/checks/<name>" form to the absolute path of the
-// highest-priority formula layer that ships the script, mirroring how
-// description_file assets shadow. Legacy/non-asset paths (e.g. ".gc/..." or
-// an absolute path) are left untouched. In strict (graph.v2) mode an
-// ../assets/ check that resolves to nothing is a compile error, surfacing a
-// missing or misspelled check script at cook time instead of as a confusing
-// runtime "escapes trusted roots" failure.
+// rewrites each ralph check path shipped by a formula pack to an absolute path.
+// The documented "../assets/scripts/checks/<name>" form follows normal layer
+// shadowing. The legacy ".gc/scripts/<rel>" form resolves only against the pack
+// that supplied the formula, where the source asset lives at
+// "../assets/scripts/<rel>"; this keeps clean rig launchers independent of a
+// materialized .gc/scripts tree and keeps remote imports pinned to their exact
+// cache checkout. Other relative paths and absolute paths are left untouched.
+// In strict (graph.v2) mode an ../assets/ check that resolves to nothing is a
+// compile error, surfacing a missing or misspelled check script at cook time
+// instead of as a confusing runtime "escapes trusted roots" failure.
 func (p *Parser) resolveCheckPaths(steps []*Step, baseDir string, strict bool) error {
 	for _, step := range steps {
 		if step == nil {
@@ -903,13 +905,13 @@ func (p *Parser) resolveCheckPaths(steps []*Step, baseDir string, strict bool) e
 	return nil
 }
 
-// resolveStepCheckPath rewrites a single step's "../assets/..." ralph check
-// path to its absolute layer asset. A path that still carries a template
-// placeholder (e.g. "../assets/scripts/checks/{target}.sh") is deferred: the
-// placeholder is substituted at expand time, so it cannot be matched against
-// on-disk files here. resolveExpandedCheckPaths re-runs this resolution once
-// expansion has substituted the placeholder. In strict (graph.v2) mode a
-// non-templated ../assets path that no formula layer ships is a compile error.
+// resolveStepCheckPath rewrites a single step's pack-shipped ralph check path
+// to its absolute asset. A path that still carries a template placeholder is
+// deferred: the placeholder is substituted at expand time, so it cannot be
+// matched against on-disk files here. resolveExpandedCheckPaths re-runs this
+// resolution once expansion has substituted the placeholder. In strict
+// (graph.v2) mode a non-templated ../assets path that no formula layer ships is
+// a compile error.
 func (p *Parser) resolveStepCheckPath(step *Step, baseDir string, strict bool) error {
 	if step.Ralph == nil || step.Ralph.Check == nil {
 		return nil
@@ -942,23 +944,45 @@ func (p *Parser) resolveExpandedCheckPaths(f *Formula) error {
 	return p.resolveCheckPaths(f.Steps, descriptionFileBaseDir(f.Source), UsesGraphCompiler(f))
 }
 
-// resolveCheckAssetPath resolves a "../assets/<rel>" check path to an absolute
-// script path: the highest-priority layer that ships it, falling back to the
-// formula's own pack asset (baseDir-relative) so a formula parsed outside its
-// layer set still resolves its shipped script. Returns ("", false) for
-// non-asset paths or when nothing ships the script.
+// resolveCheckAssetPath resolves a pack-shipped check path to an absolute
+// script path. Legacy .gc/scripts paths bind to the formula's own pack so a
+// lockfile-selected cache checkout cannot be displaced by another layer.
+// Documented ../assets paths retain their highest-priority layer shadowing,
+// falling back to the formula's own pack when parsed outside its layer set.
+// Returns ("", false) for non-asset paths or when nothing ships the script.
 func (p *Parser) resolveCheckAssetPath(rawPath, baseDir string) (string, bool) {
-	if _, ok := descriptionAssetRelPath(rawPath); !ok {
+	if assetRel, ok := legacyRuntimeScriptAssetRelPath(rawPath); ok {
+		candidate := filepath.Join(filepath.Dir(baseDir), "assets", filepath.FromSlash(assetRel))
+		if p.source.Stat(candidate) {
+			return candidate, true
+		}
+		return "", false
+	}
+	assetRel, ok := descriptionAssetRelPath(rawPath)
+	if !ok {
 		return "", false
 	}
 	if winner, ok := p.winningAssetPath(rawPath); ok {
 		return winner, true
 	}
-	candidate := filepath.Clean(filepath.Join(baseDir, filepath.FromSlash(rawPath)))
+	candidate := filepath.Join(filepath.Dir(baseDir), "assets", filepath.FromSlash(assetRel))
 	if p.source.Stat(candidate) {
 		return candidate, true
 	}
 	return "", false
+}
+
+func legacyRuntimeScriptAssetRelPath(rawPath string) (string, bool) {
+	path := filepath.ToSlash(filepath.Clean(rawPath))
+	const runtimeScriptPrefix = ".gc/scripts/"
+	if !strings.HasPrefix(path, runtimeScriptPrefix) {
+		return "", false
+	}
+	rel := strings.TrimPrefix(path, runtimeScriptPrefix)
+	if rel == "." || rel == "" || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return "scripts/" + rel, true
 }
 
 func descriptionAssetRelPath(rawPath string) (string, bool) {

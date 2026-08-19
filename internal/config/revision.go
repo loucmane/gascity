@@ -49,6 +49,18 @@ func Revision(fs fsys.FS, prov *Provenance, cfg *City, cityRoot string) string {
 		h.Write([]byte{0})    //nolint:errcheck // hash.Write never errors
 	}
 
+	// The machine-local site binding is applied after city.toml is decoded,
+	// so it is not part of Provenance.Sources. It still participates in the
+	// effective config and must therefore invalidate the running revision.
+	sitePath := SiteBindingPath(cityRoot)
+	if data, known, exists := revisionSnapshotFile(prov, sitePath); known {
+		if exists {
+			writeRevisionBytes(h, sitePath, data)
+		}
+	} else if data, err := fs.ReadFile(sitePath); err == nil {
+		writeRevisionBytes(h, sitePath, data)
+	}
+
 	// Hash rig pack directory contents (all pack sources).
 	rigs := cfg.Rigs
 	for _, r := range rigs {
@@ -143,6 +155,11 @@ func (p *Provenance) captureRevisionSnapshot(fs fsys.FS, cfg *City, cityRoot str
 		if data, err := fs.ReadFile(lockPath); err == nil {
 			snap.fileContents[lockPath] = cloneBytes(data)
 		}
+	}
+	sitePath := SiteBindingPath(cityRoot)
+	snap.fileKnown[sitePath] = true
+	if data, err := fs.ReadFile(sitePath); err == nil {
+		snap.fileContents[sitePath] = cloneBytes(data)
 	}
 	for _, dir := range cfg.PackDirs {
 		if strings.TrimSpace(dir) == "" {
@@ -268,6 +285,11 @@ func WatchTargets(prov *Provenance, cfg *City, cityRoot string) []WatchTarget {
 			addTarget(dir, false, pathutil.SamePath(dir, cityRoot))
 		}
 	}
+
+	// Site bindings are loaded outside Provenance.Sources but are still
+	// effective configuration. Watch the exact file so an atomic rewrite or
+	// direct edit marks the controller dirty immediately.
+	addTarget(SiteBindingPath(cityRoot), false, false)
 
 	for _, r := range cfg.Rigs {
 		for _, ref := range r.Includes {

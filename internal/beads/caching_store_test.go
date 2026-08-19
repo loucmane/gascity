@@ -1350,6 +1350,41 @@ func TestCachingStoreReadyTreatsMissingDepTargetAsClosedWithoutBackingGet(t *tes
 	}
 }
 
+func TestCachingStoreReadyDoesNotReleaseFailedBlockingDependency(t *testing.T) {
+	t.Parallel()
+	mem := beads.NewMemStore()
+	blocker, err := mem.Create(beads.Bead{Title: "failed control", Type: "task"})
+	if err != nil {
+		t.Fatalf("Create(blocker): %v", err)
+	}
+	dependent, err := mem.Create(beads.Bead{Title: "downstream work", Type: "task"})
+	if err != nil {
+		t.Fatalf("Create(dependent): %v", err)
+	}
+	if err := mem.DepAdd(dependent.ID, blocker.ID, "blocks"); err != nil {
+		t.Fatalf("DepAdd: %v", err)
+	}
+	if closed, err := mem.CloseAll([]string{blocker.ID}, map[string]string{"gc.outcome": "fail"}); err != nil {
+		t.Fatalf("CloseAll: %v", err)
+	} else if closed != 1 {
+		t.Fatalf("CloseAll closed %d beads, want 1", closed)
+	}
+
+	cache := beads.NewCachingStoreForTest(mem, nil)
+	if err := cache.Prime(context.Background()); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	ready, ok := cache.CachedReady()
+	if !ok {
+		t.Fatal("CachedReady reported cache unavailable")
+	}
+	for _, bead := range ready {
+		if bead.ID == dependent.ID {
+			t.Fatalf("CachedReady released dependent %s after blocker %s closed with gc.outcome=fail", dependent.ID, blocker.ID)
+		}
+	}
+}
+
 func TestCachingStoreCachedReadyUsesPrimedDependencies(t *testing.T) {
 	t.Parallel()
 	mem := beads.NewMemStore()

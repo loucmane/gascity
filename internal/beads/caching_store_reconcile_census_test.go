@@ -92,7 +92,8 @@ func TestMergeOracleFieldCoverage(t *testing.T) {
 	}
 	excludedStore := map[string]bool{
 		"backing": true, "idPrefix": true, "mu": true, "reconciling": true,
-		"onChange": true, "problemf": true, "problemLog": true,
+		"failedBlockers": true, // refreshed around, not written by, the merge seam
+		"onChange":       true, "problemf": true, "problemLog": true,
 		"lastReconcileLogAt": true, "primeMu": true, "primeRunning": true,
 		"primeCycle": true, "lastFullPrimeStartedAt": true, "primeRetryDelay": true,
 		"lifecycleMu": true, "lifecycleWG": true, "cancelFn": true, "stopCh": true,

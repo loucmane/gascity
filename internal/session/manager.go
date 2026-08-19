@@ -943,6 +943,9 @@ func (m *Manager) createStarted(ctx context.Context, spec CreateOptions) (Info, 
 
 		unroute := m.routeACPIfNeeded(provider, transport, sessName)
 		rollbackFailedCreate := func() error {
+			if err := m.tombstoneSessionFenceProjection(b.ID, meta["instance_token"], sessionFenceGeneration(meta["generation"])); err != nil {
+				return fmt.Errorf("tombstoning claim-fence projection during create rollback: %w", err)
+			}
 			if unroute != nil {
 				unroute()
 			}
@@ -1000,6 +1003,12 @@ func (m *Manager) createStarted(ctx context.Context, spec CreateOptions) (Info, 
 			}
 			return fmt.Errorf("pre-start orphan cleanup: %w", orphanErr)
 		}
+		if err := m.waitForStartIdentityReadable(ctx, b.ID, meta["instance_token"]); err != nil {
+			if rbErr := rollbackFailedCreate(); rbErr != nil {
+				return errors.Join(err, rbErr)
+			}
+			return err
+		}
 		if err := m.sp.Start(ctx, sessName, cfg); err != nil {
 			if runtimeSessionMatchesBead(m.sp, sessName, b.ID, meta["instance_token"]) {
 				if metaErr := m.confirmStartedRuntimeMetadata(b.ID, &b); metaErr != nil {
@@ -1020,6 +1029,9 @@ func (m *Manager) createStarted(ctx context.Context, spec CreateOptions) (Info, 
 			return fmt.Errorf("starting session: %w", err)
 		}
 		if metaErr := m.confirmStartedRuntimeMetadata(b.ID, &b); metaErr != nil {
+			if projectionErr := m.tombstoneSessionFenceProjection(b.ID, meta["instance_token"], sessionFenceGeneration(meta["generation"])); projectionErr != nil {
+				metaErr = errors.Join(metaErr, fmt.Errorf("tombstoning claim-fence projection after metadata failure: %w", projectionErr))
+			}
 			if stopErr := m.sp.Stop(sessName); stopErr != nil {
 				metaErr = errors.Join(metaErr, fmt.Errorf("stopping runtime after metadata failure: %w", stopErr))
 			}
@@ -1216,6 +1228,9 @@ func (m *Manager) Suspend(id string) error {
 			return &IllegalTransitionError{From: StateClosed, Command: CmdSuspend}
 		}
 		current := State(b.Metadata["state"])
+		if err := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"])); err != nil {
+			return fmt.Errorf("tombstoning claim-fence projection before suspend: %w", err)
+		}
 		if current == StateSuspended {
 			return nil // idempotent: already suspended
 		}
@@ -1313,6 +1328,9 @@ func (m *Manager) CloseDetailed(id string) (CloseResult, error) {
 			return err
 		}
 		if b.Status == "closed" {
+			if err := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"])); err != nil {
+				return fmt.Errorf("tombstoning claim-fence projection for closed session: %w", err)
+			}
 			_ = clearRuntimeMCPServersSnapshot(m.cityPath, id)
 			return nil // idempotent: already closed
 		}
@@ -1324,6 +1342,9 @@ func (m *Manager) CloseDetailed(id string) (CloseResult, error) {
 		current := canonicalLifecycleState(State(b.Metadata["state"]))
 		if _, err := Transition(current, CmdClose); err != nil {
 			return err
+		}
+		if err := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"])); err != nil {
+			return fmt.Errorf("tombstoning claim-fence projection before close: %w", err)
 		}
 
 		// Stop the live runtime before marking the bead closed. Stop is
@@ -1418,6 +1439,9 @@ func (m *Manager) Kill(id string) error {
 			return fmt.Errorf("session %s is not active", id)
 		}
 	}
+	if err := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"])); err != nil {
+		return fmt.Errorf("tombstoning claim-fence projection before kill: %w", err)
+	}
 	return m.sp.Stop(sessName)
 }
 
@@ -1429,6 +1453,13 @@ func (m *Manager) BeginDrain(id, reason string) error {
 		cmdLegal, err := m.checkTransition(id, CmdDrain, StateDraining)
 		if err != nil {
 			return err
+		}
+		b, err := m.store.Get(id)
+		if err != nil {
+			return fmt.Errorf("loading session before claim-fence tombstone: %w", err)
+		}
+		if err := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"])); err != nil {
+			return fmt.Errorf("tombstoning claim-fence projection before drain: %w", err)
 		}
 		if !cmdLegal {
 			return nil // idempotent: already draining
@@ -1459,6 +1490,13 @@ func (m *Manager) Quarantine(id string, until time.Time, cycle int) error {
 		cmdLegal, err := m.checkTransition(id, CmdQuarantine, StateQuarantined)
 		if err != nil {
 			return err
+		}
+		b, err := m.store.Get(id)
+		if err != nil {
+			return fmt.Errorf("loading session before claim-fence tombstone: %w", err)
+		}
+		if err := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"])); err != nil {
+			return fmt.Errorf("tombstoning claim-fence projection before quarantine: %w", err)
 		}
 		if !cmdLegal {
 			return nil // idempotent: already quarantined

@@ -220,6 +220,39 @@ func TestDoltliteReadStoreReadyBlocksMissingTargets(t *testing.T) {
 	}
 }
 
+func TestDoltliteReadStoreReadyDoesNotReleaseFailedBlockingDependency(t *testing.T) {
+	store, closeStore := newTestDoltliteReadStore(t)
+	defer closeStore()
+	writer := openTestDoltliteWriter(t, store.db)
+	defer writer.Close() //nolint:errcheck // test cleanup
+
+	insertTestDoltliteIssue(t, writer, "issues", "labels", "dependencies", testDoltliteIssue{
+		ID:        "gc-failed-control",
+		Title:     "failed control",
+		Status:    "closed",
+		IssueType: "task",
+		Metadata:  map[string]string{"gc.outcome": "fail"},
+	})
+	insertTestDoltliteIssue(t, writer, "issues", "labels", "dependencies", testDoltliteIssue{
+		ID:        "gc-downstream-work",
+		Title:     "downstream work",
+		Status:    "open",
+		IssueType: "task",
+		Dependencies: []testDoltliteDependency{{
+			DependsOnID: "gc-failed-control",
+			Type:        "blocks",
+		}},
+	})
+
+	rows, err := store.Ready()
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	if hasTestBead(rows, "gc-downstream-work") {
+		t.Fatalf("Ready released downstream work after its blocker closed with gc.outcome=fail: %#v", rows)
+	}
+}
+
 func TestDoltliteReadStoreReadyBlocksOpenWispTargets(t *testing.T) {
 	store, closeStore := newTestDoltliteReadStore(t)
 	defer closeStore()

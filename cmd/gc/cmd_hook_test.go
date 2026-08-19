@@ -17,7 +17,44 @@ import (
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/dispatch"
 	"github.com/gastownhall/gascity/internal/events"
+	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/session"
 )
+
+// startHookClaimFixtureSession provisions hook-claim identity through the same
+// Manager start path production uses. That path writes the controller-owned
+// claim-fence projection before the fake provider starts; tests must not invent
+// runtime identity environment without the corresponding lifecycle projection.
+func startHookClaimFixtureSession(t *testing.T, cityDir, template, alias, sessionName, origin string) {
+	t.Helper()
+	manager := session.NewManagerWithOptions(
+		beads.NewMemStore(),
+		runtime.NewFake(),
+		session.WithCityPath(cityDir),
+	)
+	info, err := manager.CreateSession(context.Background(), session.CreateOptions{
+		Template:     template,
+		Title:        template,
+		Alias:        alias,
+		ExplicitName: sessionName,
+		Command:      "test-provider",
+		Provider:     "fake",
+		ExtraMeta: map[string]string{
+			"session_origin": origin,
+		},
+	})
+	if err != nil {
+		t.Fatalf("start hook-claim fixture session: %v", err)
+	}
+	for key, value := range map[string]string{
+		"GC_SESSION_ID":     info.ID,
+		"GC_SESSION_NAME":   info.SessionName,
+		"GC_INSTANCE_TOKEN": info.InstanceToken,
+		"GC_RUNTIME_EPOCH":  info.Generation,
+	} {
+		t.Setenv(key, value)
+	}
+}
 
 // setHookRunExecutableForTest stubs the re-exec target of `gc hook run` to the
 // shell so tests can drive the wrapper with `sh -c` scripts instead of the real
@@ -1361,9 +1398,8 @@ esac
 	t.Setenv("GC_CITY", cityDir)
 	t.Setenv("GC_TEMPLATE", "worker")
 	t.Setenv("GC_ALIAS", "worker-1")
-	t.Setenv("GC_SESSION_ID", "session-id-1")
-	t.Setenv("GC_SESSION_NAME", "worker-1")
 	t.Setenv("GC_SESSION_ORIGIN", "ephemeral")
+	startHookClaimFixtureSession(t, cityDir, "worker", "worker-1", "worker-1", "ephemeral")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -1625,8 +1661,7 @@ printf '[]'
 	// GC_SESSION_NAME are this instance's own suffixed runtime identity.
 	t.Setenv("GC_TEMPLATE", "builder")
 	t.Setenv("GC_ALIAS", "builder-1")
-	t.Setenv("GC_SESSION_NAME", "builder-1")
-	t.Setenv("GC_SESSION_ID", "session-builder-1")
+	startHookClaimFixtureSession(t, cityDir, "builder", "builder-1", "builder-1", "ephemeral")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -1697,8 +1732,7 @@ mode = "on_demand"
 	// Named holder / canonical slot: GC_ALIAS IS the bare template.
 	t.Setenv("GC_TEMPLATE", "builder")
 	t.Setenv("GC_ALIAS", "builder")
-	t.Setenv("GC_SESSION_NAME", "builder-session")
-	t.Setenv("GC_SESSION_ID", "session-builder")
+	startHookClaimFixtureSession(t, cityDir, "builder", "builder", "builder-session", "named")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)

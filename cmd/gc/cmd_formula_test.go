@@ -1331,6 +1331,168 @@ title = "Do work"
 	}
 }
 
+// A clean rig launcher has no pack scripts of its own. Cooking an imported
+// build formula must nevertheless freeze the validator from the lockfile's
+// exact pack checkout into the control bead before dispatch can execute it.
+func TestFormulaCookImportedBuildBasicResolvesPinnedValidatorForCleanRig(t *testing.T) {
+	formulatest.EnableV2ForTest(t)
+	config.ResetRemoteCacheValidationCache()
+
+	root := t.TempDir()
+	cityDir := filepath.Join(root, "city")
+	rigSourceDir := filepath.Join(root, "rig-source")
+	rigLauncherDir := filepath.Join(cityDir, "rig-launcher")
+	packSourceDir := filepath.Join(root, "pack-source")
+	for _, dir := range []string{cityDir, rigSourceDir, packSourceDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	writeFile(t, filepath.Join(rigSourceDir, "README.md"), "clean rig\n")
+	mustGitImport(t, rigSourceDir, "init")
+	mustGitImport(t, rigSourceDir, "add", ".")
+	mustGitImport(t, rigSourceDir, "commit", "-m", "initial rig")
+	mustGitImport(t, rigSourceDir, "worktree", "add", "--detach", rigLauncherDir, "HEAD")
+	if got := gitOutputImport(t, rigLauncherDir, "status", "--porcelain"); got != "" {
+		t.Fatalf("fresh rig launcher is dirty before cook: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(rigLauncherDir, ".gc", "scripts")); !os.IsNotExist(err) {
+		t.Fatalf("fresh rig launcher .gc/scripts stat error = %v, want IsNotExist", err)
+	}
+
+	// The command uses GC_HOME for the shared repository cache. Set the
+	// hermetic command environment before materializing the two cached pack
+	// revisions so the loader and this fixture resolve the same cache root.
+	formulatest.SetupHermeticCookEnv(t, rigLauncherDir, cityDir)
+
+	for _, dir := range []string{
+		filepath.Join(packSourceDir, "formulas"),
+		filepath.Join(packSourceDir, "assets", "scripts", "checks"),
+		filepath.Join(packSourceDir, "agents", "control-dispatcher"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir pack path %s: %v", dir, err)
+		}
+	}
+	writeFile(t, filepath.Join(packSourceDir, "pack.toml"), `[pack]
+name = "gascity"
+schema = 2
+`)
+	writeFile(t, filepath.Join(packSourceDir, "agents", "control-dispatcher", "agent.toml"), `start_command = "gc convoy control --serve --follow {{.Agent}}"
+prompt_mode = "none"
+process_names = ["gc"]
+max_active_sessions = 1
+`)
+	writeFile(t, filepath.Join(packSourceDir, "formulas", "build-basic.toml"), `formula = "build-basic"
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[[steps]]
+id = "generate-requirements"
+title = "Generate requirements"
+
+[steps.check]
+max_attempts = 1
+
+[steps.check.check]
+mode = "exec"
+path = ".gc/scripts/checks/build-artifact-valid.sh"
+timeout = "5m"
+`)
+	validatorRel := filepath.Join("assets", "scripts", "checks", "build-artifact-valid.sh")
+	writeFile(t, filepath.Join(packSourceDir, validatorRel), "#!/bin/sh\n# pinned validator\nexit 0\n")
+	mustGitImport(t, packSourceDir, "init")
+	mustGitImport(t, packSourceDir, "add", ".")
+	mustGitImport(t, packSourceDir, "commit", "-m", "pinned pack")
+	pinnedCommit := gitOutputImport(t, packSourceDir, "rev-parse", "HEAD")
+
+	writeFile(t, filepath.Join(packSourceDir, validatorRel), "#!/bin/sh\n# floating validator\nexit 1\n")
+	mustGitImport(t, packSourceDir, "add", ".")
+	mustGitImport(t, packSourceDir, "commit", "-m", "floating pack")
+	floatingCommit := gitOutputImport(t, packSourceDir, "rev-parse", "HEAD")
+
+	const packSource = "https://example.invalid/gascity-packs.git"
+	gcHome := os.Getenv("GC_HOME")
+	pinnedCacheDir := config.GlobalRepoCachePath(gcHome, packSource, pinnedCommit)
+	floatingCacheDir := config.GlobalRepoCachePath(gcHome, packSource, floatingCommit)
+	if err := os.MkdirAll(filepath.Dir(pinnedCacheDir), 0o755); err != nil {
+		t.Fatalf("mkdir repo cache: %v", err)
+	}
+	mustGitImport(t, "", "clone", "--no-checkout", packSourceDir, pinnedCacheDir)
+	mustGitImport(t, pinnedCacheDir, "checkout", "--detach", pinnedCommit)
+	mustGitImport(t, "", "clone", "--no-checkout", packSourceDir, floatingCacheDir)
+	mustGitImport(t, floatingCacheDir, "checkout", "--detach", floatingCommit)
+
+	cityTOML := withBuiltinProviderAliasesTOMLForTest(`
+[workspace]
+name = "validator-city"
+provider = "claude"
+
+[daemon]
+formula_v2 = true
+`, "claude") + "\n[[rigs]]\nname = \"app\"\n"
+	writeFile(t, filepath.Join(cityDir, "city.toml"), cityTOML)
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatalf("mkdir city runtime dir: %v", err)
+	}
+	writeFile(t, filepath.Join(cityDir, ".gc", "site.toml"), fmt.Sprintf(`workspace_name = "validator-city"
+
+[[rig]]
+name = "app"
+path = %q
+`, rigLauncherDir))
+	writeFile(t, filepath.Join(cityDir, "pack.toml"), fmt.Sprintf(`[pack]
+name = "validator-city"
+schema = 2
+
+[imports.gascity]
+source = %q
+version = "1.0.0"
+`, packSource))
+	writeFile(t, filepath.Join(cityDir, "packs.lock"), fmt.Sprintf(`schema = 1
+
+[packs.%q]
+version = "1.0.0"
+commit = %q
+fetched = "2026-08-17T00:00:00Z"
+`, packSource, pinnedCommit))
+
+	var stdout, stderr bytes.Buffer
+	cmd := newFormulaCookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"build-basic", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("formula cook build-basic: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+
+	store, err := openStoreAtForCity(rigLauncherDir, cityDir)
+	if err != nil {
+		t.Fatalf("open clean rig store: %v", err)
+	}
+	materialized, err := store.List(beads.ListQuery{AllowScan: true})
+	if err != nil {
+		t.Fatalf("list cooked build-basic beads: %v", err)
+	}
+	var gotCheckPath string
+	for _, bead := range materialized {
+		if path := bead.Metadata[beadmeta.CheckPathMetadataKey]; path != "" {
+			gotCheckPath = path
+			break
+		}
+	}
+	if gotCheckPath == "" {
+		t.Fatal("cooked build-basic has no materialized control with gc.check_path")
+	}
+	wantCheckPath := filepath.Join(pinnedCacheDir, validatorRel)
+	if gotCheckPath != wantCheckPath {
+		t.Fatalf("materialized gc.check_path = %q, want pinned pack validator %q (floating cache %q must not win)", gotCheckPath, wantCheckPath, floatingCacheDir)
+	}
+	if _, err := os.Stat(gotCheckPath); err != nil {
+		t.Fatalf("materialized validator path is not executable input: %v", err)
+	}
+}
+
 func TestFormulaCookAttachGraphV2AllowsDifferentLiveBareBeadRoots(t *testing.T) {
 	formulatest.EnableV2ForTest(t)
 	t.Setenv("GC_HOME", t.TempDir())

@@ -91,9 +91,12 @@ func doltliteReadyIssueWhere(tables doltliteTableSet, includeWispTargets bool) (
 	depType := "COALESCE(NULLIF(d.type, ''), 'blocks')"
 	blockerJoins := "LEFT JOIN " + tables.issues + " blocker_issue ON blocker_issue.id = " + issueTarget
 	blockerStatus := "COALESCE(blocker_issue.status, '')"
+	blockerOutcome := `COALESCE(json_extract(NULLIF(blocker_issue.metadata, ''), '$."gc.outcome"'), '')`
+	dependentKind := `COALESCE(json_extract(NULLIF(i.metadata, ''), '$."gc.kind"'), '')`
 	if includeWispTargets {
 		blockerJoins += "\n\t\t\tLEFT JOIN " + doltliteWispTables.issues + " blocker_wisp ON blocker_wisp.id = " + wispTarget
 		blockerStatus = "CASE WHEN " + wispTarget + " IS NOT NULL THEN COALESCE(blocker_wisp.status, '') ELSE COALESCE(blocker_issue.status, '') END"
+		blockerOutcome = `CASE WHEN ` + wispTarget + ` IS NOT NULL THEN COALESCE(json_extract(NULLIF(blocker_wisp.metadata, ''), '$."gc.outcome"'), '') ELSE COALESCE(json_extract(NULLIF(blocker_issue.metadata, ''), '$."gc.outcome"'), '') END`
 	}
 
 	return strings.Join([]string{
@@ -101,7 +104,7 @@ func doltliteReadyIssueWhere(tables doltliteTableSet, includeWispTargets bool) (
 		`NOT EXISTS (
 				SELECT 1 FROM ` + tables.deps + ` d
 				` + blockerJoins + `
-				WHERE d.issue_id = i.id AND ` + depType + ` IN (` + blockingPlaceholders + `) AND ` + blockerStatus + ` != 'closed'
+				WHERE d.issue_id = i.id AND ` + depType + ` IN (` + blockingPlaceholders + `) AND (` + blockerStatus + ` != 'closed' OR (` + blockerOutcome + ` = 'fail' AND ` + dependentKind + ` NOT IN ('cleanup', 'workflow-finalize')))
 			)`,
 	}, " AND "), args
 }
@@ -806,6 +809,10 @@ func (s *DoltliteReadStore) enrichReadyProjectionForCache(items []Bead) ([]Bead,
 	// Native DoltLite snapshots do not carry bd's denormalized is_blocked
 	// projection, so cached ready intentionally keeps the nil fallback.
 	return items, nil
+}
+
+func (s *DoltliteReadStore) failedReadyBlockersForCache(ids []string) (map[string]struct{}, error) {
+	return failedReadyBlockersByID(ids, s.Get)
 }
 
 func (s *DoltliteReadStore) queryDeps(where, value string) ([]Dep, error) {

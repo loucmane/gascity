@@ -218,6 +218,135 @@ func TestReconcileSessionBeads_ProgressStallRecyclesWithOpenAssignedWork(t *test
 	}
 }
 
+func TestReconcileSessionBeads_ProgressStallMarksClaimedWorkNeedsOperatorOnceAndRearms(t *testing.T) {
+	env, session, sessionName := newProgressStallTestEnv(t)
+	work, err := env.store.Create(beads.Bead{
+		Title:    "claimed work stopped at an operator boundary",
+		Type:     "task",
+		Assignee: sessionName,
+	})
+	if err != nil {
+		t.Fatalf("Create(work): %v", err)
+	}
+	status := "in_progress"
+	if err := env.store.Update(work.ID, beads.UpdateOpts{Status: &status}); err != nil {
+		t.Fatalf("Update(work): %v", err)
+	}
+	initialLastProgress := env.clk.Now().Add(-time.Hour)
+
+	env.reconcileAtPath(t.TempDir(), []beads.Bead{session})
+
+	if !env.sp.IsRunning(sessionName) {
+		t.Fatalf("session %q was recycled; claimed work must be preserved for operator attention", sessionName)
+	}
+	first, err := env.store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("store.Get(%s): %v", work.ID, err)
+	}
+	if !containsString(first.Labels, "needs/operator") {
+		t.Fatalf("work labels = %v, want needs/operator", first.Labels)
+	}
+	if got := first.Metadata["gc.failure_reason"]; got != "progress_stall" {
+		t.Fatalf("gc.failure_reason = %q, want progress_stall", got)
+	}
+	if got := first.Metadata["gc.failure_subject"]; got != session.ID {
+		t.Fatalf("gc.failure_subject = %q, want session bead %q", got, session.ID)
+	}
+	if got := first.Metadata["gc.progress_last_observed_at"]; got != initialLastProgress.Format(time.RFC3339Nano) {
+		t.Fatalf("gc.progress_last_observed_at = %q, want %q", got, initialLastProgress.Format(time.RFC3339Nano))
+	}
+	if got := first.Metadata["gc.controller_error"]; !strings.Contains(got, "inspect session") {
+		t.Fatalf("gc.controller_error = %q, want an actionable operator decision", got)
+	}
+	firstSignature := first.Metadata["gc.progress_attention_signature"]
+	if firstSignature == "" {
+		t.Fatal("gc.progress_attention_signature is empty")
+	}
+	firstRevision := first.Revision
+
+	// An unchanged reconcile tick must not emit a duplicate bead update/event.
+	env.reconcileAtPath(t.TempDir(), []beads.Bead{session})
+	duplicate, err := env.store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("store.Get duplicate %s: %v", work.ID, err)
+	}
+	if duplicate.Revision != firstRevision {
+		t.Fatalf("unchanged stall revision = %d, want %d", duplicate.Revision, firstRevision)
+	}
+
+	// Real provider activity changes the future stall signature. Once that new
+	// activity itself ages beyond the threshold, the same claimed work must
+	// emit one new attention update rather than remaining permanently deduped.
+	progressAt := env.clk.Now().Add(-time.Minute)
+	env.sp.SetActivity(sessionName, progressAt)
+	env.reconcileAtPath(t.TempDir(), []beads.Bead{session})
+	env.clk.Time = env.clk.Time.Add(time.Hour)
+	env.reconcileAtPath(t.TempDir(), []beads.Bead{session})
+	rearmed, err := env.store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("store.Get rearmed %s: %v", work.ID, err)
+	}
+	if rearmed.Metadata["gc.progress_attention_signature"] == firstSignature {
+		t.Fatalf("rearmed signature = %q, want a new signature after real progress", firstSignature)
+	}
+	if rearmed.Revision <= firstRevision {
+		t.Fatalf("rearmed revision = %d, want > %d", rearmed.Revision, firstRevision)
+	}
+}
+
+func TestReconcileSessionBeads_ProgressStallHonorsRecentClaimHeartbeatWithoutHidingOtherStaleWork(t *testing.T) {
+	env, session, sessionName := newProgressStallTestEnv(t)
+	work, err := env.store.Create(beads.Bead{
+		Title:    "claimed work with a recent mechanical heartbeat",
+		Type:     "task",
+		Assignee: sessionName,
+	})
+	if err != nil {
+		t.Fatalf("Create(work): %v", err)
+	}
+	status := "in_progress"
+	heartbeatAt := env.clk.Now().Add(-time.Minute).Format(time.RFC3339Nano)
+	if err := env.store.Update(work.ID, beads.UpdateOpts{
+		Status: &status,
+		Metadata: map[string]string{
+			"gc.last_heartbeat_at": heartbeatAt,
+		},
+	}); err != nil {
+		t.Fatalf("Update(work): %v", err)
+	}
+	staleWork, err := env.store.Create(beads.Bead{
+		Title:    "other claimed work without a recent heartbeat",
+		Type:     "task",
+		Assignee: sessionName,
+	})
+	if err != nil {
+		t.Fatalf("Create(stale work): %v", err)
+	}
+	if err := env.store.Update(staleWork.ID, beads.UpdateOpts{Status: &status}); err != nil {
+		t.Fatalf("Update(stale work): %v", err)
+	}
+
+	env.reconcileAtPath(t.TempDir(), []beads.Bead{session})
+
+	if !env.sp.IsRunning(sessionName) {
+		t.Fatalf("session %q was recycled; recent claimed-work heartbeat must preserve it", sessionName)
+	}
+	got, err := env.store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("store.Get(%s): %v", work.ID, err)
+	}
+	if containsString(got.Labels, "needs/operator") {
+		t.Fatalf("work labels = %v, recent heartbeat must not request operator attention", got.Labels)
+	}
+	stale, err := env.store.Get(staleWork.ID)
+	if err != nil {
+		t.Fatalf("store.Get(%s): %v", staleWork.ID, err)
+	}
+	if !containsString(stale.Labels, "needs/operator") {
+		t.Fatalf("stale work labels = %v, want needs/operator despite sibling heartbeat", stale.Labels)
+	}
+}
+
 func TestReconcileSessionBeads_ProgressStallDoesNotRecycleExemptOrSafeSessions(t *testing.T) {
 	tests := []struct {
 		name      string

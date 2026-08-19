@@ -47,6 +47,12 @@ type DesiredStateResult struct {
 	State            map[string]TemplateParams
 	BaseState        map[string]TemplateParams
 	ScaleCheckCounts map[string]int // nil when store is nil or scale_check not run
+	// EffectiveConfig is the single reconciliation configuration used to build
+	// State and demand. It may contain concrete per-rig copies of generic
+	// scope="rig" pools. Wake reconciliation must consume this exact pointer so
+	// creation and later awake/drain decisions cannot disagree about template
+	// identity.
+	EffectiveConfig *config.City
 	// ScaleCheckPartialTemplates records all templates whose bead-backed demand
 	// probe failed. PoolScaleCheckPartialTemplates drives generic pool retention;
 	// NamedScaleCheckPartialTemplates only protects configured named sessions.
@@ -123,6 +129,13 @@ type DesiredStateResult struct {
 
 func (r DesiredStateResult) snapshotQueryPartial() bool {
 	return r.StoreQueryPartial || r.SessionQueryPartial
+}
+
+func (r DesiredStateResult) reconciliationConfig(fallback *config.City) *config.City {
+	if r.EffectiveConfig != nil {
+		return r.EffectiveConfig
+	}
+	return fallback
 }
 
 type poolEvalWork struct {
@@ -369,11 +382,18 @@ func buildDesiredStateWithSessionBeads(
 		return DesiredStateResult{}
 	}
 
-	bp := newAgentBuildParams(cityName, cityPath, cfg, sp, beaconTime, store, stderr)
-	bp.sessionBeads = sessionBeads
-
 	// Pre-compute suspended rig paths (config + runtime state).
 	suspendedRigPaths := buildSuspendedRigPathsForCity(cfg, cityPath)
+	// City-local agent files can declare one generic scope="rig" pool that
+	// applies to every registered rig. Pack expansion already materializes
+	// rig-bound copies, but direct city agents remain generic in the loaded
+	// config. Reconciliation must operate on the same concrete identities that
+	// routing and worker hooks use (for example, blog/builder), otherwise a
+	// ready routed bead is invisible after its one-shot route nudge has passed.
+	cfg = reconciliationCityWithExpandedGenericRigPools(cfg, suspendedRigPaths)
+
+	bp := newAgentBuildParams(cityName, cityPath, cfg, sp, beaconTime, store, stderr)
+	bp.sessionBeads = sessionBeads
 
 	// Collect all open session Infos from all stores to correctly count
 	// running sessions for each pool. A partial/failed collection is logged,
@@ -989,6 +1009,7 @@ func buildDesiredStateWithSessionBeads(
 		State:                              desired,
 		BaseState:                          baseDesired,
 		ScaleCheckCounts:                   scaleCheckCounts,
+		EffectiveConfig:                    cfg,
 		ScaleCheckPartialTemplates:         scaleCheckPartialTemplates,
 		PoolScaleCheckPartialTemplates:     poolScaleCheckPartialTemplates,
 		NamedScaleCheckPartialTemplates:    namedScaleCheckPartialTemplates,
@@ -1002,6 +1023,84 @@ func buildDesiredStateWithSessionBeads(
 		NamedSessionRoutedDemand:           namedRoutedDemand,
 		StoreQueryPartial:                  storePartial,
 		BeaconTime:                         beaconTime,
+	}
+}
+
+// reconciliationCityWithExpandedGenericRigPools returns a shallow city copy
+// whose agent slice replaces each unbound scope="rig" pool with one deep,
+// concrete copy per active registered rig. Explicit rig-bound agents win over
+// the generic template for their identity. The caller's config is never
+// mutated; maps and slices inside synthesized agents are deep-copied by
+// agentutil.DeepCopyAgent.
+func reconciliationCityWithExpandedGenericRigPools(cfg *config.City, suspendedRigPaths map[string]bool) *config.City {
+	if cfg == nil || len(cfg.Rigs) == 0 {
+		return cfg
+	}
+
+	explicit := make(map[string]struct{})
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Dir != "" {
+			explicit[cfg.Agents[i].QualifiedName()] = struct{}{}
+		}
+	}
+
+	expanded := make([]config.Agent, 0, len(cfg.Agents))
+	changed := false
+	for i := range cfg.Agents {
+		agent := &cfg.Agents[i]
+		if strings.TrimSpace(agent.Scope) != "rig" || agent.Dir != "" || !agent.SupportsGenericEphemeralSessions() {
+			expanded = append(expanded, *agent)
+			continue
+		}
+		changed = true
+		for _, rig := range cfg.Rigs {
+			if suspendedRigPaths[filepath.Clean(rig.Path)] {
+				continue
+			}
+			bound := agentutil.DeepCopyAgent(agent, agent.Name, rig.Name)
+			if _, exists := explicit[bound.QualifiedName()]; exists {
+				continue
+			}
+			mergeGenericRigPoolOptionDefaults(cfg, &bound, &rig)
+			expanded = append(expanded, bound)
+		}
+	}
+	if !changed {
+		return cfg
+	}
+	effective := *cfg
+	effective.Agents = expanded
+	return &effective
+}
+
+// mergeGenericRigPoolOptionDefaults applies the narrow rig override surface
+// accepted by config loading to the concrete copy created for that rig. A
+// pack-stamped agent with the same unqualified name owns the override under
+// the longstanding pack semantics, so the generic pool must not consume it a
+// second time.
+func mergeGenericRigPoolOptionDefaults(cfg *config.City, bound *config.Agent, rig *config.Rig) {
+	if cfg == nil || bound == nil || rig == nil {
+		return
+	}
+	for i := range cfg.Agents {
+		candidate := &cfg.Agents[i]
+		if candidate.Dir == rig.Name && candidate.Name == bound.Name {
+			return
+		}
+	}
+	overrides := make([]config.AgentOverride, 0, len(rig.Overrides)+len(rig.RigPatches))
+	overrides = append(overrides, rig.Overrides...)
+	overrides = append(overrides, rig.RigPatches...)
+	for _, override := range overrides {
+		if override.Agent != bound.Name {
+			continue
+		}
+		if bound.OptionDefaults == nil {
+			bound.OptionDefaults = make(map[string]string, len(override.OptionDefaults))
+		}
+		for key, value := range override.OptionDefaults {
+			bound.OptionDefaults[key] = value
+		}
 	}
 }
 
@@ -1126,6 +1225,7 @@ func refreshDesiredStateWithSessionBeads(
 	sessionBeads *sessionBeadSnapshot,
 	stderr io.Writer,
 ) DesiredStateResult {
+	cfg = result.reconciliationConfig(cfg)
 	if cfg == nil || sessionBeads == nil {
 		return result
 	}
@@ -4642,10 +4742,17 @@ func prepareTemplateResolution(bp *agentBuildParams, cfgAgent *config.Agent, qua
 	}
 	rigName := sessionSetupContextForAgent(bp.cityPath, bp.cityName, qualifiedName, cfgAgent, bp.rigs).Rig
 	materializeProviderOverlaysBeforeFingerprint(bp, cfgAgent, resolved, qualifiedName, rigName, workDir, stderr)
-	if ih := config.ResolveInstallHooks(cfgAgent, bp.workspace); len(ih) > 0 {
+	installHooks := config.ResolveInstallHooks(cfgAgent, bp.workspace)
+	if len(installHooks) > 0 {
 		resolver := func(name string) string { return config.BuiltinFamily(name, bp.providers) }
-		if hErr := hooks.InstallWithResolver(bp.fs, bp.cityPath, workDir, ih, resolver); hErr != nil {
+		if hErr := hooks.InstallWithResolver(bp.fs, bp.cityPath, workDir, installHooks, resolver); hErr != nil {
 			fmt.Fprintf(stderr, "agent %q: hooks: %v\n", qualifiedName, hErr) //nolint:errcheck
+		}
+	}
+	providers := hookProviderSet(hookFileProvidersForResolved(resolved, installHooks, bp.providers))
+	if providers["codex"] {
+		if hErr := hooks.FinalizeProjectedCodexHooks(bp.fs, bp.cityPath, workDir); hErr != nil {
+			fmt.Fprintf(stderr, "agent %q: finalize projected Codex hooks: %v\n", qualifiedName, hErr) //nolint:errcheck
 		}
 	}
 }

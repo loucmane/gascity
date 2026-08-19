@@ -337,11 +337,18 @@ func (c *CachingStore) runReconciliation() {
 	if depErr != nil {
 		c.recordProblem("refresh dep cache during reconcile", depErr)
 	}
+	failedBlockers, failedBlockersErr := c.fetchFailedReadyBlockers(freshByID, depMap)
+	if failedBlockersErr != nil {
+		c.recordProblem("refresh failed blockers during reconcile", failedBlockersErr)
+	}
 	useFreshDeps := depsComplete && depErr == nil
 
 	c.mu.Lock()
 	now := time.Now()
 	res := c.mergeSnapshotLocked(freshByID, confirmedClosed, depMap, useFreshDeps, startSeq, now)
+	if failedBlockersErr == nil && c.mutationSeq == startSeq {
+		c.failedBlockers = failedBlockers
+	}
 	durMs := float64(time.Since(start).Microseconds()) / 1000.0
 	c.stats.LastReconcileMs = durMs
 	c.recordReconcileLatencyLocked(bdLatency)

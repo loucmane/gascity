@@ -1,0 +1,131 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "AEGIS_INVOKING_AGENT=codex \"$(git rev-parse --show-toplevel)/.aegis/bin/aegis\" hook posttooluse",
+            "statusMessage": "Recording Aegis tracking",
+            "timeout": 30,
+            "type": "command"
+          },
+          {
+            "command": "AEGIS_INVOKING_AGENT=codex \"$(git rev-parse --show-toplevel)/.aegis/bin/aegis\" hook record",
+            "statusMessage": "Recording Aegis evidence",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "^(Bash|apply_patch|mcp__.*)$"
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gc handoff --auto --hook-format codex \"context cycle\"",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "AEGIS_INVOKING_AGENT=codex \"$(git rev-parse --show-toplevel)/.aegis/bin/aegis\" hook pretooluse",
+            "statusMessage": "Evaluating Aegis policy",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "^(Bash|apply_patch|mcp__.*)$"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "AEGIS_INVOKING_AGENT=codex \"$(git rev-parse --show-toplevel)/.aegis/bin/aegis\" hook sessionstart",
+            "statusMessage": "Loading Aegis brief and session evidence",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "startup|resume|clear|compact"
+      },
+      {
+        "hooks": [
+          {
+            "command": "GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart '/opt/gascity/bin/gc' --city '/srv/gascity/city' prime --hook --hook-format codex",
+            "type": "command"
+          }
+        ],
+        "matcher": "startup"
+      },
+      {
+        "hooks": [
+          {
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart gc prime --hook --hook-format codex",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "AEGIS_INVOKING_AGENT=codex \"$(git rev-parse --show-toplevel)/.aegis/bin/aegis\" hook stop",
+            "statusMessage": "Checking Aegis completion evidence",
+            "timeout": 30,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "command": "AEGIS_INVOKING_AGENT=codex \"$(git rev-parse --show-toplevel)/.aegis/bin/aegis\" hook subagentstart",
+            "statusMessage": "Recording Aegis subagent start",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": ".*"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "AEGIS_INVOKING_AGENT=codex \"$(git rev-parse --show-toplevel)/.aegis/bin/aegis\" hook recordjson",
+            "statusMessage": "Recording Aegis subagent completion",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": ".*"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gc hook run --timeout 15s --timeout-exit-code 0 -- nudge drain --inject --hook-format codex",
+            "type": "command"
+          },
+          {
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gc hook run --timeout 15s --timeout-exit-code 0 -- mail check --inject --hook-format codex",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
+  }
+}

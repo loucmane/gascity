@@ -8,8 +8,42 @@ import (
 
 const repoCacheLockName = ".packman-cache.lock"
 
+func repoCacheLockOpenFlags(createLock bool) int {
+	if createLock {
+		return os.O_RDWR | os.O_CREATE
+	}
+	return os.O_RDONLY
+}
+
+func openRepoCacheLockFile(path string, exclusive bool) (*os.File, error) {
+	if exclusive {
+		return os.OpenFile(path, repoCacheLockOpenFlags(true), 0o644)
+	}
+
+	lockFile, err := os.OpenFile(path, repoCacheLockOpenFlags(false), 0o644)
+	if err == nil || !os.IsNotExist(err) {
+		return lockFile, err
+	}
+
+	// Preserve the established lazy-initialization behavior for writable
+	// caches, but never require write access once the lock exists. O_EXCL
+	// makes a concurrent initializer harmless; either way readers reopen the
+	// resulting lock read-only before acquiring the shared OS lock.
+	initializer, createErr := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
+	if createErr != nil {
+		if !os.IsExist(createErr) {
+			return nil, createErr
+		}
+	} else if closeErr := initializer.Close(); closeErr != nil {
+		return nil, closeErr
+	}
+	return os.OpenFile(path, repoCacheLockOpenFlags(false), 0o644)
+}
+
 // WithRepoCacheReadLock runs fn while holding the shared repo-cache lock if
-// the cache root exists. It does not create cache files or directories.
+// the cache root exists. It never creates the cache root or cache content. A
+// writable cache may lazily initialize its coordination lock; existing locks
+// are always opened read-only.
 func WithRepoCacheReadLock(root string, fn func() error) error {
 	return withRepoCacheLock(root, repoCacheLockShared, false, fn)
 }

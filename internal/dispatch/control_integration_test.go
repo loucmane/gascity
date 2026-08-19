@@ -228,6 +228,48 @@ func TestRetryLifecycleRequiredOutputMissingDoesNotPass(t *testing.T) {
 	}
 }
 
+func TestFailedControlDoesNotReleaseDownstreamDispatch(t *testing.T) {
+	t.Parallel()
+	store := beads.NewMemStore()
+
+	spec := &formula.Step{
+		ID:    "validate",
+		Title: "Validate",
+		Type:  "task",
+		Retry: &formula.RetrySpec{MaxAttempts: 1},
+	}
+	root, control := makeRetryControl(t, store, "mol-test.validate", spec, 1)
+	attempt := makeAttemptBead(t, store, root.ID, "mol-test.validate.attempt.1", 1, map[string]string{
+		"gc.outcome":       "fail",
+		"gc.failure_class": "hard",
+	})
+	mustDep(t, store, control.ID, attempt.ID, "blocks")
+	downstream := mustCreate(t, store, beads.Bead{Title: "downstream implementation", Type: "task"})
+	mustDep(t, store, downstream.ID, control.ID, "blocks")
+
+	result, err := processRetryControl(store, mustGet(t, store, control.ID), ProcessOptions{})
+	if err != nil {
+		t.Fatalf("processRetryControl: %v", err)
+	}
+	if result.Action != "hard-fail" {
+		t.Fatalf("control action = %q, want hard-fail", result.Action)
+	}
+	failed := mustGet(t, store, control.ID)
+	if failed.Status != "closed" || failed.Metadata[beadmeta.OutcomeMetadataKey] != beadmeta.OutcomeFail {
+		t.Fatalf("control = status %q outcome %q, want closed/fail", failed.Status, failed.Metadata[beadmeta.OutcomeMetadataKey])
+	}
+
+	ready, err := store.Ready()
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	for _, bead := range ready {
+		if bead.ID == downstream.ID {
+			t.Fatalf("failed control %s released downstream dispatch bead %s", control.ID, downstream.ID)
+		}
+	}
+}
+
 // TestRetryLifecycleExhaustion exercises: attempt 1 fails → retry →
 // attempt 2 fails → retry → attempt 3 fails → exhausted (hard_fail).
 func TestRetryLifecycleExhaustion(t *testing.T) {

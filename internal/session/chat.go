@@ -219,9 +219,19 @@ func (m *Manager) retryFreshStartAfterStaleKey(
 		}
 		return false, fmt.Errorf("pre-start orphan cleanup: %w", orphanErr)
 	}
-	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
+	if err := m.waitForStartIdentityReadable(ctx, id, b.Metadata["instance_token"]); err != nil {
 		if unroute != nil {
 			unroute()
+		}
+		return false, err
+	}
+	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
+		projectionErr := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"]))
+		if unroute != nil {
+			unroute()
+		}
+		if projectionErr != nil {
+			return false, errors.Join(fmt.Errorf("fresh start after stale key: %w", err), fmt.Errorf("tombstoning claim-fence projection after failed start: %w", projectionErr))
 		}
 		return false, fmt.Errorf("fresh start after stale key: %w", err)
 	}
@@ -363,6 +373,9 @@ func (m *Manager) ensureRunning(ctx context.Context, id string, b beads.Bead, se
 	}
 	instanceToken := b.Metadata["instance_token"]
 	if instanceToken == "" {
+		if err := m.tombstoneSessionFenceProjection(id, instanceToken, generation); err != nil {
+			return fmt.Errorf("tombstoning claim-fence projection before token replacement: %w", err)
+		}
 		instanceToken = NewInstanceToken()
 		if err := m.store.SetMetadata(id, "instance_token", instanceToken); err != nil {
 			return fmt.Errorf("storing instance token: %w", err)
@@ -398,6 +411,12 @@ func (m *Manager) ensureRunning(ctx context.Context, id string, b beads.Bead, se
 		}
 		return fmt.Errorf("pre-start orphan cleanup: %w", orphanErr)
 	}
+	if err := m.waitForStartIdentityReadable(ctx, id, b.Metadata["instance_token"]); err != nil {
+		if unroute != nil {
+			unroute()
+		}
+		return err
+	}
 	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
 		if errors.Is(err, runtime.ErrSessionDiedDuringStartup) && b.Metadata["session_key"] != "" {
 			retried, err := m.retryFreshStartAfterStaleKey(ctx, id, &b, sessName, resumeCommand, cfg, unroute)
@@ -409,8 +428,12 @@ func (m *Manager) ensureRunning(ctx context.Context, id string, b beads.Bead, se
 			// Another caller may have resumed the same session after we loaded the
 			// bead but before we reached Start. If the runtime is already up, treat
 			// the resume as converged and only persist active state below.
+			projectionErr := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"]))
 			if unroute != nil {
 				unroute()
+			}
+			if projectionErr != nil {
+				return errors.Join(fmt.Errorf("resuming session: %w", err), fmt.Errorf("tombstoning claim-fence projection after failed start: %w", projectionErr))
 			}
 			return fmt.Errorf("resuming session: %w", err)
 		}
@@ -450,6 +473,9 @@ func (m *Manager) ensureRunning(ctx context.Context, id string, b beads.Bead, se
 	}
 	if err := m.confirmLiveSessionState(id, &b); err != nil {
 		if started && !errors.Is(err, ErrStateSync) {
+			if projectionErr := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"])); projectionErr != nil {
+				err = errors.Join(err, fmt.Errorf("tombstoning claim-fence projection before failed-start cleanup: %w", projectionErr))
+			}
 			_ = m.sp.Stop(sessName)
 		}
 		return err
@@ -482,6 +508,9 @@ func (m *Manager) ensureRunningRuntimeOnly(ctx context.Context, id string, b bea
 	}
 	instanceToken := b.Metadata["instance_token"]
 	if instanceToken == "" {
+		if err := m.tombstoneSessionFenceProjection(id, instanceToken, generation); err != nil {
+			return fmt.Errorf("tombstoning claim-fence projection before token replacement: %w", err)
+		}
 		instanceToken = NewInstanceToken()
 		if err := m.store.SetMetadata(id, "instance_token", instanceToken); err != nil {
 			return fmt.Errorf("storing instance token: %w", err)
@@ -518,6 +547,12 @@ func (m *Manager) ensureRunningRuntimeOnly(ctx context.Context, id string, b bea
 		}
 		return fmt.Errorf("pre-start orphan cleanup: %w", orphanErr)
 	}
+	if err := m.waitForStartIdentityReadable(ctx, id, b.Metadata["instance_token"]); err != nil {
+		if unroute != nil {
+			unroute()
+		}
+		return err
+	}
 	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
 		switch {
 		case errors.Is(err, runtime.ErrSessionDiedDuringStartup) && b.Metadata["session_key"] != "":
@@ -529,8 +564,12 @@ func (m *Manager) ensureRunningRuntimeOnly(ctx context.Context, id string, b bea
 		case errors.Is(err, runtime.ErrSessionExists) && m.sp.IsRunning(sessName):
 			return err
 		default:
+			projectionErr := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"]))
 			if unroute != nil {
 				unroute()
+			}
+			if projectionErr != nil {
+				return errors.Join(fmt.Errorf("resuming session: %w", err), fmt.Errorf("tombstoning claim-fence projection after failed start: %w", projectionErr))
 			}
 			return fmt.Errorf("resuming session: %w", err)
 		}

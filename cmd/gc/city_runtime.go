@@ -2185,6 +2185,7 @@ func (cr *CityRuntime) stopConfigWatcher() {
 // gastownhall/gascity#3288). The first steady-state tick performs the sweep.
 func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStateResult, sessionBeads *sessionBeadSnapshot, trace *sessionReconcilerTraceCycle, bootReconcile bool) {
 	desiredState := result.State
+	reconcileCfg := result.reconciliationConfig(cr.cfg)
 	store := cr.cityBeadStore()
 	if store == nil {
 		return
@@ -2214,7 +2215,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	assignedWorkBeads := result.AssignedWorkBeads
 	assignedWorkStoreRefs := result.AssignedWorkStoreRefs
 	phaseStart := time.Now()
-	released := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(store, cr.cfg, cr.cityPath, sessionBeads.OpenInfos(), result, rigStores)
+	released := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(store, reconcileCfg, cr.cityPath, sessionBeads.OpenInfos(), result, rigStores)
 	recordPhase(TraceSiteControllerTickPhase, "bead_reconcile.release_orphaned_pool_assignments", phaseStart, map[string]any{
 		"released_count": len(released),
 	})
@@ -2249,11 +2250,11 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	poolDesired := result.PoolDesiredCounts
 	if poolDesired == nil {
 		phaseStart = time.Now()
-		poolWorkBeads := filterAssignedWorkBeadsForPoolDemand(cr.cfg, cr.cityPath, sessionBeads.OpenInfos(), assignedWorkBeads, assignedWorkStoreRefs)
+		poolWorkBeads := filterAssignedWorkBeadsForPoolDemand(reconcileCfg, cr.cityPath, sessionBeads.OpenInfos(), assignedWorkBeads, assignedWorkStoreRefs)
 		poolDesired = retainScaleCheckPartialPoolDesired(
-			cr.cfg,
+			reconcileCfg,
 			PoolDesiredCounts(ComputePoolDesiredStatesTraced(
-				cr.cfg, poolWorkBeads, sessionBeads.OpenInfos(), result.ScaleCheckCounts, trace)),
+				reconcileCfg, poolWorkBeads, sessionBeads.OpenInfos(), result.ScaleCheckCounts, trace)),
 			sessionBeads,
 			result.PoolScaleCheckPartialTemplates,
 		)
@@ -2267,7 +2268,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	if poolDesired == nil {
 		poolDesired = make(map[string]int)
 	}
-	mergeNamedSessionDemand(poolDesired, result.NamedSessionDemand, cr.cfg)
+	mergeNamedSessionDemand(poolDesired, result.NamedSessionDemand, reconcileCfg)
 	for tmpl, count := range poolDesired {
 		if count > 0 {
 			fmt.Fprintf(cr.stderr, "poolDesired: %s = %d\n", tmpl, count) //nolint:errcheck
@@ -2297,7 +2298,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 			rigStores,
 			sessionBeads,
 			desiredState,
-			cr.cfg,
+			reconcileCfg,
 			cr.sp,
 			result.snapshotQueryPartial(),
 		) > 0 {
@@ -2313,7 +2314,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	cityName := cr.cityName
 
 	phaseStart = time.Now()
-	cfgNames := configuredSessionNamesWithSnapshot(cr.cfg, cityName, sessionBeads)
+	cfgNames := configuredSessionNamesWithSnapshot(reconcileCfg, cityName, sessionBeads)
 
 	readyWaitSet, err := prepareWaitWakeStateWithSnapshot(sessionpkg.NewStore(sessStore), newWaitDependencyStoreSet(store, rigStores), cr.nudgesBeadStore(), time.Now(), sessionBeads)
 	if err != nil {
@@ -2329,11 +2330,11 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	// work_query remains the agent-side gc hook claim path; running every
 	// work_query here can block assigned-work resumes behind unrelated probes.
 	workSet := make(map[string]bool)
-	traceWorkRequested := traceWorkRequestedByTemplate(result.ScaleCheckCounts, result.NamedSessionDemand, workSet, cr.cfg)
+	traceWorkRequested := traceWorkRequestedByTemplate(result.ScaleCheckCounts, result.NamedSessionDemand, workSet, reconcileCfg)
 	cr.recordReconcileTraceInputs(trace, openInfos, desiredState, poolDesired, workSet, traceWorkRequested, readyWaitSet, result, recordPhase)
 
 	phaseStart = time.Now()
-	awakeAssignedWorkBeads, awakeAssignedStoreRefs := filterAssignedWorkBeadsForSessionWake(cr.cfg, cr.cityPath, openInfos, assignedWorkBeads, assignedWorkStoreRefs)
+	awakeAssignedWorkBeads, awakeAssignedStoreRefs := filterAssignedWorkBeadsForSessionWake(reconcileCfg, cr.cityPath, openInfos, assignedWorkBeads, assignedWorkStoreRefs)
 	recordPhase(TraceSiteControllerTickPhase, "bead_reconcile.filter_assigned_work_for_wake", phaseStart, map[string]any{
 		"assigned_work_bead_count":       len(assignedWorkBeads),
 		"awake_assigned_work_bead_count": len(awakeAssignedWorkBeads),
@@ -2356,7 +2357,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 		reconcileStartOptions = append(reconcileStartOptions, withDeferSessionClosesOnBoot())
 	}
 	reconcileSessionBeadsTracedWithNamedDemand(
-		ctx, cr.cityPath, sessionBeads.OpenForReconcile(), sessionBeads, desiredState, cfgNames, cr.cfg, cr.sp, sessStore,
+		ctx, cr.cityPath, sessionBeads.OpenForReconcile(), sessionBeads, desiredState, cfgNames, reconcileCfg, cr.sp, sessStore,
 		cr.dops,
 		awakeAssignedWorkBeads, rigStores, readyWaitSet, cr.sessionDrains, cr.providerHealthGate,
 		poolDesired,
@@ -2364,8 +2365,8 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 		result.NamedSessionRoutedDemand,
 		result.snapshotQueryPartial(),
 		workSet, cityName,
-		cr.it, clock.Real{}, cr.rec, cr.cfg.Session.StartupTimeoutDuration(),
-		cr.cfg.Daemon.DriftDrainTimeoutDuration(),
+		cr.it, clock.Real{}, cr.rec, reconcileCfg.Session.StartupTimeoutDuration(),
+		reconcileCfg.Daemon.DriftDrainTimeoutDuration(),
 		cr.stdout, cr.stderr, trace,
 		reconcileStartOptions...,
 	)
@@ -2391,7 +2392,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	}
 	phaseStart = time.Now()
 	if err == nil {
-		if nudgeErr := dispatchReadyWaitNudgesWithSnapshot(cr.cityPath, cr.cfg, sessionpkg.NewStore(sessStore), cr.nudgesBeadStore(), time.Now(), dispatchSessionBeads); nudgeErr != nil {
+		if nudgeErr := dispatchReadyWaitNudgesWithSnapshot(cr.cityPath, reconcileCfg, sessionpkg.NewStore(sessStore), cr.nudgesBeadStore(), time.Now(), dispatchSessionBeads); nudgeErr != nil {
 			fmt.Fprintf(cr.stderr, "%s: dispatching wait nudges: %v\n", cr.logPrefix, nudgeErr) //nolint:errcheck
 		}
 	}
@@ -2433,7 +2434,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 		claimWorkStoreRefs := make([]string, len(claimWork))
 		copy(claimWorkStoreRefs, assignedWorkStoreRefs)
 		copy(claimWorkStoreRefs[len(assignedWorkBeads):], result.ReadyUnassignedRoutedWorkStoreRefs)
-		nudgeStalledPoolClaims(cr.sp, cr.cfg, sessStore, stalledPoolBeads, claimWork, claimWorkStoreRefs, time.Now(), cr.stdout)
+		nudgeStalledPoolClaims(cr.sp, reconcileCfg, sessStore, stalledPoolBeads, claimWork, claimWorkStoreRefs, time.Now(), cr.stdout)
 	}
 	recordPhase(TraceSiteControllerTickPhase, "bead_reconcile.nudge_stalled_pool_claims", phaseStart, nil)
 }
@@ -2456,6 +2457,7 @@ func (cr *CityRuntime) recordReconcileTraceInputs(
 	if trace == nil {
 		return
 	}
+	reconcileCfg := result.reconciliationConfig(cr.cfg)
 	phaseStart := time.Now()
 	templateNames := make(map[string]struct{})
 	openCounts := make(map[string]int)
@@ -2464,7 +2466,7 @@ func (cr *CityRuntime) recordReconcileTraceInputs(
 	// captured before the reconciler runs, so these reads are the pre-tick values
 	// (byte-equivalent to the raw open-bead read they replace).
 	for _, info := range openInfos {
-		template := normalizedSessionTemplateInfo(info, cr.cfg)
+		template := normalizedSessionTemplateInfo(info, reconcileCfg)
 		if template == "" {
 			continue
 		}
@@ -2520,13 +2522,13 @@ func (cr *CityRuntime) recordReconcileTraceInputs(
 		"session_query_partial":               result.SessionQueryPartial,
 		"snapshot_query_partial":              result.snapshotQueryPartial(),
 	})
-	for _, agent := range cr.cfg.Agents {
+	for _, agent := range reconcileCfg.Agents {
 		template := agent.QualifiedName()
 		if !trace.detailEnabled(template) {
 			continue
 		}
 		trace.RecordTemplateConfigSnapshot(template, map[string]any{
-			"provider":            firstNonEmpty(agent.Provider, cr.cfg.Session.Provider),
+			"provider":            firstNonEmpty(agent.Provider, reconcileCfg.Session.Provider),
 			"session":             agent.Session,
 			"work_dir":            agent.WorkDir,
 			"dir":                 agent.Dir,
@@ -3259,22 +3261,23 @@ func (cr *CityRuntime) loadDemandSnapshot(
 	sessionFingerprint := sessionBeadSnapshotFingerprint(sessionBeads)
 	if cr.shouldRefreshDemandSnapshot(trigger, configChanged, sessionFingerprint) {
 		result := cr.buildDesiredState(sessionBeads, trace)
+		reconcileCfg := result.reconciliationConfig(cr.cfg)
 		var openSessionInfos []sessionpkg.Info
 		if sessionBeads != nil {
 			openSessionInfos = sessionBeads.OpenInfos()
 		}
-		poolWorkBeads := filterAssignedWorkBeadsForPoolDemand(cr.cfg, cr.cityPath, openSessionInfos, result.AssignedWorkBeads, result.AssignedWorkStoreRefs)
+		poolWorkBeads := filterAssignedWorkBeadsForPoolDemand(reconcileCfg, cr.cityPath, openSessionInfos, result.AssignedWorkBeads, result.AssignedWorkStoreRefs)
 		result.PoolDesiredCounts = retainScaleCheckPartialPoolDesired(
-			cr.cfg,
+			reconcileCfg,
 			PoolDesiredCounts(ComputePoolDesiredStatesTraced(
-				cr.cfg, poolWorkBeads, openSessionInfos, result.ScaleCheckCounts, trace)),
+				reconcileCfg, poolWorkBeads, openSessionInfos, result.ScaleCheckCounts, trace)),
 			sessionBeads,
 			result.PoolScaleCheckPartialTemplates,
 		)
 		if result.PoolDesiredCounts == nil {
 			result.PoolDesiredCounts = make(map[string]int)
 		}
-		mergeNamedSessionDemand(result.PoolDesiredCounts, result.NamedSessionDemand, cr.cfg)
+		mergeNamedSessionDemand(result.PoolDesiredCounts, result.NamedSessionDemand, reconcileCfg)
 		result.WorkSet = make(map[string]bool)
 		cr.demandSnapshot = &runtimeDemandSnapshot{
 			createdAt:          time.Now(),

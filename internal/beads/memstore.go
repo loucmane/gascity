@@ -397,12 +397,12 @@ func (m *MemStore) readyLocked(ctx context.Context, q ReadyQuery) ([]Bead, error
 		return ctx.Err()
 	}
 
-	statusByID := make(map[string]string, len(m.beads))
+	beadByID := make(map[string]Bead, len(m.beads))
 	for _, bead := range m.beads {
 		if err := contextErr(); err != nil {
 			return nil, err
 		}
-		statusByID[bead.ID] = bead.Status
+		beadByID[bead.ID] = bead
 	}
 
 	var result []Bead
@@ -430,7 +430,7 @@ func (m *MemStore) readyLocked(ctx context.Context, q ReadyQuery) ([]Bead, error
 			default:
 				continue
 			}
-			if statusByID[dep.DependsOnID] != "closed" {
+			if blocker, ok := beadByID[dep.DependsOnID]; !ok || !IsReadyBlockingDependencySatisfiedFor(b, blocker) {
 				blocked = true
 				break
 			}
@@ -443,6 +443,10 @@ func (m *MemStore) readyLocked(ctx context.Context, q ReadyQuery) ([]Bead, error
 		}
 	}
 	return result, nil
+}
+
+func (m *MemStore) failedReadyBlockersForCache(ids []string) (map[string]struct{}, error) {
+	return failedReadyBlockersByID(ids, m.Get)
 }
 
 // Get retrieves a bead by ID. Returns a wrapped ErrNotFound if the ID does

@@ -283,6 +283,10 @@ func runControlDispatcherWithStoreAndConfig(cityPath, storePath string, store be
 }
 
 func quarantineControlFailureBead(store beads.Store, beadID string, cause error) error {
+	control, err := store.Get(beadID)
+	if err != nil {
+		return fmt.Errorf("reading failed control %s before quarantine: %w", beadID, err)
+	}
 	failureReason := "control_dispatch_error"
 	if errors.Is(cause, dispatch.ErrControlGraphMalformed) {
 		failureReason = "malformed_control_graph"
@@ -308,6 +312,29 @@ func quarantineControlFailureBead(store beads.Store, beadID string, cause error)
 		return err
 	}
 	_, _ = dispatch.ReconcileClosedScopeMember(store, beadID)
+
+	rootID := strings.TrimSpace(control.Metadata[beadmeta.RootBeadIDMetadataKey])
+	if rootID == "" || rootID == beadID {
+		return nil
+	}
+	root, err := store.Get(rootID)
+	if err != nil {
+		return fmt.Errorf("reading workflow root %s for failed control %s: %w", rootID, beadID, err)
+	}
+	if root.Status == "closed" {
+		return nil
+	}
+	if err := store.Update(rootID, beads.UpdateOpts{
+		Labels: []string{"needs/operator"},
+		Metadata: map[string]string{
+			beadmeta.FailureClassMetadataKey:    beadmeta.FailureClassHard,
+			beadmeta.FailureReasonMetadataKey:   failureReason,
+			beadmeta.FailureSubjectMetadataKey:  beadID,
+			beadmeta.ControllerErrorMetadataKey: reason,
+		},
+	}); err != nil {
+		return fmt.Errorf("marking workflow root %s as needs/operator after control %s failed: %w", rootID, beadID, err)
+	}
 	return nil
 }
 

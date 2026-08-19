@@ -81,6 +81,48 @@ func TestIsReadyExcludedType(t *testing.T) {
 	}
 }
 
+func TestIsReadyBlockingDependencySatisfied(t *testing.T) {
+	tests := []struct {
+		name    string
+		blocker Bead
+		want    bool
+	}{
+		{name: "open", blocker: Bead{Status: "open"}, want: false},
+		{name: "closed without control outcome", blocker: Bead{Status: "closed"}, want: true},
+		{name: "closed passing", blocker: Bead{Status: "closed", Metadata: StringMap{"gc.outcome": "pass"}}, want: true},
+		{name: "closed failed", blocker: Bead{Status: "closed", Metadata: StringMap{"gc.outcome": "fail"}}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsReadyBlockingDependencySatisfied(tt.blocker); got != tt.want {
+				t.Fatalf("IsReadyBlockingDependencySatisfied(%+v) = %v, want %v", tt.blocker, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsReadyBlockingDependencySatisfiedForTerminalizers(t *testing.T) {
+	failed := Bead{Status: "closed", Metadata: StringMap{"gc.outcome": "fail"}}
+	tests := []struct {
+		name      string
+		dependent Bead
+		blocker   Bead
+		want      bool
+	}{
+		{name: "ordinary downstream remains blocked", dependent: Bead{Type: "task"}, blocker: failed, want: false},
+		{name: "cleanup runs after failure", dependent: Bead{Metadata: StringMap{"gc.kind": "cleanup"}}, blocker: failed, want: true},
+		{name: "workflow finalizer runs after failure", dependent: Bead{Metadata: StringMap{"gc.kind": "workflow-finalize"}}, blocker: failed, want: true},
+		{name: "terminalizer still waits for open blocker", dependent: Bead{Metadata: StringMap{"gc.kind": "cleanup"}}, blocker: Bead{Status: "open"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsReadyBlockingDependencySatisfiedFor(tt.dependent, tt.blocker); got != tt.want {
+				t.Fatalf("IsReadyBlockingDependencySatisfiedFor(%+v, %+v) = %v, want %v", tt.dependent, tt.blocker, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsReadyCandidate(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	past := now.Add(-time.Minute)

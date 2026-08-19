@@ -38,22 +38,26 @@ func TestCodexHooksDriftCheckReportsManagedMissingPreCompact(t *testing.T) {
 
 func TestCodexHooksDriftCheckPassesCurrentHooks(t *testing.T) {
 	dir := t.TempDir()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
 	writeCodexHooksForDoctorTest(t, dir, fmt.Sprintf(`{
   "hooks": {
     "SessionStart": [{
       "hooks": [{
         "type": "command",
-        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart gc --city %s prime --hook --hook-format codex"
+        "command": "GC_MANAGED_SESSION_HOOK=1 GC_HOOK_EVENT_NAME=SessionStart %s --city %s prime --hook --hook-format codex"
       }]
     }],
     "PreCompact": [{
       "hooks": [{
         "type": "command",
-        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gc --city %s handoff --auto --hook-format codex \"context cycle\""
+        "command": "%s --city %s handoff --auto --hook-format codex \"context cycle\""
       }]
     }]
   }
-}`, shellquote.Quote(dir), shellquote.Quote(dir)))
+}`, shellquote.Quote(executable), shellquote.Quote(dir), shellquote.Quote(executable), shellquote.Quote(dir)))
 
 	check := newCodexHooksDriftCheck(dir, []string{dir})
 	result := check.Run(&doctor.CheckContext{})
@@ -152,7 +156,11 @@ func TestCodexHooksDriftCheckFixBindsAgentWorkDirToCityRoot(t *testing.T) {
 		t.Fatalf("read hooks: %v", err)
 	}
 	got := string(data)
-	if !strings.Contains(got, `gc --city `) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	if !strings.Contains(got, shellquote.Quote(executable)+` --city `) {
 		t.Fatalf("fixed hooks missing explicit --city binding:\n%s", got)
 	}
 	if !strings.Contains(got, shellquote.Quote(cityDir)) {
