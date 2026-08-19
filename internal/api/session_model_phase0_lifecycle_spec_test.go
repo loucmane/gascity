@@ -376,6 +376,54 @@ func TestPhase0HandleSessionWake_ContinuityEligibleArchivedBeadRequestsStart(t *
 	}
 }
 
+func TestSupervisorShutdownCancelsAndJoinsSessionWakeStart(t *testing.T) {
+	fs := newSessionFakeState(t)
+	srv := New(fs)
+	id := phase0MaterializeCityScopedNamedWorker(t, srv, fs)
+	if err := fs.cityBeadStore.SetMetadataBatch(id, map[string]string{
+		"state":               "archived",
+		"continuity_eligible": "true",
+	}); err != nil {
+		t.Fatalf("SetMetadataBatch(archived): %v", err)
+	}
+
+	provider := &cancelObservedStartProvider{
+		Fake:     runtime.NewFake(),
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	t.Cleanup(func() { close(provider.release) })
+	wrappedState := &stateWithSessionProvider{fakeState: fs, provider: provider}
+	srv = New(wrappedState)
+	sm := NewSupervisorMux(&stateCityResolver{state: wrappedState}, nil, false, "test", "", time.Now()).WithAnyHostAllowed()
+	sm.cacheMu.Lock()
+	sm.cache[wrappedState.CityName()] = cachedCityServer{state: wrappedState, srv: srv}
+	sm.cacheMu.Unlock()
+
+	rec := httptest.NewRecorder()
+	sm.Handler().ServeHTTP(rec, newPostRequest(cityURL(fs, "/session/"+id+"/wake"), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("wake status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	select {
+	case <-provider.started:
+	case <-time.After(testEventTimeout):
+		t.Fatal("timed out waiting for session wake start")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), testEventTimeout)
+	defer cancel()
+	if err := sm.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	select {
+	case <-provider.canceled:
+	default:
+		t.Fatal("Shutdown returned before canceling and joining the in-flight session wake start")
+	}
+}
+
 func TestPhase0HandleSessionWake_NamedIdentityReassignsHistoricalStateToFreshCanonicalBead(t *testing.T) {
 	fs := newSessionFakeState(t)
 	srv := New(fs)

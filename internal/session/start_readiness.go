@@ -36,6 +36,9 @@ func (m *Manager) waitForStartIdentityReadable(ctx context.Context, id, instance
 	ticker := time.NewTicker(sessionIdentityProjectionPollInterval)
 	defer ticker.Stop()
 	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("waiting for session %q identity projection: %w", id, err)
+		}
 		b, err := live.Get(id)
 		if err == nil {
 			switch {
@@ -52,6 +55,9 @@ func (m *Manager) waitForStartIdentityReadable(ctx context.Context, id, instance
 			projection := SessionFenceProjection{State: string(projectionState)}
 			if !projection.ClaimEligible() {
 				projectionState = StateCreating
+			}
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("waiting for session %q identity projection: %w", id, err)
 			}
 			if err := m.publishSessionFenceProjection(id, instanceToken, sessionFenceGeneration(b.Metadata["generation"]), projectionState); err != nil {
 				return fmt.Errorf("publishing session %q claim-fence projection: %w", id, err)

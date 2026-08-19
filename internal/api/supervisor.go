@@ -135,6 +135,7 @@ type SupervisorMux struct {
 	// the State pointer changes (city restarted → new controllerState).
 	cacheMu sync.RWMutex
 	cache   map[string]cachedCityServer
+	servers map[*Server]struct{}
 
 	// idem caches responses for Idempotency-Key replay on supervisor-scope
 	// create endpoints (POST /v0/city). Per-city creates use the per-city
@@ -162,6 +163,7 @@ func NewSupervisorMux(resolver CityResolver, initializer cityInitializer, readOn
 		humaMux:     humaMux,
 		humaAPI:     newSupervisorHumaAPI(humaMux, readOnly),
 		cache:       make(map[string]cachedCityServer),
+		servers:     make(map[*Server]struct{}),
 		idem:        newIdempotencyCache(30 * time.Minute),
 	}
 	sm.registerSupervisorRoutes()
@@ -414,7 +416,25 @@ func (sm *SupervisorMux) Serve(lis net.Listener) error {
 
 // Shutdown gracefully shuts down the server.
 func (sm *SupervisorMux) Shutdown(ctx context.Context) error {
-	return sm.server.Shutdown(ctx)
+	httpErr := sm.server.Shutdown(ctx)
+
+	sm.cacheMu.RLock()
+	servers := make(map[*Server]struct{}, len(sm.servers)+len(sm.cache))
+	for srv := range sm.servers {
+		servers[srv] = struct{}{}
+	}
+	for _, cached := range sm.cache {
+		servers[cached.srv] = struct{}{}
+	}
+	sm.cacheMu.RUnlock()
+
+	var backgroundErrs []error
+	for srv := range servers {
+		if err := srv.shutdownBackground(ctx); err != nil {
+			backgroundErrs = append(backgroundErrs, err)
+		}
+	}
+	return errors.Join(httpErr, errors.Join(backgroundErrs...))
 }
 
 // ServeHTTP delegates every request to humaMux. Every typed
@@ -488,6 +508,7 @@ func (sm *SupervisorMux) getCityServer(name string, state State) *Server {
 		return cached.srv
 	}
 	sm.cache[name] = cachedCityServer{state: state, srv: srv}
+	sm.servers[srv] = struct{}{}
 	return srv
 }
 

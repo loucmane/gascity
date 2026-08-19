@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -79,5 +80,12 @@ func newTestCityHandlerWith(t *testing.T, state State, srv *Server) http.Handler
 	sm.cacheMu.Lock()
 	sm.cache[state.CityName()] = cachedCityServer{state: state, srv: srv}
 	sm.cacheMu.Unlock()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), testEventTimeout)
+		defer cancel()
+		if err := sm.Shutdown(ctx); err != nil {
+			t.Errorf("shutting down test city handler: %v", err)
+		}
+	})
 	return wrapTestSupervisorMiddleware(sm)
 }

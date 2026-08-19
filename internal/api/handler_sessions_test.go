@@ -453,6 +453,25 @@ func (p *blockingStartProvider) Start(ctx context.Context, name string, cfg runt
 	return p.Fake.Start(ctx, name, cfg)
 }
 
+type cancelObservedStartProvider struct {
+	*runtime.Fake
+	started  chan struct{}
+	canceled chan struct{}
+	release  chan struct{}
+	once     sync.Once
+}
+
+func (p *cancelObservedStartProvider) Start(ctx context.Context, name string, cfg runtime.Config) error {
+	p.once.Do(func() { close(p.started) })
+	select {
+	case <-ctx.Done():
+		close(p.canceled)
+		return ctx.Err()
+	case <-p.release:
+		return p.Fake.Start(ctx, name, cfg)
+	}
+}
+
 type blockingNudgeProvider struct {
 	*runtime.Fake
 	started chan struct{}

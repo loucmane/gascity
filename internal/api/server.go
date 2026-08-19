@@ -21,21 +21,63 @@ import (
 // lifetimes or block shutdown on a slow downstream.
 const extmsgNotifyTimeout = 30 * time.Second
 
-// runBackground owns one detached, bounded task. The task is visible to
-// waitForBackground so tests and a future server shutdown path can wait for
-// side effects before releasing the state they use.
+// runBackground owns one detached, bounded notification task. The task is
+// rooted in the Server lifetime so shutdown cancels it before releasing the
+// per-city state it uses.
 func (s *Server) runBackground(run func(context.Context)) {
+	s.runBackgroundTask(func(ctx context.Context) {
+		ctx, cancel := context.WithTimeout(ctx, extmsgNotifyTimeout)
+		defer cancel()
+		run(ctx)
+	})
+}
+
+// runBackgroundTask owns asynchronous request work for the Server lifetime.
+// Domain operations retain their own deadlines; server shutdown supplies the
+// cancellation boundary and joins every accepted task.
+func (s *Server) runBackgroundTask(run func(context.Context)) {
+	s.backgroundMu.Lock()
+	if s.backgroundClosed {
+		s.backgroundMu.Unlock()
+		return
+	}
+	if s.backgroundCtx == nil {
+		s.backgroundCtx, s.backgroundCancel = context.WithCancel(context.Background())
+	}
 	s.backgroundTasks.Add(1)
+	ctx := s.backgroundCtx
+	s.backgroundMu.Unlock()
 	go func() {
 		defer s.backgroundTasks.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), extmsgNotifyTimeout)
-		defer cancel()
 		run(ctx)
 	}()
 }
 
 func (s *Server) waitForBackground() {
 	s.backgroundTasks.Wait()
+}
+
+func (s *Server) shutdownBackground(ctx context.Context) error {
+	s.backgroundMu.Lock()
+	if !s.backgroundClosed {
+		s.backgroundClosed = true
+		if s.backgroundCancel != nil {
+			s.backgroundCancel()
+		}
+	}
+	s.backgroundMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		s.backgroundTasks.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Server is the per-city handler-host. It owns the per-city State and
@@ -62,7 +104,11 @@ type Server struct {
 
 	runCensusSource RunCensusSource
 
-	backgroundTasks sync.WaitGroup
+	backgroundMu     sync.Mutex
+	backgroundCtx    context.Context
+	backgroundCancel context.CancelFunc
+	backgroundClosed bool
+	backgroundTasks  sync.WaitGroup
 
 	// sessionLogSearchPaths overrides the default search paths for Claude
 	// session JSONL files. Nil means use worker.DefaultSearchPaths().
@@ -249,14 +295,17 @@ func NewReadOnly(state State) *Server {
 
 func newServer(state State, readOnly bool) *Server {
 	mux := http.NewServeMux()
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	s := &Server{
-		state:          state,
-		mux:            mux,
-		readOnly:       readOnly,
-		idem:           newIdempotencyCache(30 * time.Minute),
-		rigIdem:        newRigIdemIndex(),
-		webhookDedup:   newWebhookDedupCache(defaultWebhookDedupTTL),
-		webhookLimiter: newWebhookRateLimiter(),
+		state:            state,
+		mux:              mux,
+		readOnly:         readOnly,
+		backgroundCtx:    backgroundCtx,
+		backgroundCancel: backgroundCancel,
+		idem:             newIdempotencyCache(30 * time.Minute),
+		rigIdem:          newRigIdemIndex(),
+		webhookDedup:     newWebhookDedupCache(defaultWebhookDedupTTL),
+		webhookLimiter:   newWebhookRateLimiter(),
 	}
 	// Latch the rollout snapshot once: prefer the State's boot latch (the
 	// production controllerState); fall back to resolving from Config() for

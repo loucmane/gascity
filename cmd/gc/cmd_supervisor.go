@@ -1440,11 +1440,15 @@ func runSupervisor(stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "gc supervisor: api: %v\n", err) //nolint:errcheck
 		}
 	}()
-	defer func() {
-		shutCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
-		defer c()
-		apiMux.Shutdown(shutCtx) //nolint:errcheck
-	}()
+	var apiShutdownOnce sync.Once
+	shutdownAPI := func() {
+		apiShutdownOnce.Do(func() {
+			shutCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
+			defer c()
+			apiMux.Shutdown(shutCtx) //nolint:errcheck
+		})
+	}
+	defer shutdownAPI()
 	fmt.Fprintf(stdout, "Supervisor API listening on http://%s\n", addr) //nolint:errcheck
 	writeSupervisorDashboardStartup(stdout, dashboardMounted, readOnly, bind, port)
 
@@ -1551,6 +1555,9 @@ func runSupervisor(stdout, stderr io.Writer) int {
 			}
 		case <-ctx.Done():
 			notifySdState(stderr, sdnotify.Stopping)
+			// Stop API admission and join/cancel accepted asynchronous work before
+			// city runtimes release their stores, providers, and fence paths.
+			shutdownAPI()
 			// Shutdown all cities. Collect under lock, then stop outside
 			// to avoid blocking API requests during graceful shutdown.
 			var toStop map[string]*managedCity

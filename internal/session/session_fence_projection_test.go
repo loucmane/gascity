@@ -140,6 +140,34 @@ func TestManagerPublishesHashedFenceProjectionBeforeProviderStart(t *testing.T) 
 	}
 }
 
+func TestCanceledStartDoesNotPublishFenceProjection(t *testing.T) {
+	cityPath := t.TempDir()
+	store := beads.NewMemStore()
+	created, err := store.Create(beads.Bead{
+		Type:   BeadType,
+		Labels: []string{LabelSession},
+		Metadata: map[string]string{
+			"state":          string(StateStartPending),
+			"generation":     "1",
+			"instance_token": "token-before-shutdown",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	manager := NewManagerWithOptions(store, runtime.NewFake(), WithCityPath(cityPath))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = manager.waitForStartIdentityReadable(ctx, created.ID, created.Metadata["instance_token"])
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForStartIdentityReadable error = %v, want context cancellation", err)
+	}
+	if _, statErr := os.Stat(fenceProjectionFixturePath(cityPath, created.ID)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("fence projection after canceled start: stat error = %v, want not-exist", statErr)
+	}
+}
+
 func TestManagerTombstonesFenceProjectionBeforeLifecycleTeardown(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
