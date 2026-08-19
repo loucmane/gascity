@@ -781,12 +781,13 @@ func TestReconcileSessionBeads_AdoptedLiveEligiblePublishFailureRemainsFailClose
 		Type:   session.BeadType,
 		Labels: []string{"gc:session", "agent:worker-1"},
 		Metadata: map[string]string{
-			"session_name":   "worker-1",
-			"agent_name":     "worker-1",
-			"template":       "worker",
-			"state":          string(session.StateActive),
-			"instance_token": claimIdentityRaceToken,
-			"generation":     "1",
+			"session_name":      "worker-1",
+			"agent_name":        "worker-1",
+			"template":          "worker",
+			"state":             string(session.StateActive),
+			"instance_token":    claimIdentityRaceToken,
+			"generation":        "1",
+			"restart_requested": "true",
 		},
 	})
 	if err != nil {
@@ -796,6 +797,7 @@ func TestReconcileSessionBeads_AdoptedLiveEligiblePublishFailureRemainsFailClose
 	if err := provider.Start(context.Background(), "worker-1", runtime.Config{Command: "test-cmd"}); err != nil {
 		t.Fatalf("seed eligible live provider: %v", err)
 	}
+	startsBefore := provider.CountCalls("Start", "worker-1")
 	desired := map[string]TemplateParams{
 		"worker-1": {Command: "test-cmd", SessionName: "worker-1", TemplateName: "worker"},
 	}
@@ -812,8 +814,21 @@ func TestReconcileSessionBeads_AdoptedLiveEligiblePublishFailureRemainsFailClose
 	if drain := drains.get(bead.ID); drain != nil {
 		t.Fatalf("eligible session entered teardown after an unexpected projection failure: %+v", drain)
 	}
+	if got := provider.CountCalls("Stop", "worker-1"); got != 0 {
+		t.Fatalf("restart-requested eligible session was stopped after an unexpected projection failure: Stop calls = %d", got)
+	}
 	if !provider.IsRunning("worker-1") {
 		t.Fatal("eligible session runtime stopped after an unexpected projection failure")
+	}
+	if got := provider.CountCalls("Start", "worker-1"); got != startsBefore {
+		t.Fatalf("eligible session runtime was respawned without a claim-fence projection: Start calls = %d, want %d", got, startsBefore)
+	}
+	current, err := store.Get(bead.ID)
+	if err != nil {
+		t.Fatalf("reload eligible session bead: %v", err)
+	}
+	if got := current.Metadata["restart_requested"]; got != "true" {
+		t.Fatalf("restart_requested = %q, want preserved while projection is unavailable", got)
 	}
 	if !strings.Contains(stderr.String(), "publishing adopted live session claim fence") {
 		t.Fatalf("stderr = %q, want fail-closed projection diagnostic", stderr.String())
