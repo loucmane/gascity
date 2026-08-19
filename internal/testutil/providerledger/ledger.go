@@ -320,6 +320,13 @@ func provedRuntimeScoped(constructor SymbolRef, file, test, scope string, allowe
 	return claim
 }
 
+// runtimeWaiverExpiry records the 2026-08-19 review of the nine remaining
+// runtime.Provider contract gaps. Their constructors and gap-specific reasons
+// remain current; ga-80po0c.3 continues to own the replacement contracts. This
+// short renewal keeps the expiry validator as the forcing function for another
+// review instead of hiding the debt behind the 90-day maximum horizon.
+var runtimeWaiverExpiry = time.Date(2026, time.September, 2, 0, 0, 0, 0, time.UTC)
+
 func waivedRuntime(constructor SymbolRef, reason string) ContractClaim {
 	return ContractClaim{
 		Constructor: constructor,
@@ -327,7 +334,7 @@ func waivedRuntime(constructor SymbolRef, reason string) ContractClaim {
 		Disposition: DispositionWaived,
 		Waiver: &Waiver{
 			Owner:   runtimeContractWaiverOwner,
-			Expires: time.Date(2026, time.August, 12, 0, 0, 0, 0, time.UTC),
+			Expires: runtimeWaiverExpiry,
 			Reason:  reason,
 		},
 	}
