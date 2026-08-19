@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/runtime"
 	sessionpkg "github.com/gastownhall/gascity/internal/session"
 )
@@ -655,6 +657,83 @@ func TestReconcileSessionBeads_ClaimHolderStallUsesItsOwnThreshold(t *testing.T)
 
 	if !env.sp.IsRunning(sessionName) {
 		t.Fatalf("session %q recycled before its claim-holder threshold", sessionName)
+	}
+}
+
+func TestReconcileSessionBeads_ClaimedWorkAttentionUsesClaimHolderThreshold(t *testing.T) {
+	env, session, sessionName := newProgressStallTestEnv(t)
+	env.cfg.Session.ProgressStallTimeout = "30m"
+	env.cfg.Session.ClaimHolderStallTimeout = "45m"
+	env.sp.SetActivity(sessionName, env.clk.Now().Add(-35*time.Minute))
+	rec := events.NewFake()
+	env.rec = rec
+
+	work, err := env.store.Create(beads.Bead{Title: "claimed work", Type: "task", Assignee: sessionName})
+	if err != nil {
+		t.Fatalf("Create(work): %v", err)
+	}
+	status := "in_progress"
+	if err := env.store.Update(work.ID, beads.UpdateOpts{Status: &status}); err != nil {
+		t.Fatalf("Update(work): %v", err)
+	}
+
+	env.reconcileAtPath(t.TempDir(), []beads.Bead{session})
+
+	got, err := env.store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("store.Get(%s): %v", work.ID, err)
+	}
+	if containsString(got.Labels, "needs/operator") {
+		t.Fatalf("work labels = %v, want no needs/operator before claim-holder threshold", got.Labels)
+	}
+	for _, key := range []string{
+		beadmeta.ControllerErrorMetadataKey,
+		beadmeta.FailureOwnerMetadataKey,
+		beadmeta.FailureReasonMetadataKey,
+		beadmeta.FailureSubjectMetadataKey,
+		beadmeta.ProgressStallSignatureMetadataKey,
+		beadmeta.ProgressLastObservedMetadataKey,
+	} {
+		if value, present := got.Metadata[key]; present {
+			t.Errorf("work metadata[%q] = %q, want absent before claim-holder threshold", key, value)
+		}
+	}
+	for _, event := range rec.Events {
+		if event.Subject == work.ID {
+			t.Errorf("attention event for work before claim-holder threshold: %+v", event)
+		}
+	}
+}
+
+func TestReconcileSessionBeads_ClaimedWorkAttentionFallsBackWhenClaimHolderPolicyDisabled(t *testing.T) {
+	env, session, sessionName := newProgressStallTestEnv(t)
+	env.cfg.Session.ProgressStallTimeout = "30m"
+	env.cfg.Session.ClaimHolderStallTimeout = "0"
+	env.sp.SetActivity(sessionName, env.clk.Now().Add(-35*time.Minute))
+
+	work, err := env.store.Create(beads.Bead{Title: "claimed work", Type: "task", Assignee: sessionName})
+	if err != nil {
+		t.Fatalf("Create(work): %v", err)
+	}
+	status := "in_progress"
+	if err := env.store.Update(work.ID, beads.UpdateOpts{Status: &status}); err != nil {
+		t.Fatalf("Update(work): %v", err)
+	}
+
+	env.reconcileAtPath(t.TempDir(), []beads.Bead{session})
+
+	got, err := env.store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("store.Get(%s): %v", work.ID, err)
+	}
+	if !containsString(got.Labels, "needs/operator") {
+		t.Fatalf("work labels = %v, want needs/operator from claimless fallback", got.Labels)
+	}
+	if got.Metadata[beadmeta.FailureReasonMetadataKey] != "progress_stall" {
+		t.Fatalf("work metadata[%q] = %q, want progress_stall", beadmeta.FailureReasonMetadataKey, got.Metadata[beadmeta.FailureReasonMetadataKey])
+	}
+	if got.Metadata[beadmeta.ProgressStallSignatureMetadataKey] == "" {
+		t.Fatalf("work metadata[%q] is empty, want attention fingerprint", beadmeta.ProgressStallSignatureMetadataKey)
 	}
 }
 

@@ -2493,8 +2493,17 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					}
 				}
 				if !exempt && holdsClaim {
+					claimedWorkAttentionThreshold := claimHolderThreshold
+					if claimedWorkAttentionThreshold == 0 {
+						// Operator attention predates the destructive claim-holder
+						// recycle policy and was originally governed by the sole
+						// progress-stall timeout. Preserve that surfacing for cities
+						// that leave claim-holder recycling disabled; once configured,
+						// the more conservative claim-holder threshold governs both.
+						claimedWorkAttentionThreshold = claimlessThreshold
+					}
 					if err := markProgressStalledClaimedWorkNeedsOperator(
-						cityPath, cfg, store, rigStores, infoByID[id], lastActivity, gateThreshold, clk.Now(),
+						cityPath, cfg, store, rigStores, infoByID[id], lastActivity, claimedWorkAttentionThreshold, clk.Now(),
 					); err != nil {
 						fmt.Fprintf(stderr, "session reconciler: marking claimed work for progress-stall attention for %s: %v\n", name, err) //nolint:errcheck
 					}
