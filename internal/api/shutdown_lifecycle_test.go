@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -86,6 +87,111 @@ func (p *cancelThenBlockStartProvider) Start(ctx context.Context, _ string, _ ru
 
 func (p *cancelThenBlockStartProvider) unblock() {
 	p.releaseOnce.Do(func() { close(p.release) })
+}
+
+func supervisorCityLockCount(sm *SupervisorMux) int {
+	sm.cacheMu.RLock()
+	defer sm.cacheMu.RUnlock()
+	return len(sm.cityMu)
+}
+
+func TestSupervisorUnknownCityResolutionDoesNotRetainKeyedLocks(t *testing.T) {
+	resolver := &mutableCityResolver{states: make(map[string]State)}
+	sm := NewSupervisorMux(resolver, nil, false, "test", "", time.Now())
+	baseline := supervisorCityLockCount(sm)
+
+	for i := range 10_000 {
+		name := fmt.Sprintf("missing-city-%d", i)
+		if srv := sm.resolveCityServer(name); srv != nil {
+			t.Fatalf("resolveCityServer(%q) = %p, want nil", name, srv)
+		}
+	}
+
+	if got := supervisorCityLockCount(sm); got != baseline {
+		t.Fatalf("keyed city locks after unknown resolutions = %d, want baseline %d", got, baseline)
+	}
+}
+
+func TestSupervisorUnknownResolutionPreservesRealCityReplacementSerialization(t *testing.T) {
+	oldState := newSessionFakeState(t)
+	oldState.cityName = "real-city"
+	resolver := &mutableCityResolver{states: map[string]State{oldState.cityName: oldState}}
+	sm := NewSupervisorMux(resolver, nil, false, "test", "", time.Now())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.GoroutineRaceTimeout)
+		defer cancel()
+		if err := sm.Shutdown(ctx); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
+	})
+	if srv := sm.resolveCityServer(oldState.cityName); srv == nil {
+		t.Fatal("initial city server is nil")
+	}
+
+	replacementState := &gatedConfigState{
+		fakeState: newSessionFakeState(t),
+		entered:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	replacementState.cityName = oldState.cityName
+	resolver.set(oldState.cityName, replacementState)
+	replaced := make(chan *Server, 1)
+	go func() { replaced <- sm.resolveCityServer(oldState.cityName) }()
+	select {
+	case <-replacementState.entered:
+	case <-time.After(testutil.GoroutineRaceTimeout):
+		t.Fatal("timed out waiting for replacement Server construction")
+	}
+
+	unknownResult := make(chan error, 1)
+	go func() {
+		for i := range 1_000 {
+			if srv := sm.resolveCityServer(fmt.Sprintf("missing-during-replacement-%d", i)); srv != nil {
+				unknownResult <- fmt.Errorf("unknown city resolved to Server %p", srv)
+				return
+			}
+		}
+		unknownResult <- nil
+	}()
+	select {
+	case err := <-unknownResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(testutil.GoroutineRaceTimeout):
+		t.Fatal("unknown-city resolution was disturbed by a different city's replacement")
+	}
+
+	resolver.set(oldState.cityName, nil)
+	unregistered := make(chan *Server, 1)
+	go func() { unregistered <- sm.resolveCityServer(oldState.cityName) }()
+	select {
+	case srv := <-unregistered:
+		t.Fatalf("unregister resolution returned Server %p before pending replacement publication completed", srv)
+	default:
+	}
+
+	close(replacementState.release)
+	select {
+	case srv := <-replaced:
+		if srv == nil {
+			t.Fatal("replacement resolution returned nil")
+		}
+	case <-time.After(testutil.GoroutineRaceTimeout):
+		t.Fatal("timed out waiting for replacement Server publication")
+	}
+	select {
+	case srv := <-unregistered:
+		if srv != nil {
+			t.Fatalf("resolved Server = %p after unregister, want nil", srv)
+		}
+	case <-time.After(testutil.GoroutineRaceTimeout):
+		t.Fatal("timed out waiting for unregister quiescence")
+	}
+
+	if got := supervisorCityLockCount(sm); got != 0 {
+		t.Fatalf("keyed city locks after concurrent replacement and misses = %d, want 0", got)
+	}
 }
 
 func TestSupervisorPerCityReplacementQuiescesBlockedSessionStart(t *testing.T) {

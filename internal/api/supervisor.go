@@ -91,6 +91,13 @@ type cachedCityServer struct {
 	srv   *Server
 }
 
+// cityCacheLock serializes cache lifecycle transitions for one city. users
+// counts both the goroutine holding mu and goroutines waiting to acquire it.
+type cityCacheLock struct {
+	mu    sync.Mutex
+	users int
+}
+
 // SupervisorMux owns the single Huma API for the entire control plane.
 // Every typed operation — supervisor-scope and per-city — is registered
 // on humaAPI:
@@ -136,7 +143,7 @@ type SupervisorMux struct {
 	cacheMu sync.RWMutex
 	cache   map[string]cachedCityServer
 	servers map[*Server]struct{}
-	cityMu  map[string]*sync.Mutex
+	cityMu  map[string]*cityCacheLock
 
 	// idem caches responses for Idempotency-Key replay on supervisor-scope
 	// create endpoints (POST /v0/city). Per-city creates use the per-city
@@ -165,7 +172,7 @@ func NewSupervisorMux(resolver CityResolver, initializer cityInitializer, readOn
 		humaAPI:     newSupervisorHumaAPI(humaMux, readOnly),
 		cache:       make(map[string]cachedCityServer),
 		servers:     make(map[*Server]struct{}),
-		cityMu:      make(map[string]*sync.Mutex),
+		cityMu:      make(map[string]*cityCacheLock),
 		idem:        newIdempotencyCache(30 * time.Minute),
 	}
 	sm.registerSupervisorRoutes()
@@ -486,9 +493,8 @@ func (sm *SupervisorMux) getCityServer(name string, state State) *Server {
 
 	srv := sm.newCityServer(state)
 
-	cityMu := sm.cityCacheMutex(name)
-	cityMu.Lock()
-	defer cityMu.Unlock()
+	releaseCity := sm.lockCityCache(name)
+	defer releaseCity()
 	return sm.installCityServerLocked(name, state, srv)
 }
 
@@ -534,24 +540,37 @@ func (sm *SupervisorMux) installCityServerLocked(name string, state State, srv *
 	return srv
 }
 
-func (sm *SupervisorMux) cityCacheMutex(name string) *sync.Mutex {
+func (sm *SupervisorMux) lockCityCache(name string) func() {
 	sm.cacheMu.Lock()
-	defer sm.cacheMu.Unlock()
-	mu := sm.cityMu[name]
-	if mu == nil {
-		mu = &sync.Mutex{}
-		sm.cityMu[name] = mu
+	entry := sm.cityMu[name]
+	if entry == nil {
+		entry = &cityCacheLock{}
+		sm.cityMu[name] = entry
 	}
-	return mu
+	entry.users++
+	sm.cacheMu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		// Unlock before dropping the registry reference. A waiter is already
+		// counted in users, so the entry remains discoverable until every
+		// holder and waiter has left this serialization domain.
+		entry.mu.Unlock()
+		sm.cacheMu.Lock()
+		entry.users--
+		if entry.users == 0 && sm.cityMu[name] == entry {
+			delete(sm.cityMu, name)
+		}
+		sm.cacheMu.Unlock()
+	}
 }
 
 // QuiesceCity closes asynchronous admission for one cached city and joins all
 // accepted tasks. The supervisor reconciler calls this boundary before it
 // releases the managed city's store and runtime provider.
 func (sm *SupervisorMux) QuiesceCity(ctx context.Context, name string) error {
-	cityMu := sm.cityCacheMutex(name)
-	cityMu.Lock()
-	defer cityMu.Unlock()
+	releaseCity := sm.lockCityCache(name)
+	defer releaseCity()
 	return sm.quiesceCityLocked(ctx, name)
 }
 
