@@ -151,6 +151,79 @@ func TestParseApprovalPrompt_MultipleToolHeaders_BindsToNearest(t *testing.T) {
 	}
 }
 
+func TestParseApprovalPrompt_CodexEscalation(t *testing.T) {
+	a := parseApprovalPrompt(codexApprovalPromptPane())
+	if a == nil {
+		t.Fatal("expected Codex approval prompt, got nil")
+	}
+	if a.ToolName != "Bash" {
+		t.Fatalf("ToolName = %q, want Bash", a.ToolName)
+	}
+	if a.Input != "git status --short" {
+		t.Fatalf("Input = %q, want exact command", a.Input)
+	}
+}
+
+func TestParseApprovalPrompt_CodexResolvedMenuIsNotPending(t *testing.T) {
+	pane := codexApprovalPromptPane() + "\n\n✔ You approved codex to run git status --short"
+	if got := parseApprovalPrompt(pane); got != nil {
+		t.Fatalf("resolved Codex menu parsed as pending: %+v", got)
+	}
+}
+
+func TestProviderPendingExposesCodexApproval(t *testing.T) {
+	tm := &Tmux{
+		cfg:  Config{SocketName: "phase2-sock"},
+		exec: &fakeExecutor{out: codexApprovalPromptPane()},
+	}
+
+	pending, err := tm.Pending("codex-approval")
+	if err != nil {
+		t.Fatalf("Pending: %v", err)
+	}
+	if pending == nil {
+		t.Fatal("Pending = nil, want Codex interaction")
+	}
+	if pending.Kind != "approval" || pending.Metadata["tool_name"] != "Bash" {
+		t.Fatalf("Pending = %#v, want Bash approval", pending)
+	}
+	if !strings.Contains(pending.Prompt, "git status --short") {
+		t.Fatalf("Prompt = %q, want command", pending.Prompt)
+	}
+}
+
+func TestProviderRespondSubmitsCodexApproval(t *testing.T) {
+	fe := &fakeExecutor{outs: []string{
+		codexApprovalPromptPane(), // pre-verify capture
+		"0",                       // pane is not parked in copy mode
+		"",                        // literal choice
+		"",                        // Enter submission
+		"assistant ready",         // prompt cleared
+	}}
+	tm := &Tmux{cfg: Config{SocketName: "phase2-sock"}, exec: fe}
+	if err := tm.Respond("codex-approval", runtime.InteractionResponse{
+		Action: "approve",
+	}); err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+
+	want := [][]string{
+		{"-u", "-L", "phase2-sock", "capture-pane", "-p", "-t", "codex-approval", "-S", "-40"},
+		{"-u", "-L", "phase2-sock", "display-message", "-t", "codex-approval", "-p", "#{pane_in_mode}"},
+		{"-u", "-L", "phase2-sock", "send-keys", "-t", "codex-approval", "-l", "1"},
+		{"-u", "-L", "phase2-sock", "send-keys", "-t", "codex-approval", "Enter"},
+		{"-u", "-L", "phase2-sock", "capture-pane", "-p", "-t", "codex-approval", "-S", "-40"},
+	}
+	if len(fe.calls) != len(want) {
+		t.Fatalf("tmux calls = %d, want %d: %v", len(fe.calls), len(want), fe.calls)
+	}
+	for i := range want {
+		if err := matchTMuxCall(fe.calls[i], want[i]); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+}
+
 func TestApprovalDedup(t *testing.T) {
 	d := &approvalDedup{lastHash: make(map[string]string)}
 
@@ -338,6 +411,18 @@ func approvalPromptPane() string {
  ❯ 1. Yes
    2. Yes, and don't ask again for: Read:*
    3. No`
+}
+
+func codexApprovalPromptPane() string {
+	return `Would you like to run the following command?
+
+$ git status --short
+
+› 1. Yes, proceed
+  2. Yes, and don't ask again for commands that start with ` + "`git status`" + `
+  3. No, and tell Codex what to do differently
+
+Press enter to confirm or esc to cancel`
 }
 
 func pendingInteractionSeamResult(session string, pending *runtime.PendingInteraction, err error, calls [][]string) workertest.Result {
