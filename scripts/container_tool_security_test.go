@@ -326,7 +326,7 @@ func TestTrivyIgnoreDropsStdlibWaiversForRebuiltTools(t *testing.T) {
 	for _, v := range doc.Vulnerabilities {
 		for _, p := range v.Paths {
 			if stdlibCVEs[v.ID] && rebuiltPaths[p] {
-				t.Errorf("%s still waives rebuilt tool %q for a Go-stdlib CVE the 1.26.5 rebuild clears; drop the path so the scan proves the fix stays effective", v.ID, p)
+				t.Errorf("%s still waives rebuilt tool %q for a Go-stdlib CVE the 1.26.6 rebuild clears; drop the path so the scan proves the fix stays effective", v.ID, p)
 			}
 			if allowedPaths, ok := reviewedWaivers[v.ID]; ok && allowedPaths[p] {
 				if foundReviewed[v.ID] == nil {
