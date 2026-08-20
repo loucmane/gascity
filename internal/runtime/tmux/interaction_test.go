@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -243,6 +244,20 @@ func TestApprovalDedup(t *testing.T) {
 	d.clear("s1")
 	if !d.isNew("s1", a) {
 		t.Error("after clear, should be new again")
+	}
+}
+
+func TestApprovalHashPreservesClaudeRequestIDs(t *testing.T) {
+	approval := &parsedApproval{ToolName: "Bash", Input: "ls"}
+	legacy := sha256.Sum256([]byte("Bash\x00ls"))
+	want := fmt.Sprintf("%x", legacy[:8])
+	if got := approvalHash(approval); got != want {
+		t.Fatalf("Claude approval hash = %q, want legacy %q", got, want)
+	}
+
+	codex := &parsedApproval{ToolName: "Bash", Input: "ls", Submit: true}
+	if approvalHash(codex) == want {
+		t.Fatal("Codex submit semantics must participate in the request ID")
 	}
 }
 
