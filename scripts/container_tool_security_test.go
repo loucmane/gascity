@@ -29,6 +29,16 @@ func TestContainerBuildsUsePatchedGoToolchain(t *testing.T) {
 			t.Errorf("%s must build embedded Go tools with patched Go %s", path, patchedGo)
 		}
 	}
+
+	for _, path := range []string{
+		".github/actions/setup-gascity-ubuntu/action.yml",
+		".github/actions/setup-gascity-macos/action.yml",
+	} {
+		wantDefault := `default: "` + patchedGo + `"`
+		if !strings.Contains(readFile(t, root, path), wantDefault) {
+			t.Errorf("%s must default to patched Go %s", path, patchedGo)
+		}
+	}
 }
 
 func TestContainerCLIToolsRebuildWithPatchedGRPC(t *testing.T) {
