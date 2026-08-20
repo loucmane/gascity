@@ -105,13 +105,15 @@ func legacyEphemeralPoolDemandShell(limit int, includeEphemeralReady, quiet bool
 
 // poolDemandFirstRowFunctionScript emits the work_query Tier 3 function: it
 // reads the first ready, unassigned, routed bead for the supplied target,
-// prints it, and exits 0. The caller appends a terminal fallthrough
-// (printf "[]") for the empty case.
+// prints it, and exits 0. A failure of the canonical routed-ready probe exits
+// the generated query non-zero so the hook can emit an operational failure;
+// only a successful empty result reaches the caller's terminal `printf "[]"`.
+// Legacy migration probes remain best-effort after that authoritative read.
 func poolDemandFirstRowFunctionScript(includeEphemeralReady bool) string {
 	return `probe_pool_demand() { ` +
 		`target="$1"; ` +
 		`[ -z "$target" ] && return 1; ` +
-		`r=$(` + routedReadyTierCommand(includeEphemeralReady) + `); ` +
+		`r=$(` + routedReadyTierCommand(includeEphemeralReady) + `) || exit $?; ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 		`legacy_candidates=$(` + bdReadyPoolDemandMigrationShell("--limit=20", includeEphemeralReady) + ` 2>/dev/null); ` +
 		`r=$(printf "%s" "$legacy_candidates" | ` + poolDemandMigrationFilterJQ(1) + ` 2>/dev/null); ` +
@@ -130,7 +132,7 @@ func routedReadyTierCommand(includeEphemeralReady bool) string {
 	// self-blocked head (is_blocked / status==blocked) has Ready routed work
 	// behind it to fall through to instead of idle-exiting; the hook layer
 	// (filterUnreadyHookCandidates) strips the blocked head from the result.
-	return bdReadyPoolDemandShell("--sort oldest --limit=20", includeEphemeralReady) + ` 2>/dev/null`
+	return bdReadyPoolDemandShell("--sort oldest --limit=20", includeEphemeralReady)
 }
 
 // poolDemandCountShell emits the reconciler count-form for target: it counts
