@@ -161,9 +161,13 @@ func Catalog() []Entry {
 		),
 		builtin(
 			"subprocess", "exact:subprocess", nil,
-			waivedRuntime(
+			provedRuntime(
 				repoSymbol("internal/runtime/subprocess", "NewSeamBacked"),
-				"NewSeamBacked selects a distinct reachable empty-cityPath branch with shared /tmp state; the WithDir proof does not exercise that composition",
+				"internal/runtime/subprocess/seam_conformance_test.go",
+				"TestSubprocessDefaultDirSeamConformance",
+				SymbolRef{ImportPath: "fmt", Name: "Sprintf"},
+				SymbolRef{ImportPath: "os", Name: "Getpid"},
+				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
 			provedRuntime(
 				repoSymbol("internal/runtime/subprocess", "NewSeamBackedWithDir"),
@@ -320,11 +324,19 @@ func provedRuntimeScoped(constructor SymbolRef, file, test, scope string, allowe
 	return claim
 }
 
-// runtimeWaiverExpiry records the 2026-08-19 review of the nine remaining
-// runtime.Provider contract gaps. Their constructors and gap-specific reasons
-// remain current; ga-80po0c.3 continues to own the replacement contracts. This
-// short renewal keeps the expiry validator as the forcing function for another
-// review instead of hiding the debt behind the 90-day maximum horizon.
+// runtimeWaiverExpiry dates every remaining runtime.Provider waiver owned by
+// runtimeContractWaiverOwner. The 2026-08-19 review reconfirmed the eight
+// remaining live gaps and extended their forcing-function deadline to
+// 2026-09-02. This is a renewal, not a first grant.
+//
+// Each gap was re-checked against cmd/gc/runtime_registry.go. The subprocess
+// default-directory composition gained a runnable full contract in v1.4.1 and
+// was retired from the waiver set; the other eight constructors remain live
+// registrations without a full shared contract.
+//
+// The short horizon deliberately avoids hiding stalled contract work behind
+// the validator's 90-day maximum. Renewing again without contracts landing is
+// debt, and the next renewal must say so.
 var runtimeWaiverExpiry = time.Date(2026, time.September, 2, 0, 0, 0, 0, time.UTC)
 
 func waivedRuntime(constructor SymbolRef, reason string) ContractClaim {
