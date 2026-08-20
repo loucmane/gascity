@@ -141,6 +141,7 @@ const (
 	PackRootMetadataKey                  = "gc.pack_root"
 	PackWorkspaceMetadataKey             = "gc.pack_workspace"
 	PerDispatchModelMetadataKey          = "gc.per_dispatch_model"
+	ProviderCommandSignatureKey          = "gc.provider_resolution_signature"
 	ProgressStallSignatureMetadataKey    = "gc.progress_attention_signature"
 	ProgressLastObservedMetadataKey      = "gc.progress_last_observed_at"
 	RalphStepIDMetadataKey               = "gc.ralph_step_id"

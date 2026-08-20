@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -394,6 +395,15 @@ func buildDesiredStateWithSessionBeads(
 
 	bp := newAgentBuildParams(cityName, cityPath, cfg, sp, beaconTime, store, stderr)
 	bp.sessionBeads = sessionBeads
+	bp.workStores = make(map[string]beads.Store, len(rigStores)+1)
+	if store != nil {
+		bp.workStores["city"] = store
+	}
+	for rigName, rigStore := range rigStores {
+		if rigStore != nil {
+			bp.workStores["rig:"+strings.TrimSpace(rigName)] = rigStore
+		}
+	}
 
 	// Collect all open session Infos from all stores to correctly count
 	// running sessions for each pool. A partial/failed collection is logged,
@@ -2794,6 +2804,7 @@ func realizePoolDesiredSessions(
 ) {
 	qualifiedName := cfgAgent.QualifiedName()
 	if err := validateAgentSessionTransportForBuild(bp, cfgAgent, qualifiedName); err != nil {
+		markProviderResolutionDemandNeedsOperator(bp, cfgAgent, poolState.Requests, err, stderr)
 		fmt.Fprintf(stderr, "buildDesiredState: pool %q: %v (skipping)\n", qualifiedName, err) //nolint:errcheck
 		return
 	}
@@ -2980,6 +2991,78 @@ func realizePoolDesiredSessions(
 		}
 		installAgentSideEffects(bp, resolveAgent, tp, stderr)
 		desired[tp.SessionName] = tp
+	}
+}
+
+func markProviderResolutionDemandNeedsOperator(
+	bp *agentBuildParams,
+	cfgAgent *config.Agent,
+	requests []SessionRequest,
+	resolutionErr error,
+	stderr io.Writer,
+) {
+	if bp == nil || cfgAgent == nil || !errors.Is(resolutionErr, config.ErrProviderNotInPATH) {
+		return
+	}
+	qualifiedName := cfgAgent.QualifiedName()
+	providerName := strings.TrimSpace(cfgAgent.Provider)
+	if providerName == "" {
+		providerName = strings.TrimSpace(cfgAgent.InheritedProvider)
+	}
+	if providerName == "" && bp.workspace != nil {
+		providerName = strings.TrimSpace(bp.workspace.Provider)
+	}
+	reason := fmt.Sprintf(
+		"provider command is unavailable for demanded agent %s (provider %s): %v",
+		qualifiedName,
+		providerName,
+		resolutionErr,
+	)
+	for _, request := range requests {
+		workID := strings.TrimSpace(request.WorkBeadID)
+		if workID == "" {
+			continue
+		}
+		storeRef := normalizeDemandStoreRef(request.WorkStoreRef)
+		if storeRef == "" {
+			storeRef = "city"
+		}
+		workStore := bp.workStores[storeRef]
+		if workStore == nil && storeRef == "city" {
+			workStore = bp.beadStore
+		}
+		if workStore == nil {
+			fmt.Fprintf(stderr, "buildDesiredState: provider failure for work %s: store %q unavailable\n", workID, storeRef) //nolint:errcheck
+			continue
+		}
+		work, err := workStore.Get(workID)
+		if err != nil {
+			fmt.Fprintf(stderr, "buildDesiredState: provider failure for work %s: reading demand bead: %v\n", workID, err) //nolint:errcheck
+			continue
+		}
+		fingerprint := strings.Join([]string{
+			qualifiedName,
+			providerName,
+			storeRef,
+			workID,
+			resolutionErr.Error(),
+		}, "\x00")
+		signature := fmt.Sprintf("%x", sha256.Sum256([]byte(fingerprint)))
+		if work.Metadata[beadmeta.ProviderCommandSignatureKey] == signature && containsString(work.Labels, "needs/operator") {
+			continue
+		}
+		if err := workStore.Update(workID, beads.UpdateOpts{
+			Labels: []string{"needs/operator"},
+			Metadata: map[string]string{
+				beadmeta.ControllerErrorMetadataKey:  reason,
+				beadmeta.FailureOwnerMetadataKey:     "gc.desired-state",
+				beadmeta.FailureReasonMetadataKey:    "provider_command_unavailable",
+				beadmeta.FailureSubjectMetadataKey:   qualifiedName,
+				beadmeta.ProviderCommandSignatureKey: signature,
+			},
+		}); err != nil {
+			fmt.Fprintf(stderr, "buildDesiredState: provider failure for work %s: marking needs/operator: %v\n", workID, err) //nolint:errcheck
+		}
 	}
 }
 
