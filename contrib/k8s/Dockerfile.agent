@@ -25,10 +25,14 @@ ARG BD_SOURCE_SHA256=99bd5f50226590b5ce4978d117f481c7d4d5718bd3152568a983d2683f6
 ARG BD_BUILD=6c124203e
 ARG BD_BRANCH=HEAD
 ARG GRPC_VERSION=1.82.1
+ARG XCRYPTO_VERSION=0.55.0
+ARG XNET_VERSION=0.58.0
+ARG XTEXT_VERSION=0.41.0
 
-# The published bd 1.1.0 binary embeds vulnerable grpc-go 1.80.0. Rebuild the
-# exact released source with its production CGO/pure-Go-regex configuration and
-# release identity, changing only the patched dependency version.
+# The published bd binary and the pinned v1.2.2 source embed vulnerable grpc-go
+# and golang.org/x modules. Rebuild the exact source with its production
+# CGO/pure-Go-regex configuration and release identity, forcing only the patched
+# dependency versions forward.
 RUN mkdir -p /src/bd /out \
     && curl -fsSL --retry 3 \
        "https://github.com/gastownhall/beads/archive/${BD_SOURCE_REF}.tar.gz" \
@@ -41,6 +45,10 @@ WORKDIR /src/bd
 RUN bd_version="${BD_VERSION#v}" \
     && grep -Fq "Version = \"${bd_version}\"" cmd/bd/version.go \
     && go get "google.golang.org/grpc@v${GRPC_VERSION}" \
+    && go get \
+       "golang.org/x/crypto@v${XCRYPTO_VERSION}" \
+       "golang.org/x/net@v${XNET_VERSION}" \
+       "golang.org/x/text@v${XTEXT_VERSION}" \
     && CGO_ENABLED=1 go build \
        -tags="gms_pure_go" \
        -trimpath \
@@ -48,7 +56,10 @@ RUN bd_version="${BD_VERSION#v}" \
        -o /out/bd \
        ./cmd/bd \
     && /out/bd --version | grep -Fq "bd version ${bd_version} (${BD_BUILD})" \
-    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep google.golang.org/grpc v${GRPC_VERSION} "
+    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep google.golang.org/grpc v${GRPC_VERSION} " \
+    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/crypto v${XCRYPTO_VERSION} " \
+    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/net v${XNET_VERSION} " \
+    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/text v${XTEXT_VERSION} "
 
 FROM ${BASE_IMAGE}
 
