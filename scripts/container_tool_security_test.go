@@ -227,11 +227,13 @@ func TestRebuiltToolsAssertPatchedGRPCArtifact(t *testing.T) {
 }
 
 // TestRebuiltToolsForcePatchedXModules guards the module overrides that replaced the
-// gh and Dolt waivers in .trivyignore.yaml. The pinned gh and Dolt sources select
-// versions Trivy flags, and the grpc-only override left them there. Dropping either
-// the go get or its go version -m proof would restore a vulnerable binary silently.
+// gh, Dolt, and bd waivers in .trivyignore.yaml. The pinned sources select versions
+// Trivy flags, and the grpc-only overrides left them there. Dropping either the go
+// get or its go version -m proof would restore a vulnerable binary silently.
 func TestRebuiltToolsForcePatchedXModules(t *testing.T) {
-	base := readFile(t, repoRoot(t), "contrib/k8s/Dockerfile.base")
+	root := repoRoot(t)
+	base := readFile(t, root, "contrib/k8s/Dockerfile.base")
+	agent := readFile(t, root, "contrib/k8s/Dockerfile.agent")
 
 	for _, arg := range []string{
 		"ARG XCRYPTO_VERSION=0.55.0",
@@ -242,6 +244,15 @@ func TestRebuiltToolsForcePatchedXModules(t *testing.T) {
 	} {
 		if !strings.Contains(base, arg) {
 			t.Errorf("contrib/k8s/Dockerfile.base missing %q", arg)
+		}
+	}
+	for _, arg := range []string{
+		"ARG XCRYPTO_VERSION=0.55.0",
+		"ARG XNET_VERSION=0.58.0",
+		"ARG XTEXT_VERSION=0.41.0",
+	} {
+		if !strings.Contains(agent, arg) {
+			t.Errorf("contrib/k8s/Dockerfile.agent missing %q", arg)
 		}
 	}
 
@@ -287,6 +298,29 @@ func TestRebuiltToolsForcePatchedXModules(t *testing.T) {
 	}
 	if xmodGet < xtextGet {
 		t.Error("gh stanza runs the x/mod override ahead of x/text; the newest constraint must run last")
+	}
+
+	bdStart := strings.Index(agent, "WORKDIR /src/bd")
+	if bdStart < 0 {
+		t.Fatal("contrib/k8s/Dockerfile.agent has no WORKDIR /src/bd stanza")
+	}
+	bdStanza := agent[bdStart:]
+	if next := strings.Index(bdStanza, "\nFROM "); next > 0 {
+		bdStanza = bdStanza[:next]
+	}
+	for module, arg := range map[string]string{
+		"golang.org/x/crypto": "XCRYPTO_VERSION",
+		"golang.org/x/net":    "XNET_VERSION",
+		"golang.org/x/text":   "XTEXT_VERSION",
+	} {
+		get := `"` + module + `@v${` + arg + `}` + `"`
+		if !strings.Contains(bdStanza, get) {
+			t.Errorf("contrib/k8s/Dockerfile.agent must override %s inside the /out/bd build stanza; missing %q", module, get)
+		}
+		assertion := `go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep ` + module + ` v${` + arg + `} "`
+		if !strings.Contains(bdStanza, assertion) {
+			t.Errorf("contrib/k8s/Dockerfile.agent must assert /out/bd embeds patched %s; missing %q", module, assertion)
+		}
 	}
 }
 
