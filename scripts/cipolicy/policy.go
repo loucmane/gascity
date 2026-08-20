@@ -23,7 +23,7 @@ const (
 	expectedCIExecutionHash      = "81a5e5802ff7656161f039aa088bb02f3fa80f1d7559846d6333034f82298b32" // reviewed merge: retain integration workflow shape and pin BD_VERSION v1.2.2
 	expectedNightlyTriggersHash  = "0a4400a09ac567e90adf8be1232eef1f14e36efd8dba3e143aa6e36f5b7a36f5"
 	expectedNightlyExecutionHash = "4b17e6d5c9c6c13c0935051aff0c50ddbbc6b6c5aa10947ed4447d25c29a2a23" // reviewed delta: BD_VERSION v1.1.0 -> v1.2.2 (beads pin hotfix)
-	expectedSetupActionHash      = "b7864038195cd054aee7fccfa903cab335b375bcab1a35239c17c5da7d32c07e"
+	expectedSetupActionHash      = "6a7fa725afa5cdf18cc459ea401a74bbd83cef757bf4e5d0dcd131a010df6ac0"
 )
 
 var requiredFilterPaths = map[string][]string{
