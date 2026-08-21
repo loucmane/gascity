@@ -1,0 +1,21 @@
+schema = 1
+
+[packs."https://github.com/gastownhall/gascity/tree/main/examples/bd"]
+version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"
+commit = "f895c0ff47d6ee9334ed282a416387eb5b084d24"
+fetched = "2026-08-02T16:26:04Z"
+
+[packs."https://github.com/gastownhall/gascity/tree/main/internal/bootstrap/packs/core"]
+version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"
+commit = "f895c0ff47d6ee9334ed282a416387eb5b084d24"
+fetched = "2026-08-02T16:26:04Z"
+
+[packs."https://github.com/loucmane/gascity-packs/tree/main/gascity"]
+version = "sha:caa9bca29a670f07d0c17b04410315dc293e440e"
+commit = "caa9bca29a670f07d0c17b04410315dc293e440e"
+fetched = "2026-08-21T21:47:43Z"
+
+[packs."https://github.com/loucmane/gascity-packs/tree/main/gascity/roles"]
+version = "sha:cc9e72b2078bab50ce708141961a31ef89ca590f"
+commit = "cc9e72b2078bab50ce708141961a31ef89ca590f"
+fetched = "2026-08-05T09:08:30Z"
