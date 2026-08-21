@@ -39,12 +39,27 @@ type Artifact struct {
 	Mode        uint32 `json:"mode"`
 }
 
+// ManagedFile identifies one versioned platform file that must be published
+// in the same transaction as the core binary. An empty PreviousSHA256 means
+// the destination must be absent before the install and must be removed by a
+// rollback. Otherwise BackupPath stores the exact prior bytes.
+type ManagedFile struct {
+	Name           string `json:"name"`
+	Source         string `json:"source"`
+	Destination    string `json:"destination"`
+	SHA256         string `json:"sha256"`
+	Mode           uint32 `json:"mode"`
+	PreviousSHA256 string `json:"previous_sha256,omitempty"`
+	BackupPath     string `json:"backup_path,omitempty"`
+}
+
 // Manifest is the digest-pinned input to one platform installation.
 type Manifest struct {
 	Schema         string         `json:"schema"`
 	ReleaseID      string         `json:"release_id"`
 	CityPath       string         `json:"city_path"`
 	Core           Artifact       `json:"core"`
+	ManagedFiles   []ManagedFile  `json:"managed_files,omitempty"`
 	PreviousSHA256 string         `json:"previous_sha256"`
 	BackupPath     string         `json:"backup_path"`
 	ReceiptPath    string         `json:"receipt_path"`
@@ -55,13 +70,21 @@ type Manifest struct {
 // Receipt is the durable result of an installation attempt that reached a
 // terminal installed or no-op state.
 type Receipt struct {
-	Schema         string `json:"schema"`
-	ReleaseID      string `json:"release_id"`
-	ManifestSHA256 string `json:"manifest_sha256"`
-	ArtifactSHA256 string `json:"artifact_sha256"`
+	Schema         string               `json:"schema"`
+	ReleaseID      string               `json:"release_id"`
+	ManifestSHA256 string               `json:"manifest_sha256"`
+	ArtifactSHA256 string               `json:"artifact_sha256"`
+	PreviousSHA256 string               `json:"previous_sha256,omitempty"`
+	ManagedFiles   []ReceiptManagedFile `json:"managed_files,omitempty"`
+	Result         string               `json:"result"`
+	ReceiptSHA256  string               `json:"receipt_sha256,omitempty"`
+}
+
+// ReceiptManagedFile binds one installed managed file to the receipt.
+type ReceiptManagedFile struct {
+	Name           string `json:"name"`
+	SHA256         string `json:"sha256"`
 	PreviousSHA256 string `json:"previous_sha256,omitempty"`
-	Result         string `json:"result"`
-	ReceiptSHA256  string `json:"receipt_sha256,omitempty"`
 }
 
 // MarshalManifest serializes a manifest without insignificant whitespace.
