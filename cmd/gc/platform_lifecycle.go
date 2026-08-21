@@ -124,7 +124,7 @@ func inspectPlatformRuntime(ctx context.Context, oldPID int, requireReplacement 
 	if err != nil {
 		return platforminstall.RuntimeProof{}, fmt.Errorf("hash running supervisor executable: %w", err)
 	}
-	versionOutput, err := exec.CommandContext(ctx, procExecutable, "--version").CombinedOutput()
+	versionOutput, err := platformRuntimeVersionOutput(ctx, procExecutable)
 	if err != nil {
 		return platforminstall.RuntimeProof{}, fmt.Errorf("read running supervisor version: %w: %s", err, strings.TrimSpace(string(versionOutput)))
 	}
@@ -143,6 +143,10 @@ func inspectPlatformRuntime(ctx context.Context, oldPID int, requireReplacement 
 		Commit:           status.BuildID,
 		Version:          strings.TrimSpace(string(versionOutput)),
 	}, nil
+}
+
+func platformRuntimeVersionOutput(ctx context.Context, executable string) ([]byte, error) {
+	return exec.CommandContext(ctx, executable, "--version").CombinedOutput()
 }
 
 func sha256File(path string) (string, error) {

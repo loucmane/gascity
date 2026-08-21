@@ -3,11 +3,36 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/platforminstall"
 )
+
+func TestPlatformRuntimeVersionOutputUsesVersionSubcommand(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "gc")
+	script := `#!/bin/sh
+if [ "$#" -eq 1 ] && [ "$1" = "version" ]; then
+  printf '1.4.1-test\n'
+  exit 0
+fi
+printf 'unexpected arguments: %s\n' "$*" >&2
+exit 64
+`
+	if err := os.WriteFile(executable, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := platformRuntimeVersionOutput(context.Background(), executable)
+	if err != nil {
+		t.Fatalf("platformRuntimeVersionOutput() error = %v, output = %q", err, output)
+	}
+	if got := strings.TrimSpace(string(output)); got != "1.4.1-test" {
+		t.Fatalf("platformRuntimeVersionOutput() = %q, want 1.4.1-test", got)
+	}
+}
 
 func TestPlatformSupervisorLifecycleRefusesSecondRestartAttempt(t *testing.T) {
 	restartCalls := 0
