@@ -82,6 +82,10 @@ func InspectIntegrity(ctx context.Context, manifest Manifest) (IntegrityReport, 
 			inspectRegularFile(&report, field+".backup", file.BackupPath, file.PreviousSHA256, file.Mode)
 		}
 	}
+	if manifest.PreviousMetadata != nil {
+		inspectRegularFile(&report, "previous_metadata.manifest_backup", manifest.PreviousMetadata.ManifestBackupPath, manifest.PreviousMetadata.ManifestSHA256, 0o644)
+		inspectRegularFile(&report, "previous_metadata.receipt_backup", manifest.PreviousMetadata.ReceiptBackupPath, manifest.PreviousMetadata.ReceiptSHA256, 0o644)
+	}
 	inspectReceipt(&report, manifest)
 	pinned := inspectPinnedIntegrity(ctx, manifest)
 	report.Drifts = append(report.Drifts, pinned.Drifts...)

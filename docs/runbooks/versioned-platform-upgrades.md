@@ -24,6 +24,8 @@ separate operator decision tied to one exact manifest digest.
 - activation makes at most one supervisor restart attempt and verifies the
   running executable SHA-256, commit, and version;
 - the receipt is canonical and self-digested;
+- each successive release pins and retains the exact previous canonical
+  manifest and receipt before publishing any new platform bytes;
 - replaying the same manifest is a filesystem no-op and verifies the runtime
   before considering a restart;
 - rollback restores the manifest-pinned prior platform, makes one restart
@@ -106,6 +108,12 @@ absolute. Modes are JSON numbers: `493` is `0755`; `420` is `0644`.
       "mode": 493
     }
   ],
+  "previous_metadata": {
+    "manifest_sha256": "<sha256sum-of-previous-canonical-manifest-file>",
+    "manifest_backup_path": "/absolute/path/to/retained/install-manifest.previous.json",
+    "receipt_sha256": "<sha256sum-of-previous-install-receipt-file>",
+    "receipt_backup_path": "/absolute/path/to/retained/install-receipt.previous.json"
+  },
   "previous_sha256": "<previous-core-sha256>",
   "backup_path": "/absolute/path/to/retained/gc.backup",
   "receipt_path": "/absolute/path/to/city/.gc/platform/install-receipt.json",
@@ -155,6 +163,20 @@ Sort `managed_files` strictly by `name`. Use an empty
 `previous_sha256` only when the destination is required to be absent; rollback
 then removes that newly created file. Otherwise supply both the prior digest
 and a distinct retained backup path.
+
+Omit `previous_metadata` only for the first managed installation. Every later
+release must include it. Its two digests are SHA-256 hashes of the complete
+canonical files on disk (including their embedded self-digest fields), not the
+manifest's internal `manifest_sha256` value or the receipt's internal
+`receipt_sha256` value. Give each release distinct retained backup paths.
+
+A successive manifest must retain the same city, core destination and mode,
+and receipt path. It must name the installed release's core SHA as
+`previous_sha256`, preserve every previously managed file by name,
+destination, and mode, and bind each such file's `previous_sha256` to the
+previous manifest's candidate SHA. Its activation `previous_commit` and
+`previous_version` must equal the previous manifest's expected runtime. These
+relationships are verified before the first write.
 
 ## 4. Finalize and review the canonical manifest
 
@@ -244,9 +266,12 @@ gc platform rollback \
   --dry-run
 ```
 
-The plan restores or removes managed files in reverse publication order,
-restores the prior core, removes the candidate receipt and canonical live
-manifest, restarts once, and verifies the manifest-pinned previous runtime.
+The plan restores or removes managed files in reverse publication order and
+restores the prior core. For the first managed installation it removes the
+candidate receipt and canonical manifest. For a successive release it instead
+restores the exact previous receipt and canonical manifest from the
+digest-pinned metadata backups. It then restarts once and verifies the
+manifest-pinned previous runtime.
 
 After explicit rollback authorization tied to the same manifest digest:
 
