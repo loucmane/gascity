@@ -126,6 +126,7 @@ func validateManifest(manifest Manifest) error {
 		return errors.New("manifest core name is required")
 	}
 	for name, path := range map[string]string{
+		"city_path":        manifest.CityPath,
 		"core.source":      manifest.Core.Source,
 		"core.destination": manifest.Core.Destination,
 		"backup_path":      manifest.BackupPath,
@@ -135,7 +136,7 @@ func validateManifest(manifest Manifest) error {
 			return fmt.Errorf("manifest %s must be an absolute path: %q", name, path)
 		}
 	}
-	paths := []string{manifest.Core.Source, manifest.Core.Destination, manifest.BackupPath, manifest.ReceiptPath}
+	paths := []string{manifest.Core.Source, manifest.Core.Destination, manifest.BackupPath, manifest.ReceiptPath, DefaultManifestPath(manifest.CityPath)}
 	for i := range paths {
 		for j := i + 1; j < len(paths); j++ {
 			if filepath.Clean(paths[i]) == filepath.Clean(paths[j]) {
