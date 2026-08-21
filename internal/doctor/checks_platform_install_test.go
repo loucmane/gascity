@@ -75,6 +75,7 @@ func installDoctorFixture(t *testing.T, cityPath string) platforminstall.Manifes
 	manifest := platforminstall.Manifest{
 		Schema:         platforminstall.ManifestSchemaV1,
 		ReleaseID:      "test-release",
+		CityPath:       cityPath,
 		Core:           platforminstall.Artifact{Name: "gc", Source: candidatePath, Destination: destinationPath, SHA256: doctorSHA256(candidate), Mode: 0o755},
 		PreviousSHA256: doctorSHA256(previous),
 		BackupPath:     filepath.Join(cityPath, ".gc", "platform", "gc.previous"),

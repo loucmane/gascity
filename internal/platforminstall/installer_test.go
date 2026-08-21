@@ -83,6 +83,10 @@ func TestInstallPublishesCandidateWithExactBackupAndReceipt(t *testing.T) {
 	if got := mustReadFile(t, manifest.ReceiptPath); !bytes.Contains(got, []byte(`"result":"installed"`)) {
 		t.Fatalf("receipt file does not record installed result: %s", got)
 	}
+	manifestPath := DefaultManifestPath(manifest.CityPath)
+	if got := mustReadFile(t, manifestPath); !bytes.Equal(got, marshalManifest(t, manifest)) {
+		t.Fatalf("canonical manifest = %s, want exact input manifest", got)
+	}
 	if info, err := os.Stat(manifest.Core.Destination); err != nil {
 		t.Fatal(err)
 	} else if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
@@ -99,6 +103,7 @@ func TestInstallIdenticalReplayIsNoOp(t *testing.T) {
 	destinationBefore := mustStat(t, manifest.Core.Destination)
 	backupBefore := mustStat(t, manifest.BackupPath)
 	receiptBefore := mustStat(t, manifest.ReceiptPath)
+	manifestBefore := mustStat(t, DefaultManifestPath(manifest.CityPath))
 
 	receipt, err := Install(manifest)
 	if err != nil {
@@ -110,6 +115,44 @@ func TestInstallIdenticalReplayIsNoOp(t *testing.T) {
 	assertSameFileIdentityAndTime(t, manifest.Core.Destination, destinationBefore)
 	assertSameFileIdentityAndTime(t, manifest.BackupPath, backupBefore)
 	assertSameFileIdentityAndTime(t, manifest.ReceiptPath, receiptBefore)
+	assertSameFileIdentityAndTime(t, DefaultManifestPath(manifest.CityPath), manifestBefore)
+}
+
+func TestPlanInstallIsOrderedAndDoesNotMutate(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifest(t, dir, []byte("candidate"), []byte("installed"))
+	destinationBefore := mustStat(t, manifest.Core.Destination)
+	destinationBytes := mustReadFile(t, manifest.Core.Destination)
+
+	steps, err := Plan(manifest)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	wantActions := []string{
+		"verify-manifest",
+		"verify-candidate",
+		"verify-live-baseline",
+		"write-backup",
+		"publish-core",
+		"publish-manifest",
+		"write-receipt",
+		"verify-integrity",
+	}
+	if len(steps) != len(wantActions) {
+		t.Fatalf("Plan() steps = %+v, want %d steps", steps, len(wantActions))
+	}
+	for index, want := range wantActions {
+		if steps[index].Order != index+1 || steps[index].Action != want {
+			t.Errorf("Plan() step %d = %+v, want order=%d action=%q", index, steps[index], index+1, want)
+		}
+	}
+	assertSameFileIdentityAndTime(t, manifest.Core.Destination, destinationBefore)
+	if got := mustReadFile(t, manifest.Core.Destination); !bytes.Equal(got, destinationBytes) {
+		t.Fatalf("destination changed during plan: got %q want %q", got, destinationBytes)
+	}
+	assertPathAbsent(t, manifest.BackupPath)
+	assertPathAbsent(t, manifest.ReceiptPath)
+	assertPathAbsent(t, DefaultManifestPath(manifest.CityPath))
 }
 
 func TestInstallResumesAfterExactBackupWasWritten(t *testing.T) {
@@ -245,6 +288,7 @@ func TestInstallerReceiptFailureRollsBackExactPriorBinary(t *testing.T) {
 		t.Fatalf("destination after rollback = %q, want %q", got, want)
 	}
 	assertPathAbsent(t, manifest.ReceiptPath)
+	assertPathAbsent(t, DefaultManifestPath(manifest.CityPath))
 }
 
 func testManifest(t *testing.T, dir string, candidate, installed []byte) Manifest {
@@ -267,6 +311,7 @@ func testManifest(t *testing.T, dir string, candidate, installed []byte) Manifes
 	return finalizeManifest(t, Manifest{
 		Schema:         ManifestSchemaV1,
 		ReleaseID:      "v1.4.1-loucmane.1-d0a197d31",
+		CityPath:       dir,
 		Core:           Artifact{Name: "gc", Source: source, Destination: destination, SHA256: testSHA256(candidate), Mode: 0o755},
 		PreviousSHA256: testSHA256(installed),
 		BackupPath:     backup,

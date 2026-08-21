@@ -43,6 +43,7 @@ type Artifact struct {
 type Manifest struct {
 	Schema         string         `json:"schema"`
 	ReleaseID      string         `json:"release_id"`
+	CityPath       string         `json:"city_path"`
 	Core           Artifact       `json:"core"`
 	PreviousSHA256 string         `json:"previous_sha256"`
 	BackupPath     string         `json:"backup_path"`
