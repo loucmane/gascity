@@ -63,6 +63,7 @@ gc [flags]
 | [gc nudge](#gc-nudge) | Inspect and deliver deferred nudges |
 | [gc order](#gc-order) | Manage orders (scheduled and event-driven dispatch) |
 | [gc pack](#gc-pack) | Manage remote pack sources |
+| [gc platform](#gc-platform) | Manage a versioned Gas City platform installation |
 | [gc prime](#gc-prime) | Output the behavioral prompt for an agent |
 | [gc prompt](#gc-prompt) | Author and inspect agent prompt templates |
 | [gc register](#gc-register) | Register a city with the machine-wide supervisor |
@@ -3062,6 +3063,32 @@ gc pack release verify <source> [flags]
 | `--commit` | string |  | git commit or ref to verify |
 | `--hash` | string |  | expected sha256:&lt;64hex&gt; content hash |
 | `--path` | string |  | pack path inside the source repository |
+
+## gc platform
+
+Manage a versioned Gas City platform installation
+
+```
+gc platform
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| [gc platform install](#gc-platform-install) | Preflight or atomically apply a digest-pinned platform manifest |
+
+## gc platform install
+
+Preflight or atomically apply a digest-pinned platform manifest
+
+```
+gc platform install [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--apply` | bool |  | atomically apply the manifest (requires separate operator authorization) |
+| `--dry-run` | bool |  | run full preflight and print the ordered plan without mutation |
+| `--manifest` | string |  | absolute path to the signed/digest-pinned install manifest |
 
 ## gc prime
 
