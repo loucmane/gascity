@@ -248,6 +248,12 @@ func validateManifest(manifest Manifest) error {
 		if strings.TrimSpace(manifest.Activation.ExpectedVersion) == "" {
 			return errors.New("manifest activation.expected_version is required")
 		}
+		if err := validateGitCommit("activation.previous_commit", manifest.Activation.PreviousCommit); err != nil {
+			return err
+		}
+		if strings.TrimSpace(manifest.Activation.PreviousVersion) == "" {
+			return errors.New("manifest activation.previous_version is required")
+		}
 	}
 	if err := validateIntegritySpec(manifest.Integrity); err != nil {
 		return err

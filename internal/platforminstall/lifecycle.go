@@ -69,16 +69,83 @@ func Rollback(manifest Manifest) error {
 }
 
 // Revert restores the prior filesystem and then activates and verifies the
-// manifest-pinned previous runtime. This RED scaffold is replaced by the
-// verified rollback transition.
-func Revert(context.Context, Manifest, Lifecycle) (RuntimeProof, error) {
-	return RuntimeProof{}, fmt.Errorf("verified platform revert is disabled")
+// manifest-pinned previous runtime. Disk restoration deliberately precedes
+// the single restart attempt: a failed restart leaves the known prior bytes
+// in place for explicit operator recovery instead of retrying a transition.
+func Revert(ctx context.Context, manifest Manifest, lifecycle Lifecycle) (RuntimeProof, error) {
+	if lifecycle == nil {
+		return RuntimeProof{}, fmt.Errorf("platform rollback lifecycle is required")
+	}
+	if manifest.Activation == nil {
+		return RuntimeProof{}, fmt.Errorf("manifest activation is required")
+	}
+	if err := Rollback(manifest); err != nil {
+		return RuntimeProof{}, err
+	}
+
+	previousManifest := manifest
+	previousManifest.Core.SHA256 = manifest.PreviousSHA256
+	previousManifest.Activation = &ActivationSpec{
+		ExpectedCommit:  manifest.Activation.PreviousCommit,
+		ExpectedVersion: manifest.Activation.PreviousVersion,
+		PreviousCommit:  manifest.Activation.ExpectedCommit,
+		PreviousVersion: manifest.Activation.ExpectedVersion,
+	}
+	if err := lifecycle.Restart(ctx, previousManifest); err != nil {
+		return RuntimeProof{}, fmt.Errorf("restart previous supervisor: %w", err)
+	}
+	proof, err := lifecycle.Verify(ctx, previousManifest)
+	if err != nil {
+		return RuntimeProof{}, fmt.Errorf("verify previous supervisor: %w", err)
+	}
+	if err := validateRuntimeProof(previousManifest, proof); err != nil {
+		return RuntimeProof{}, fmt.Errorf("verify previous runtime: %w", err)
+	}
+	return proof, nil
 }
 
 // RollbackPlan returns the ordered rollback without mutating the filesystem.
-// This RED scaffold is replaced by the canonical rollback planner.
-func RollbackPlan(Manifest) ([]PlanStep, error) {
-	return nil, fmt.Errorf("platform rollback planning is disabled")
+func RollbackPlan(manifest Manifest) ([]PlanStep, error) {
+	state, err := preflightManifest(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("preflight rollback plan: %w", err)
+	}
+	if !state.coreAlreadyInstalled || !allManagedFilesInstalled(state.managedFiles) {
+		return nil, fmt.Errorf("rollback plan requires the complete candidate filesystem state")
+	}
+	if manifest.Activation == nil {
+		return nil, fmt.Errorf("manifest activation is required")
+	}
+
+	steps := make([]PlanStep, 0, len(state.managedFiles)+5)
+	for index := len(state.managedFiles) - 1; index >= 0; index-- {
+		file := state.managedFiles[index]
+		if file.previousPresent {
+			steps = append(steps, PlanStep{
+				Action:  "restore-managed-file:" + file.file.Name,
+				Path:    file.file.Destination,
+				SHA256:  file.file.PreviousSHA256,
+				Mutates: true,
+			})
+			continue
+		}
+		steps = append(steps, PlanStep{
+			Action:  "remove-managed-file:" + file.file.Name,
+			Path:    file.file.Destination,
+			Mutates: true,
+		})
+	}
+	steps = append(steps,
+		PlanStep{Action: "restore-core", Path: manifest.Core.Destination, SHA256: manifest.PreviousSHA256, Mutates: true},
+		PlanStep{Action: "remove-receipt", Path: manifest.ReceiptPath, Mutates: true},
+		PlanStep{Action: "remove-manifest", Path: DefaultManifestPath(manifest.CityPath), Mutates: true},
+		PlanStep{Action: "restart-supervisor", Path: manifest.Core.Destination, SHA256: manifest.PreviousSHA256, Mutates: true},
+		PlanStep{Action: "verify-previous-runtime", Path: manifest.Core.Destination, SHA256: manifest.PreviousSHA256},
+	)
+	for index := range steps {
+		steps[index].Order = index + 1
+	}
+	return steps, nil
 }
 
 func finalizeActivationReceipt(ctx context.Context, manifest Manifest, receipt Receipt, proof RuntimeProof) (Receipt, error) {
