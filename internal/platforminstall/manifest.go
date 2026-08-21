@@ -24,6 +24,12 @@ const (
 	ResultNoop = "noop"
 )
 
+// DefaultManifestPath returns the managed platform manifest location for a
+// city. Absence means that city has not opted into managed platform installs.
+func DefaultManifestPath(cityPath string) string {
+	return filepath.Join(cityPath, ".gc", "platform", "install-manifest.json")
+}
+
 // Artifact identifies one immutable release artifact and its destination.
 type Artifact struct {
 	Name        string `json:"name"`

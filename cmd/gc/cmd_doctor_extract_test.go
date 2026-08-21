@@ -60,6 +60,24 @@ func TestBuildDoctorChecksRegistersNamedAlwaysMinConflictCheck(t *testing.T) {
 	}
 }
 
+func TestBuildDoctorChecksRegistersPlatformInstallIntegrity(t *testing.T) {
+	cityDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte("[workspace]\nname = \"demo\"\n"), 0o644); err != nil {
+		t.Fatalf("write city.toml: %v", err)
+	}
+	t.Setenv("GC_DOLT", "skip")
+	cfg := &config.City{Workspace: config.Workspace{Name: "demo"}}
+
+	names := doctorCheckNames(buildDoctorChecks(cityDir, cfg, nil, buildDoctorChecksOpts{
+		ControllerRunning:    false,
+		SkipCityDoltCheck:    true,
+		SkipManagedDoltCheck: true,
+	}))
+	if got := doctorCheckIndex(names, "platform-install-integrity"); got < 0 {
+		t.Fatalf("platform-install-integrity check missing: %v", names)
+	}
+}
+
 func TestBuildDoctorChecksSkipsNamedAlwaysMinConflictCheckWithoutConfig(t *testing.T) {
 	cityDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte("[workspace]\nname = \"demo\"\n"), 0o644); err != nil {
