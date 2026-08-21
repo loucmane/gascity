@@ -177,11 +177,13 @@ ready work with `assignee=<named-session-identity>` and no generic route
 metadata, so the reconciler does not also treat the handoff as generic pool
 demand.
 
-The shared predicate is the agreement substrate. Failure envelopes
-intentionally differ: the worker path suppresses `bd ready` stderr and
-returns `[]` so a session exits cleanly, while the count form propagates
-the failure to `evaluatePool`, which records telemetry and falls back to
-the pool minimum.
+The shared predicate is the agreement substrate. Both failure envelopes keep
+the authoritative canonical read observable: the worker path exits non-zero
+with the `bd ready` diagnostic so `gc hook --claim` emits a work-query failure
+instead of draining as healthy `no_work`; the count form propagates the failure
+to `evaluatePool`, which records telemetry and falls back to the pool minimum.
+Only a successful empty canonical read may become `[]`. The worker's temporary
+legacy migration probes remain best-effort after that successful read.
 
 Diverging the two — for example, by adding a state filter to the
 work-query without updating the count form — re-introduces the
