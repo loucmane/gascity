@@ -207,10 +207,17 @@ Do not wrap the command in an automatic retry. The command itself handles an
 interrupted publication and verifies a replay before deciding whether a
 restart is still needed.
 
-After success:
+After success, run `gc doctor`. Treat the replay as a separate live command:
+present the post-install proof and obtain explicit replay authorization tied to
+the same manifest digest before invoking `--apply` again.
 
 ```bash
 gc doctor
+```
+
+After that replay authorization:
+
+```bash
 gc platform install \
   --manifest /absolute/path/platform-manifest.json \
   --apply
