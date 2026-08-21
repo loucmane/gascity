@@ -55,17 +55,27 @@ type ManagedFile struct {
 
 // Manifest is the digest-pinned input to one platform installation.
 type Manifest struct {
-	Schema         string          `json:"schema"`
-	ReleaseID      string          `json:"release_id"`
-	CityPath       string          `json:"city_path"`
-	Core           Artifact        `json:"core"`
-	ManagedFiles   []ManagedFile   `json:"managed_files,omitempty"`
-	PreviousSHA256 string          `json:"previous_sha256"`
-	BackupPath     string          `json:"backup_path"`
-	ReceiptPath    string          `json:"receipt_path"`
-	Activation     *ActivationSpec `json:"activation,omitempty"`
-	Integrity      *IntegritySpec  `json:"integrity,omitempty"`
-	ManifestSHA256 string          `json:"manifest_sha256,omitempty"`
+	Schema           string                `json:"schema"`
+	ReleaseID        string                `json:"release_id"`
+	CityPath         string                `json:"city_path"`
+	Core             Artifact              `json:"core"`
+	ManagedFiles     []ManagedFile         `json:"managed_files,omitempty"`
+	PreviousMetadata *PreviousMetadataSpec `json:"previous_metadata,omitempty"`
+	PreviousSHA256   string                `json:"previous_sha256"`
+	BackupPath       string                `json:"backup_path"`
+	ReceiptPath      string                `json:"receipt_path"`
+	Activation       *ActivationSpec       `json:"activation,omitempty"`
+	Integrity        *IntegritySpec        `json:"integrity,omitempty"`
+	ManifestSHA256   string                `json:"manifest_sha256,omitempty"`
+}
+
+// PreviousMetadataSpec pins the canonical manifest and receipt that a
+// successive release must preserve as its rollback authority.
+type PreviousMetadataSpec struct {
+	ManifestSHA256     string `json:"manifest_sha256"`
+	ManifestBackupPath string `json:"manifest_backup_path"`
+	ReceiptSHA256      string `json:"receipt_sha256"`
+	ReceiptBackupPath  string `json:"receipt_backup_path"`
 }
 
 // Receipt is the durable result of an installation attempt that reached a
