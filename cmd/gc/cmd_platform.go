@@ -23,7 +23,10 @@ func newPlatformCmd(stdout, stderr io.Writer) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newPlatformInstallCmd(stdout, stderr))
+	cmd.AddCommand(
+		newPlatformInstallCmd(stdout, stderr),
+		newPlatformRollbackCmd(stdout, stderr),
+	)
 	return cmd
 }
 
@@ -77,6 +80,60 @@ func newPlatformInstallCmd(stdout, _ io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "absolute path to the signed/digest-pinned install manifest")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "run full preflight and print the ordered plan without mutation")
 	cmd.Flags().BoolVar(&apply, "apply", false, "atomically apply the manifest (requires separate operator authorization)")
+	_ = cmd.MarkFlagRequired("manifest")
+	return cmd
+}
+
+func newPlatformRollbackCmd(stdout, _ io.Writer) *cobra.Command {
+	var manifestPath string
+	var dryRun bool
+	var apply bool
+	cmd := &cobra.Command{
+		Use:   "rollback",
+		Short: "Preflight or restore the manifest-pinned previous platform",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if dryRun == apply {
+				return fmt.Errorf("exactly one of --dry-run or --apply is required")
+			}
+			manifest, err := loadPlatformInstallManifest(manifestPath)
+			if err != nil {
+				return err
+			}
+			if dryRun {
+				steps, err := platforminstall.RollbackPlan(manifest)
+				if err != nil {
+					return fmt.Errorf("plan platform rollback: %w", err)
+				}
+				fmt.Fprintf(stdout, "platform rollback plan release=%q manifest_sha256=%s\n", manifest.ReleaseID, manifest.ManifestSHA256) //nolint:errcheck // best-effort stdout
+				for _, step := range steps {
+					mode := "CHECK"
+					if step.Mutates {
+						mode = "MUTATE"
+					}
+					fields := []string{fmt.Sprintf("%02d", step.Order), mode, step.Action}
+					if step.Path != "" {
+						fields = append(fields, "path="+step.Path)
+					}
+					if step.SHA256 != "" {
+						fields = append(fields, "sha256="+step.SHA256)
+					}
+					fmt.Fprintln(stdout, strings.Join(fields, " ")) //nolint:errcheck // best-effort stdout
+				}
+				return nil
+			}
+
+			proof, err := platforminstall.Revert(cmd.Context(), manifest, platformLifecycleFactory())
+			if err != nil {
+				return fmt.Errorf("apply platform rollback: %w", err)
+			}
+			fmt.Fprintf(stdout, "platform rollback result=restored release=%q manifest_sha256=%s artifact_sha256=%s commit=%s version=%q\n", manifest.ReleaseID, manifest.ManifestSHA256, proof.ExecutableSHA256, proof.Commit, proof.Version) //nolint:errcheck // best-effort stdout
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&manifestPath, "manifest", "", "absolute path to the signed/digest-pinned install manifest")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "run full rollback preflight and print the ordered plan without mutation")
+	cmd.Flags().BoolVar(&apply, "apply", false, "restore and verify the previous runtime (requires separate operator authorization)")
 	_ = cmd.MarkFlagRequired("manifest")
 	return cmd
 }

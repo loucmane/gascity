@@ -3075,6 +3075,7 @@ gc platform
 | Subcommand | Description |
 |------------|-------------|
 | [gc platform install](#gc-platform-install) | Preflight or atomically apply a digest-pinned platform manifest |
+| [gc platform rollback](#gc-platform-rollback) | Preflight or restore the manifest-pinned previous platform |
 
 ## gc platform install
 
@@ -3088,6 +3089,20 @@ gc platform install [flags]
 |------|------|---------|-------------|
 | `--apply` | bool |  | atomically apply the manifest (requires separate operator authorization) |
 | `--dry-run` | bool |  | run full preflight and print the ordered plan without mutation |
+| `--manifest` | string |  | absolute path to the signed/digest-pinned install manifest |
+
+## gc platform rollback
+
+Preflight or restore the manifest-pinned previous platform
+
+```
+gc platform rollback [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--apply` | bool |  | restore and verify the previous runtime (requires separate operator authorization) |
+| `--dry-run` | bool |  | run full rollback preflight and print the ordered plan without mutation |
 | `--manifest` | string |  | absolute path to the signed/digest-pinned install manifest |
 
 ## gc prime

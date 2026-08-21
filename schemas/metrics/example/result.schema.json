@@ -207,7 +207,8 @@
               "whoami",
               "runtime-heartbeat",
               "pack-registry-requests",
-              "platform-install"
+              "platform-install",
+              "platform-rollback"
             ]
           },
           "event_id": {
