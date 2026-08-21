@@ -122,21 +122,35 @@ func ManifestDigest(manifest Manifest) (string, error) {
 }
 
 // FinalizeManifest validates an unsigned manifest and returns its canonical,
-// self-digested representation. This RED scaffold is replaced by the strict
-// manifest authoring boundary.
-func FinalizeManifest([]byte) (Manifest, []byte, error) {
-	return Manifest{}, nil, errors.New("platform manifest finalization is disabled")
+// self-digested representation. A populated digest is rejected instead of
+// silently re-signing a possibly stale or already reviewed document.
+func FinalizeManifest(data []byte) (Manifest, []byte, error) {
+	manifest, err := decodeManifest(data)
+	if err != nil {
+		return Manifest{}, nil, err
+	}
+	if manifest.ManifestSHA256 != "" {
+		return Manifest{}, nil, errors.New("manifest_sha256 must be empty before finalization")
+	}
+	if err := validateManifestContent(manifest); err != nil {
+		return Manifest{}, nil, err
+	}
+	digest, err := ManifestDigest(manifest)
+	if err != nil {
+		return Manifest{}, nil, err
+	}
+	manifest.ManifestSHA256 = digest
+	canonical, err := MarshalManifest(manifest)
+	if err != nil {
+		return Manifest{}, nil, fmt.Errorf("marshal finalized platform manifest: %w", err)
+	}
+	return manifest, canonical, nil
 }
 
 // LoadManifest decodes and validates a platform-install manifest.
 func LoadManifest(data []byte) (Manifest, error) {
-	var manifest Manifest
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&manifest); err != nil {
-		return Manifest{}, fmt.Errorf("decode platform install manifest: %w", err)
-	}
-	if err := requireJSONEOF(decoder); err != nil {
+	manifest, err := decodeManifest(data)
+	if err != nil {
 		return Manifest{}, err
 	}
 	if err := validateManifest(manifest); err != nil {
@@ -148,6 +162,19 @@ func LoadManifest(data []byte) (Manifest, error) {
 	}
 	if manifest.ManifestSHA256 != want {
 		return Manifest{}, fmt.Errorf("manifest_sha256 mismatch: got %q want %q", manifest.ManifestSHA256, want)
+	}
+	return manifest, nil
+}
+
+func decodeManifest(data []byte) (Manifest, error) {
+	var manifest Manifest
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&manifest); err != nil {
+		return Manifest{}, fmt.Errorf("decode platform install manifest: %w", err)
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return Manifest{}, err
 	}
 	return manifest, nil
 }
@@ -164,6 +191,13 @@ func requireJSONEOF(decoder *json.Decoder) error {
 }
 
 func validateManifest(manifest Manifest) error {
+	if err := validateManifestContent(manifest); err != nil {
+		return err
+	}
+	return validateSHA256("manifest_sha256", manifest.ManifestSHA256)
+}
+
+func validateManifestContent(manifest Manifest) error {
 	if manifest.Schema != ManifestSchemaV1 {
 		return fmt.Errorf("manifest schema %q is unsupported", manifest.Schema)
 	}
@@ -240,9 +274,6 @@ func validateManifest(manifest Manifest) error {
 		return err
 	}
 	if err := validateSHA256("previous_sha256", manifest.PreviousSHA256); err != nil {
-		return err
-	}
-	if err := validateSHA256("manifest_sha256", manifest.ManifestSHA256); err != nil {
 		return err
 	}
 	if manifest.Core.Mode != 0o755 {
