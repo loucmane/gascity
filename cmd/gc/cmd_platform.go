@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,17 +11,7 @@ import (
 )
 
 var platformLifecycleFactory = func() platforminstall.Lifecycle {
-	return disabledPlatformLifecycle{}
-}
-
-type disabledPlatformLifecycle struct{}
-
-func (disabledPlatformLifecycle) Restart(context.Context, platforminstall.Manifest) error {
-	return fmt.Errorf("platform supervisor lifecycle is not wired")
-}
-
-func (disabledPlatformLifecycle) Verify(context.Context, platforminstall.Manifest) (platforminstall.RuntimeProof, error) {
-	return platforminstall.RuntimeProof{}, fmt.Errorf("platform supervisor lifecycle is not wired")
+	return newPlatformSupervisorLifecycle()
 }
 
 func newPlatformCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -46,7 +35,7 @@ func newPlatformInstallCmd(stdout, _ io.Writer) *cobra.Command {
 		Use:   "install",
 		Short: "Preflight or atomically apply a digest-pinned platform manifest",
 		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if dryRun == apply {
 				return fmt.Errorf("exactly one of --dry-run or --apply is required")
 			}
@@ -77,7 +66,7 @@ func newPlatformInstallCmd(stdout, _ io.Writer) *cobra.Command {
 				return nil
 			}
 
-			receipt, err := platforminstall.Install(manifest)
+			receipt, err := platforminstall.Apply(cmd.Context(), manifest, platformLifecycleFactory())
 			if err != nil {
 				return fmt.Errorf("apply platform install: %w", err)
 			}
