@@ -24,10 +24,6 @@ const (
 	ResultNoop = "noop"
 )
 
-// ErrApplyDisabled is returned by the validation-only red baseline. It keeps
-// release publication fail-closed until the transactional publisher lands.
-var ErrApplyDisabled = errors.New("platform install apply is disabled")
-
 // Artifact identifies one immutable release artifact and its destination.
 type Artifact struct {
 	Name        string `json:"name"`
@@ -42,9 +38,10 @@ type Manifest struct {
 	Schema         string   `json:"schema"`
 	ReleaseID      string   `json:"release_id"`
 	Core           Artifact `json:"core"`
+	PreviousSHA256 string   `json:"previous_sha256"`
 	BackupPath     string   `json:"backup_path"`
 	ReceiptPath    string   `json:"receipt_path"`
-	ManifestSHA256 string   `json:"manifest_sha256"`
+	ManifestSHA256 string   `json:"manifest_sha256,omitempty"`
 }
 
 // Receipt is the durable result of an installation attempt that reached a
@@ -56,6 +53,7 @@ type Receipt struct {
 	ArtifactSHA256 string `json:"artifact_sha256"`
 	PreviousSHA256 string `json:"previous_sha256,omitempty"`
 	Result         string `json:"result"`
+	ReceiptSHA256  string `json:"receipt_sha256,omitempty"`
 }
 
 // MarshalManifest serializes a manifest without insignificant whitespace.
@@ -140,6 +138,9 @@ func validateManifest(manifest Manifest) error {
 	if err := validateSHA256("core.sha256", manifest.Core.SHA256); err != nil {
 		return err
 	}
+	if err := validateSHA256("previous_sha256", manifest.PreviousSHA256); err != nil {
+		return err
+	}
 	if err := validateSHA256("manifest_sha256", manifest.ManifestSHA256); err != nil {
 		return err
 	}
@@ -159,44 +160,20 @@ func validateSHA256(name, value string) error {
 
 type installer struct {
 	rename       func(string, string) error
+	syncDir      func(string) error
 	writeReceipt func(string, Receipt) error
 }
 
 func newInstaller() *installer {
-	return &installer{
-		rename: os.Rename,
-		writeReceipt: func(string, Receipt) error {
-			return ErrApplyDisabled
-		},
-	}
+	installer := &installer{rename: os.Rename, syncDir: syncDirectory}
+	installer.writeReceipt = installer.writeReceiptFile
+	return installer
 }
 
 // Install validates and preflights a manifest, then applies it through the
-// transactional installer. The red baseline intentionally fails closed at
-// the publication boundary.
+// transactional installer.
 func Install(manifest Manifest) (Receipt, error) {
 	return newInstaller().install(manifest)
-}
-
-func (i *installer) install(manifest Manifest) (Receipt, error) {
-	if err := validateManifest(manifest); err != nil {
-		return Receipt{}, err
-	}
-	want, err := ManifestDigest(manifest)
-	if err != nil {
-		return Receipt{}, err
-	}
-	if manifest.ManifestSHA256 != want {
-		return Receipt{}, fmt.Errorf("manifest_sha256 mismatch: got %q want %q", manifest.ManifestSHA256, want)
-	}
-	data, err := os.ReadFile(manifest.Core.Source)
-	if err != nil {
-		return Receipt{}, fmt.Errorf("read candidate artifact: %w", err)
-	}
-	if got := sha256Hex(data); got != manifest.Core.SHA256 {
-		return Receipt{}, fmt.Errorf("candidate sha256 mismatch: got %s want %s", got, manifest.Core.SHA256)
-	}
-	return Receipt{}, ErrApplyDisabled
 }
 
 func sha256Hex(data []byte) string {

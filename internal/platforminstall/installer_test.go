@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func testSHA256(data []byte) string {
@@ -41,6 +40,24 @@ func TestInstallPreflightsCandidateBeforeMutation(t *testing.T) {
 	}
 	if got := mustReadFile(t, manifest.Core.Destination); !bytes.Equal(got, before) {
 		t.Fatalf("destination changed after preflight failure: got %q want %q", got, before)
+	}
+	assertPathAbsent(t, manifest.BackupPath)
+	assertPathAbsent(t, manifest.ReceiptPath)
+}
+
+func TestInstallRejectsUnexpectedLiveBaselineBeforeMutation(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifest(t, dir, []byte("candidate"), []byte("installed"))
+	if err := os.WriteFile(manifest.Core.Destination, []byte("unexpected-drift"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Install(manifest)
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("installed artifact sha256 mismatch")) {
+		t.Fatalf("Install() error = %v, want installed artifact sha256 mismatch", err)
+	}
+	if got := mustReadFile(t, manifest.Core.Destination); string(got) != "unexpected-drift" {
+		t.Fatalf("destination changed after baseline mismatch: %q", got)
 	}
 	assertPathAbsent(t, manifest.BackupPath)
 	assertPathAbsent(t, manifest.ReceiptPath)
@@ -83,7 +100,6 @@ func TestInstallIdenticalReplayIsNoOp(t *testing.T) {
 	backupBefore := mustStat(t, manifest.BackupPath)
 	receiptBefore := mustStat(t, manifest.ReceiptPath)
 
-	time.Sleep(10 * time.Millisecond)
 	receipt, err := Install(manifest)
 	if err != nil {
 		t.Fatalf("second Install() error = %v", err)
@@ -94,6 +110,107 @@ func TestInstallIdenticalReplayIsNoOp(t *testing.T) {
 	assertSameFileIdentityAndTime(t, manifest.Core.Destination, destinationBefore)
 	assertSameFileIdentityAndTime(t, manifest.BackupPath, backupBefore)
 	assertSameFileIdentityAndTime(t, manifest.ReceiptPath, receiptBefore)
+}
+
+func TestInstallResumesAfterExactBackupWasWritten(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifest(t, dir, []byte("candidate"), []byte("installed"))
+	if err := os.MkdirAll(filepath.Dir(manifest.BackupPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.BackupPath, []byte("installed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backupBefore := mustStat(t, manifest.BackupPath)
+
+	receipt, err := Install(manifest)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if receipt.Result != ResultInstalled {
+		t.Fatalf("receipt result = %q, want %q", receipt.Result, ResultInstalled)
+	}
+	assertSameFileIdentityAndTime(t, manifest.BackupPath, backupBefore)
+	if got := mustReadFile(t, manifest.Core.Destination); string(got) != "candidate" {
+		t.Fatalf("destination = %q, want candidate", got)
+	}
+}
+
+func TestInstallRecoversReceiptAfterCandidateWasPublished(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifest(t, dir, []byte("candidate"), []byte("installed"))
+	if err := os.MkdirAll(filepath.Dir(manifest.BackupPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.BackupPath, []byte("installed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.Core.Destination, []byte("candidate"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	destinationBefore := mustStat(t, manifest.Core.Destination)
+	backupBefore := mustStat(t, manifest.BackupPath)
+
+	receipt, err := Install(manifest)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if receipt.Result != ResultInstalled {
+		t.Fatalf("receipt result = %q, want %q", receipt.Result, ResultInstalled)
+	}
+	assertSameFileIdentityAndTime(t, manifest.Core.Destination, destinationBefore)
+	assertSameFileIdentityAndTime(t, manifest.BackupPath, backupBefore)
+	if _, err := loadReceipt(manifest.ReceiptPath); err != nil {
+		t.Fatalf("loadReceipt() after recovery = %v", err)
+	}
+}
+
+func TestInstallerDestinationDirectorySyncFailureRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifest(t, dir, []byte("candidate"), []byte("installed"))
+	want := mustReadFile(t, manifest.Core.Destination)
+	inst := newInstaller()
+	destinationDir := filepath.Dir(manifest.Core.Destination)
+	inst.syncDir = func(path string) error {
+		if path == destinationDir {
+			return errors.New("injected destination fsync failure")
+		}
+		return syncDirectory(path)
+	}
+
+	_, err := inst.install(manifest)
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("injected destination fsync failure")) {
+		t.Fatalf("install() error = %v, want injected destination fsync failure", err)
+	}
+	if got := mustReadFile(t, manifest.Core.Destination); !bytes.Equal(got, want) {
+		t.Fatalf("destination after fsync failure = %q, want %q", got, want)
+	}
+	assertPathAbsent(t, manifest.ReceiptPath)
+}
+
+func TestInstallRejectsSymlinkedDestinationBeforeMutation(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifest(t, dir, []byte("candidate"), []byte("installed"))
+	referent := filepath.Join(dir, "protected")
+	if err := os.WriteFile(referent, []byte("protected"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(manifest.Core.Destination); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(referent, manifest.Core.Destination); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Install(manifest)
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("installed artifact must be a regular file")) {
+		t.Fatalf("Install() error = %v, want regular-file refusal", err)
+	}
+	if got := mustReadFile(t, referent); string(got) != "protected" {
+		t.Fatalf("symlink referent changed: %q", got)
+	}
+	assertPathAbsent(t, manifest.BackupPath)
+	assertPathAbsent(t, manifest.ReceiptPath)
 }
 
 func TestInstallerPublishFailureLeavesInstalledBinaryUntouched(t *testing.T) {
@@ -148,11 +265,12 @@ func testManifest(t *testing.T, dir string, candidate, installed []byte) Manifes
 		t.Fatal(err)
 	}
 	return finalizeManifest(t, Manifest{
-		Schema:      ManifestSchemaV1,
-		ReleaseID:   "v1.4.1-loucmane.1-d0a197d31",
-		Core:        Artifact{Name: "gc", Source: source, Destination: destination, SHA256: testSHA256(candidate), Mode: 0o755},
-		BackupPath:  backup,
-		ReceiptPath: receipt,
+		Schema:         ManifestSchemaV1,
+		ReleaseID:      "v1.4.1-loucmane.1-d0a197d31",
+		Core:           Artifact{Name: "gc", Source: source, Destination: destination, SHA256: testSHA256(candidate), Mode: 0o755},
+		PreviousSHA256: testSHA256(installed),
+		BackupPath:     backup,
+		ReceiptPath:    receipt,
 	})
 }
 
