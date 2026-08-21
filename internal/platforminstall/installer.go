@@ -12,14 +12,26 @@ import (
 const receiptSchemaV1 = "gc.platform-install-receipt.v1"
 
 type preflight struct {
-	candidate      []byte
-	previous       []byte
-	previousSHA256 string
-	manifest       []byte
-	noopReceipt    *Receipt
-	reuseBackup    bool
-	reuseManifest  bool
-	recoverReceipt bool
+	candidate            []byte
+	previous             []byte
+	previousSHA256       string
+	manifest             []byte
+	managedFiles         []managedFilePreflight
+	noopReceipt          *Receipt
+	reuseBackup          bool
+	reuseManifest        bool
+	coreAlreadyInstalled bool
+	corePublished        bool
+}
+
+type managedFilePreflight struct {
+	file             ManagedFile
+	candidate        []byte
+	previous         []byte
+	previousPresent  bool
+	reuseBackup      bool
+	alreadyInstalled bool
+	published        bool
 }
 
 func (i *installer) install(manifest Manifest) (Receipt, error) {
@@ -36,36 +48,73 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 		return result, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(manifest.ReceiptPath), 0o755); err != nil {
-		return Receipt{}, fmt.Errorf("create receipt directory: %w", err)
-	}
 	manifestPath := DefaultManifestPath(manifest.CityPath)
-	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
-		return Receipt{}, fmt.Errorf("create manifest directory: %w", err)
+	directories := []string{
+		filepath.Dir(manifest.ReceiptPath),
+		filepath.Dir(manifestPath),
+		filepath.Dir(manifest.BackupPath),
+		filepath.Dir(manifest.Core.Destination),
 	}
-	if !state.recoverReceipt {
-		if err := os.MkdirAll(filepath.Dir(manifest.BackupPath), 0o755); err != nil {
-			return Receipt{}, fmt.Errorf("create backup directory: %w", err)
+	for _, file := range state.managedFiles {
+		directories = append(directories, filepath.Dir(file.file.Destination))
+		if file.previousPresent {
+			directories = append(directories, filepath.Dir(file.file.BackupPath))
 		}
-		if !state.reuseBackup {
-			if err := i.writeAtomic(manifest.BackupPath, state.previous, os.FileMode(manifest.Core.Mode)); err != nil {
-				return Receipt{}, fmt.Errorf("write exact prior-binary backup: %w", err)
-			}
+	}
+	for _, directory := range directories {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			return Receipt{}, fmt.Errorf("create install directory %q: %w", directory, err)
 		}
-		if got, err := digestRegularFile(manifest.BackupPath); err != nil {
-			return Receipt{}, fmt.Errorf("verify prior-binary backup: %w", err)
-		} else if got != state.previousSHA256 {
-			return Receipt{}, fmt.Errorf("verify prior-binary backup: sha256 got %s want %s", got, state.previousSHA256)
-		}
+	}
 
+	if !state.reuseBackup {
+		if err := i.writeAtomic(manifest.BackupPath, state.previous, os.FileMode(manifest.Core.Mode)); err != nil {
+			return Receipt{}, fmt.Errorf("write exact prior-binary backup: %w", err)
+		}
+	}
+	if got, err := digestRegularFile(manifest.BackupPath); err != nil {
+		return Receipt{}, fmt.Errorf("verify prior-binary backup: %w", err)
+	} else if got != state.previousSHA256 {
+		return Receipt{}, fmt.Errorf("verify prior-binary backup: sha256 got %s want %s", got, state.previousSHA256)
+	}
+	for index := range state.managedFiles {
+		file := &state.managedFiles[index]
+		if !file.previousPresent || file.reuseBackup {
+			continue
+		}
+		if err := i.writeAtomic(file.file.BackupPath, file.previous, os.FileMode(file.file.Mode)); err != nil {
+			return Receipt{}, fmt.Errorf("write exact managed-file backup %q: %w", file.file.Name, err)
+		}
+		file.reuseBackup = true
+	}
+
+	if !state.coreAlreadyInstalled {
 		if err := i.writeAtomic(manifest.Core.Destination, state.candidate, os.FileMode(manifest.Core.Mode)); err != nil {
 			if got, digestErr := digestRegularFile(manifest.Core.Destination); digestErr == nil && got == manifest.Core.SHA256 {
-				if rollbackErr := i.rollback(manifest, state.previous, state.previousSHA256); rollbackErr != nil {
+				state.corePublished = true
+				if rollbackErr := i.rollbackTransaction(manifest, state); rollbackErr != nil {
 					return Receipt{}, fmt.Errorf("publish candidate artifact: %w; rollback also failed: %w", err, rollbackErr)
 				}
 			}
 			return Receipt{}, fmt.Errorf("publish candidate artifact: %w", err)
 		}
+		state.corePublished = true
+	}
+	for index := range state.managedFiles {
+		file := &state.managedFiles[index]
+		if file.alreadyInstalled {
+			continue
+		}
+		if err := i.writeAtomic(file.file.Destination, file.candidate, os.FileMode(file.file.Mode)); err != nil {
+			if got, digestErr := digestRegularFile(file.file.Destination); digestErr == nil && got == file.file.SHA256 {
+				file.published = true
+			}
+			if rollbackErr := i.rollbackTransaction(manifest, state); rollbackErr != nil {
+				return Receipt{}, fmt.Errorf("publish managed file %q: %w; rollback also failed: %w", file.file.Name, err, rollbackErr)
+			}
+			return Receipt{}, fmt.Errorf("publish managed file %q: %w", file.file.Name, err)
+		}
+		file.published = true
 	}
 	receipt := Receipt{
 		Schema:         receiptSchemaV1,
@@ -73,10 +122,11 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 		ManifestSHA256: manifest.ManifestSHA256,
 		ArtifactSHA256: manifest.Core.SHA256,
 		PreviousSHA256: state.previousSHA256,
+		ManagedFiles:   receiptManagedFiles(manifest.ManagedFiles),
 		Result:         ResultInstalled,
 	}
 	if err := finalizeReceipt(&receipt); err != nil {
-		if rollbackErr := i.rollback(manifest, state.previous, state.previousSHA256); rollbackErr != nil {
+		if rollbackErr := i.rollbackTransaction(manifest, state); rollbackErr != nil {
 			return Receipt{}, fmt.Errorf("finalize install receipt: %w; rollback also failed: %w", err, rollbackErr)
 		}
 		return Receipt{}, fmt.Errorf("finalize install receipt: %w", err)
@@ -84,10 +134,7 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 	manifestPublished := false
 	if !state.reuseManifest {
 		if err := i.writeAtomic(manifestPath, state.manifest, 0o644); err != nil {
-			if state.recoverReceipt {
-				return Receipt{}, fmt.Errorf("write recovered install manifest: %w", err)
-			}
-			if rollbackErr := i.rollbackAndRemoveMetadata(manifest, state.previous, state.previousSHA256, true); rollbackErr != nil {
+			if rollbackErr := i.rollbackTransactionAndRemoveMetadata(manifest, state, true); rollbackErr != nil {
 				return Receipt{}, fmt.Errorf("write install manifest: %w; rollback also failed: %w", err, rollbackErr)
 			}
 			return Receipt{}, fmt.Errorf("write install manifest: %w", err)
@@ -95,10 +142,7 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 		manifestPublished = true
 	}
 	if err := i.writeReceipt(manifest.ReceiptPath, receipt); err != nil {
-		if state.recoverReceipt {
-			return Receipt{}, fmt.Errorf("write recovered install receipt: %w", err)
-		}
-		if rollbackErr := i.rollbackAndRemoveMetadata(manifest, state.previous, state.previousSHA256, manifestPublished); rollbackErr != nil {
+		if rollbackErr := i.rollbackTransactionAndRemoveMetadata(manifest, state, manifestPublished); rollbackErr != nil {
 			return Receipt{}, fmt.Errorf("write install receipt: %w; rollback also failed: %w", err, rollbackErr)
 		}
 		return Receipt{}, fmt.Errorf("write install receipt: %w", err)
@@ -132,59 +176,77 @@ func preflightManifest(manifest Manifest) (*preflight, error) {
 	if got := sha256Hex(candidate); got != manifest.Core.SHA256 {
 		return nil, fmt.Errorf("candidate sha256 mismatch: got %s want %s", got, manifest.Core.SHA256)
 	}
-	previous, err := readRegularFile(manifest.Core.Destination, "installed artifact")
+	installed, err := readRegularFile(manifest.Core.Destination, "installed artifact")
 	if err != nil {
 		return nil, err
 	}
-	previousSHA := sha256Hex(previous)
-	if previousSHA != manifest.PreviousSHA256 && previousSHA != manifest.Core.SHA256 {
-		return nil, fmt.Errorf("installed artifact sha256 mismatch: got %s want current %s or candidate %s", previousSHA, manifest.PreviousSHA256, manifest.Core.SHA256)
+	installedSHA := sha256Hex(installed)
+	if installedSHA != manifest.PreviousSHA256 && installedSHA != manifest.Core.SHA256 {
+		return nil, fmt.Errorf("installed artifact sha256 mismatch: got %s want current %s or candidate %s", installedSHA, manifest.PreviousSHA256, manifest.Core.SHA256)
 	}
+	state := &preflight{
+		candidate:            candidate,
+		previous:             installed,
+		previousSHA256:       installedSHA,
+		manifest:             manifestBytes,
+		reuseManifest:        reuseManifest,
+		coreAlreadyInstalled: installedSHA == manifest.Core.SHA256,
+	}
+	if state.coreAlreadyInstalled {
+		backup, backupErr := readRegularFile(manifest.BackupPath, "rollback backup")
+		if backupErr != nil {
+			return nil, fmt.Errorf("installed artifact matches candidate: %w", backupErr)
+		}
+		if backupSHA := sha256Hex(backup); backupSHA != manifest.PreviousSHA256 {
+			return nil, fmt.Errorf("rollback backup sha256 mismatch: got %s want %s", backupSHA, manifest.PreviousSHA256)
+		}
+		state.previous = backup
+		state.previousSHA256 = manifest.PreviousSHA256
+		state.reuseBackup = true
+	}
+	managedFiles, err := preflightManagedFiles(manifest.ManagedFiles)
+	if err != nil {
+		return nil, err
+	}
+	state.managedFiles = managedFiles
 
-	if previousSHA == manifest.Core.SHA256 {
-		if _, err := os.Lstat(manifest.ReceiptPath); errors.Is(err, os.ErrNotExist) {
-			backup, backupErr := readRegularFile(manifest.BackupPath, "rollback backup")
-			if backupErr != nil {
-				return nil, fmt.Errorf("installed artifact matches candidate without a receipt: %w", backupErr)
+	receiptInfo, receiptStatErr := os.Lstat(manifest.ReceiptPath)
+	if receiptStatErr != nil && !errors.Is(receiptStatErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect install receipt: %w", receiptStatErr)
+	}
+	receiptExists := receiptStatErr == nil
+	if receiptExists && !receiptInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("receipt path must be a regular file, got mode %s", receiptInfo.Mode())
+	}
+	if state.coreAlreadyInstalled {
+		if !allManagedFilesInstalled(state.managedFiles) {
+			if receiptExists {
+				return nil, errors.New("receipt exists but one or more managed files do not match the candidate")
 			}
-			if backupSHA := sha256Hex(backup); backupSHA != manifest.PreviousSHA256 {
-				return nil, fmt.Errorf("rollback backup sha256 mismatch: got %s want %s", backupSHA, manifest.PreviousSHA256)
-			}
-			return &preflight{
-				candidate:      candidate,
-				previous:       backup,
-				previousSHA256: sha256Hex(backup),
-				manifest:       manifestBytes,
-				reuseBackup:    true,
-				reuseManifest:  reuseManifest,
-				recoverReceipt: true,
-			}, nil
-		} else if err != nil {
-			return nil, fmt.Errorf("inspect install receipt: %w", err)
+			return state, nil
 		}
-		receipt, err := loadReceipt(manifest.ReceiptPath)
-		if err != nil {
-			return nil, fmt.Errorf("installed artifact matches candidate but receipt is not valid: %w", err)
+		if !receiptExists {
+			return state, nil
 		}
-		if receipt.ManifestSHA256 != manifest.ManifestSHA256 || receipt.ArtifactSHA256 != manifest.Core.SHA256 || receipt.PreviousSHA256 != manifest.PreviousSHA256 || receipt.ReleaseID != manifest.ReleaseID {
-			return nil, errors.New("installed artifact matches candidate but receipt identifies a different release")
+		receipt, loadErr := loadReceipt(manifest.ReceiptPath)
+		if loadErr != nil {
+			return nil, fmt.Errorf("installed artifacts match candidate but receipt is not valid: %w", loadErr)
 		}
-		backupMatches, err := existingRegularFileMatches(manifest.BackupPath, receipt.PreviousSHA256)
-		if err != nil {
-			return nil, fmt.Errorf("validate no-op backup: %w", err)
-		}
-		if !backupMatches {
-			return nil, errors.New("installed artifact matches candidate but its rollback backup is absent")
+		if !receiptMatchesManifest(receipt, manifest) {
+			return nil, errors.New("installed artifacts match candidate but receipt identifies a different release")
 		}
 		if !reuseManifest {
-			return nil, errors.New("installed artifact and receipt match candidate but canonical manifest is absent")
+			return nil, errors.New("installed artifacts and receipt match candidate but canonical manifest is absent")
 		}
-		return &preflight{candidate: candidate, previous: previous, previousSHA256: previousSHA, manifest: manifestBytes, noopReceipt: &receipt, reuseManifest: true}, nil
+		state.noopReceipt = &receipt
+		return state, nil
 	}
-	backupExists, err := existingRegularFileMatches(manifest.BackupPath, previousSHA)
+
+	backupExists, err := existingRegularFileMatches(manifest.BackupPath, installedSHA)
 	if err != nil {
 		return nil, fmt.Errorf("preflight backup: %w", err)
 	}
+	state.reuseBackup = backupExists
 	if err := requireAbsentOrRegular(manifest.ReceiptPath, "receipt"); err != nil {
 		return nil, err
 	}
@@ -193,7 +255,107 @@ func preflightManifest(manifest Manifest) (*preflight, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("inspect receipt path: %w", err)
 	}
-	return &preflight{candidate: candidate, previous: previous, previousSHA256: previousSHA, manifest: manifestBytes, reuseBackup: backupExists, reuseManifest: reuseManifest}, nil
+	return state, nil
+}
+
+func preflightManagedFiles(files []ManagedFile) ([]managedFilePreflight, error) {
+	states := make([]managedFilePreflight, 0, len(files))
+	for _, file := range files {
+		state := managedFilePreflight{file: file}
+		candidate, err := readRegularFile(file.Source, "managed file "+file.Name+" source")
+		if err != nil {
+			return nil, err
+		}
+		if got := sha256Hex(candidate); got != file.SHA256 {
+			return nil, fmt.Errorf("managed file %q source sha256 mismatch: got %s want %s", file.Name, got, file.SHA256)
+		}
+		state.candidate = candidate
+
+		info, err := os.Lstat(file.Destination)
+		if errors.Is(err, os.ErrNotExist) {
+			if file.PreviousSHA256 != "" {
+				return nil, fmt.Errorf("managed file %q destination is missing, want prior sha256 %s", file.Name, file.PreviousSHA256)
+			}
+			states = append(states, state)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("inspect managed file %q destination: %w", file.Name, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("managed file %q destination must be a regular file, got mode %s", file.Name, info.Mode())
+		}
+		installed, err := os.ReadFile(file.Destination)
+		if err != nil {
+			return nil, fmt.Errorf("read managed file %q destination: %w", file.Name, err)
+		}
+		installedSHA := sha256Hex(installed)
+		if installedSHA == file.SHA256 {
+			state.alreadyInstalled = true
+			if file.PreviousSHA256 != "" {
+				backup, backupErr := readRegularFile(file.BackupPath, "managed file "+file.Name+" backup")
+				if backupErr != nil {
+					return nil, fmt.Errorf("managed file %q matches candidate: %w", file.Name, backupErr)
+				}
+				if got := sha256Hex(backup); got != file.PreviousSHA256 {
+					return nil, fmt.Errorf("managed file %q backup sha256 mismatch: got %s want %s", file.Name, got, file.PreviousSHA256)
+				}
+				state.previous = backup
+				state.previousPresent = true
+				state.reuseBackup = true
+			}
+			states = append(states, state)
+			continue
+		}
+		if file.PreviousSHA256 == "" {
+			return nil, fmt.Errorf("managed file %q destination exists with sha256 %s, want absent or candidate %s", file.Name, installedSHA, file.SHA256)
+		}
+		if installedSHA != file.PreviousSHA256 {
+			return nil, fmt.Errorf("managed file %q destination sha256 mismatch: got %s want prior %s or candidate %s", file.Name, installedSHA, file.PreviousSHA256, file.SHA256)
+		}
+		state.previous = installed
+		state.previousPresent = true
+		backupExists, backupErr := existingRegularFileMatches(file.BackupPath, file.PreviousSHA256)
+		if backupErr != nil {
+			return nil, fmt.Errorf("preflight managed file %q backup: %w", file.Name, backupErr)
+		}
+		state.reuseBackup = backupExists
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func allManagedFilesInstalled(files []managedFilePreflight) bool {
+	for _, file := range files {
+		if !file.alreadyInstalled {
+			return false
+		}
+	}
+	return true
+}
+
+func receiptManagedFiles(files []ManagedFile) []ReceiptManagedFile {
+	result := make([]ReceiptManagedFile, 0, len(files))
+	for _, file := range files {
+		result = append(result, ReceiptManagedFile{Name: file.Name, SHA256: file.SHA256, PreviousSHA256: file.PreviousSHA256})
+	}
+	return result
+}
+
+func receiptMatchesManifest(receipt Receipt, manifest Manifest) bool {
+	if receipt.ManifestSHA256 != manifest.ManifestSHA256 || receipt.ArtifactSHA256 != manifest.Core.SHA256 || receipt.PreviousSHA256 != manifest.PreviousSHA256 || receipt.ReleaseID != manifest.ReleaseID {
+		return false
+	}
+	want := receiptManagedFiles(manifest.ManagedFiles)
+	if len(receipt.ManagedFiles) != len(want) {
+		return false
+	}
+	for index := range want {
+		if receipt.ManagedFiles[index] != want[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func existingRegularFileEquals(path string, want []byte) (bool, error) {
@@ -323,22 +485,47 @@ func syncDirectory(path string) error {
 	return directory.Close()
 }
 
-func (i *installer) rollback(manifest Manifest, previous []byte, wantSHA string) error {
-	if err := i.writeAtomic(manifest.Core.Destination, previous, os.FileMode(manifest.Core.Mode)); err != nil {
+func (i *installer) rollbackTransaction(manifest Manifest, state *preflight) error {
+	for index := len(state.managedFiles) - 1; index >= 0; index-- {
+		file := state.managedFiles[index]
+		if !file.alreadyInstalled && !file.published {
+			continue
+		}
+		if !file.previousPresent {
+			if err := i.removeRegularFileIfPresent(file.file.Destination, "new managed file "+file.file.Name); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := i.writeAtomic(file.file.Destination, file.previous, os.FileMode(file.file.Mode)); err != nil {
+			return fmt.Errorf("restore managed file %q: %w", file.file.Name, err)
+		}
+		got, err := digestRegularFile(file.file.Destination)
+		if err != nil {
+			return fmt.Errorf("verify restored managed file %q: %w", file.file.Name, err)
+		}
+		if got != file.file.PreviousSHA256 {
+			return fmt.Errorf("restore managed file %q sha256 got %s want %s", file.file.Name, got, file.file.PreviousSHA256)
+		}
+	}
+	if !state.coreAlreadyInstalled && !state.corePublished {
+		return nil
+	}
+	if err := i.writeAtomic(manifest.Core.Destination, state.previous, os.FileMode(manifest.Core.Mode)); err != nil {
 		return err
 	}
 	got, err := digestRegularFile(manifest.Core.Destination)
 	if err != nil {
 		return err
 	}
-	if got != wantSHA {
-		return fmt.Errorf("rollback sha256 got %s want %s", got, wantSHA)
+	if got != state.previousSHA256 {
+		return fmt.Errorf("rollback sha256 got %s want %s", got, state.previousSHA256)
 	}
 	return nil
 }
 
-func (i *installer) rollbackAndRemoveMetadata(manifest Manifest, previous []byte, wantSHA string, removeManifest bool) error {
-	if err := i.rollback(manifest, previous, wantSHA); err != nil {
+func (i *installer) rollbackTransactionAndRemoveMetadata(manifest Manifest, state *preflight, removeManifest bool) error {
+	if err := i.rollbackTransaction(manifest, state); err != nil {
 		return err
 	}
 	if err := i.removeRegularFileIfPresent(manifest.ReceiptPath, "failed receipt"); err != nil {

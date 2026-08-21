@@ -160,6 +160,50 @@ func validateManifest(manifest Manifest) error {
 		}
 	}
 	paths := []string{manifest.Core.Source, manifest.Core.Destination, manifest.BackupPath, manifest.ReceiptPath, DefaultManifestPath(manifest.CityPath)}
+	managedNames := make(map[string]struct{}, len(manifest.ManagedFiles))
+	previousName := ""
+	for index, file := range manifest.ManagedFiles {
+		field := fmt.Sprintf("managed_files[%d]", index)
+		if strings.TrimSpace(file.Name) == "" {
+			return fmt.Errorf("manifest %s.name is required", field)
+		}
+		if _, exists := managedNames[file.Name]; exists {
+			return fmt.Errorf("manifest has duplicate managed file name %q", file.Name)
+		}
+		if previousName != "" && file.Name <= previousName {
+			return errors.New("manifest managed_files must be strictly sorted by name")
+		}
+		managedNames[file.Name] = struct{}{}
+		previousName = file.Name
+		for name, path := range map[string]string{
+			field + ".source":      file.Source,
+			field + ".destination": file.Destination,
+		} {
+			if !filepath.IsAbs(path) {
+				return fmt.Errorf("manifest %s must be an absolute path: %q", name, path)
+			}
+		}
+		if err := validateSHA256(field+".sha256", file.SHA256); err != nil {
+			return err
+		}
+		if err := validatePinnedMode(field+".mode", file.Mode); err != nil {
+			return err
+		}
+		paths = append(paths, file.Source, file.Destination)
+		if file.PreviousSHA256 == "" {
+			if file.BackupPath != "" {
+				return fmt.Errorf("manifest %s.backup_path requires previous_sha256", field)
+			}
+			continue
+		}
+		if err := validateSHA256(field+".previous_sha256", file.PreviousSHA256); err != nil {
+			return err
+		}
+		if !filepath.IsAbs(file.BackupPath) {
+			return fmt.Errorf("manifest %s.backup_path must be an absolute path: %q", field, file.BackupPath)
+		}
+		paths = append(paths, file.BackupPath)
+	}
 	for i := range paths {
 		for j := i + 1; j < len(paths); j++ {
 			if filepath.Clean(paths[i]) == filepath.Clean(paths[j]) {

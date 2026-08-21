@@ -75,6 +75,13 @@ func InspectIntegrity(ctx context.Context, manifest Manifest) (IntegrityReport, 
 	report := IntegrityReport{}
 	inspectRegularFile(&report, "core", manifest.Core.Destination, manifest.Core.SHA256, manifest.Core.Mode)
 	inspectRegularFile(&report, "backup", manifest.BackupPath, manifest.PreviousSHA256, manifest.Core.Mode)
+	for _, file := range manifest.ManagedFiles {
+		field := "managed_files[" + file.Name + "]"
+		inspectRegularFile(&report, field, file.Destination, file.SHA256, file.Mode)
+		if file.PreviousSHA256 != "" {
+			inspectRegularFile(&report, field+".backup", file.BackupPath, file.PreviousSHA256, file.Mode)
+		}
+	}
 	inspectReceipt(&report, manifest)
 	if manifest.Integrity == nil {
 		return report, nil
@@ -222,6 +229,17 @@ func inspectReceipt(report *IntegrityReport, manifest Manifest) {
 	} {
 		if comparison.actual != comparison.expected {
 			report.add(comparison.field, comparison.expected, comparison.actual)
+		}
+	}
+	wantManaged := receiptManagedFiles(manifest.ManagedFiles)
+	if len(receipt.ManagedFiles) != len(wantManaged) {
+		report.add("receipt.managed_files", fmt.Sprintf("%d entries", len(wantManaged)), fmt.Sprintf("%d entries", len(receipt.ManagedFiles)))
+		return
+	}
+	for index := range wantManaged {
+		if receipt.ManagedFiles[index] != wantManaged[index] {
+			report.add("receipt.managed_files", fmt.Sprintf("%+v", wantManaged), fmt.Sprintf("%+v", receipt.ManagedFiles))
+			return
 		}
 	}
 }

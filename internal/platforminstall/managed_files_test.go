@@ -2,11 +2,25 @@ package platforminstall
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestLoadManifestRejectsUnsortedManagedFiles(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifestWithManagedFiles(t, dir)
+	manifest.ManagedFiles[0], manifest.ManagedFiles[1] = manifest.ManagedFiles[1], manifest.ManagedFiles[0]
+	manifest = finalizeManifest(t, manifest)
+
+	_, err := LoadManifest(marshalManifest(t, manifest))
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("strictly sorted")) {
+		t.Fatalf("LoadManifest() error = %v, want sorted managed-files refusal", err)
+	}
+}
 
 func TestInstallPreflightsEveryManagedFileBeforeCoreMutation(t *testing.T) {
 	dir := t.TempDir()
@@ -104,6 +118,125 @@ func TestManagedFilesIdenticalReplayIsNoOp(t *testing.T) {
 	assertSameFileIdentityAndTime(t, manifest.ManagedFiles[0].Destination, firstDestination)
 	assertSameFileIdentityAndTime(t, manifest.ManagedFiles[0].BackupPath, firstBackup)
 	assertSameFileIdentityAndTime(t, manifest.ManagedFiles[1].Destination, secondDestination)
+}
+
+func TestInstallResumesAfterCoreAndOneManagedFileWerePublished(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifestWithManagedFiles(t, dir)
+	if err := os.MkdirAll(filepath.Dir(manifest.BackupPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.BackupPath, []byte("installed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.Core.Destination, []byte("candidate"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	first := manifest.ManagedFiles[0]
+	if err := os.WriteFile(first.BackupPath, []byte("rules-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(first.Destination, []byte("rules-v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coreBefore := mustStat(t, manifest.Core.Destination)
+	firstBefore := mustStat(t, first.Destination)
+
+	receipt, err := Install(manifest)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if receipt.Result != ResultInstalled {
+		t.Fatalf("receipt result = %q, want installed", receipt.Result)
+	}
+	assertSameFileIdentityAndTime(t, manifest.Core.Destination, coreBefore)
+	assertSameFileIdentityAndTime(t, first.Destination, firstBefore)
+	if got := string(mustReadFile(t, manifest.ManagedFiles[1].Destination)); got != "validator-v1" {
+		t.Fatalf("remaining managed file = %q, want validator-v1", got)
+	}
+}
+
+func TestManagedFilePlanNamesEveryBackupAndPublicationWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifestWithManagedFiles(t, dir)
+	rulesBefore := mustStat(t, manifest.ManagedFiles[0].Destination)
+
+	steps, err := Plan(manifest)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	want := map[string]string{
+		"write-managed-backup:control-rules": manifest.ManagedFiles[0].BackupPath,
+		"publish-managed-file:control-rules": manifest.ManagedFiles[0].Destination,
+		"publish-managed-file:validator":     manifest.ManagedFiles[1].Destination,
+	}
+	for _, step := range steps {
+		if path, exists := want[step.Action]; exists {
+			if step.Path != path || !step.Mutates {
+				t.Errorf("Plan() step = %+v, want path=%q mutates=true", step, path)
+			}
+			delete(want, step.Action)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("Plan() missing managed actions: %v", want)
+	}
+	assertSameFileIdentityAndTime(t, manifest.ManagedFiles[0].Destination, rulesBefore)
+	assertPathAbsent(t, manifest.ManagedFiles[0].BackupPath)
+	assertPathAbsent(t, manifest.ManagedFiles[1].Destination)
+}
+
+func TestInspectIntegrityReportsManagedFileAndBackupDrift(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifestWithManagedFiles(t, dir)
+	if _, err := Install(manifest); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if err := os.WriteFile(manifest.ManagedFiles[0].Destination, []byte("rules drift"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.ManagedFiles[0].BackupPath, []byte("backup drift"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := InspectIntegrity(context.Background(), manifest)
+	if err != nil {
+		t.Fatalf("InspectIntegrity() error = %v", err)
+	}
+	fields := driftFields(report)
+	for _, want := range []string{"managed_files[control-rules].sha256", "managed_files[control-rules].backup.sha256"} {
+		if !containsString(fields, want) {
+			t.Errorf("drift fields = %v, want %q", fields, want)
+		}
+	}
+}
+
+func TestNoopRejectsReceiptWithDifferentManagedFileSet(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testManifestWithManagedFiles(t, dir)
+	if _, err := Install(manifest); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	receipt, err := loadReceipt(manifest.ReceiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt.ManagedFiles = receipt.ManagedFiles[:1]
+	if err := finalizeReceipt(&receipt); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.ReceiptPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Install(manifest)
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("different release")) {
+		t.Fatalf("Install() error = %v, want receipt managed-file mismatch", err)
+	}
 }
 
 func testManifestWithManagedFiles(t *testing.T, dir string) Manifest {
