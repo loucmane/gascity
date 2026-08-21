@@ -24,6 +24,7 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/extmsg"
 	"github.com/gastownhall/gascity/internal/fsys"
+	"github.com/gastownhall/gascity/internal/mail"
 	"github.com/gastownhall/gascity/internal/nudgepoller"
 	"github.com/gastownhall/gascity/internal/nudgequeue"
 	"github.com/gastownhall/gascity/internal/pidutil"
@@ -1086,7 +1087,15 @@ func writeQueuedSessionNudgeResult(target nudgeTarget, mode nudgeDeliveryMode, j
 	return 0
 }
 
-func sendMailNotify(target nudgeTarget, sender string) error {
+func sendMailNotify(target nudgeTarget, sender string, messages ...mail.Message) error {
+	var message mail.Message
+	switch len(messages) {
+	case 0:
+	case 1:
+		message = messages[0]
+	default:
+		return fmt.Errorf("mail notification received %d messages, want at most one", len(messages))
+	}
 	store := openNudgeBeadStore(target.cityPath)
 	if store.Store == nil {
 		return fmt.Errorf("opening city store for %q", target.agentKey())
@@ -1095,15 +1104,19 @@ func sendMailNotify(target nudgeTarget, sender string) error {
 	if err != nil {
 		return err
 	}
-	return sendMailNotifyWithWorker(target, store.Store, sp, sender)
+	return sendMailMessageNotifyWithWorker(target, store.Store, sp, sender, message)
 }
 
 func sendMailNotifyWithProvider(target nudgeTarget, sp runtime.Provider) error {
-	return sendMailNotifyWithWorker(target, nil, sp, "human")
+	return sendMailNotifyWithWorker(target, nil, sp)
 }
 
-func sendMailNotifyWithWorker(target nudgeTarget, store beads.Store, sp runtime.Provider, sender string) error {
-	msg := fmt.Sprintf("You have mail from %s", sender)
+func sendMailNotifyWithWorker(target nudgeTarget, store beads.Store, sp runtime.Provider) error {
+	return sendMailMessageNotifyWithWorker(target, store, sp, "human", mail.Message{})
+}
+
+func sendMailMessageNotifyWithWorker(target nudgeTarget, store beads.Store, sp runtime.Provider, sender string, message mail.Message) error {
+	msg := formatMailNudgeMessage(sender, message)
 	now := time.Now()
 	// Session-class store for the observe/handle reads and the last-nudge stamp
 	// below; the raw store keeps flowing to canRequestManagedNudgeWake,
@@ -1153,6 +1166,30 @@ func sendMailNotifyWithWorker(target nudgeTarget, store beads.Store, sp runtime.
 		maybeStartNudgePoller(target)
 	}
 	return nil
+}
+
+func formatMailNudgeMessage(sender string, message mail.Message) string {
+	from := strings.TrimSpace(sender)
+	if from == "" {
+		from = strings.TrimSpace(message.From)
+	}
+	from = extmsg.SanitizeForSystemReminder(from)
+
+	if strings.TrimSpace(message.ID) == "" && strings.TrimSpace(message.Subject) == "" && strings.TrimSpace(message.Body) == "" {
+		return fmt.Sprintf("You have mail from %s", from)
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "You have mail from %s. The complete message is delivered in-band; no mail-store read is required.\n", from)
+	if id := strings.TrimSpace(message.ID); id != "" {
+		fmt.Fprintf(&sb, "Mail ID: %s\n", extmsg.SanitizeForSystemReminder(id))
+	}
+	if subject := strings.TrimSpace(message.Subject); subject != "" {
+		fmt.Fprintf(&sb, "Subject: %s\n", extmsg.SanitizeForSystemReminder(subject))
+	}
+	sb.WriteString("\n")
+	sb.WriteString(extmsg.SanitizeForSystemReminder(message.Body))
+	return sb.String()
 }
 
 func resolveNudgeTarget(identifier string, warningWriter ...io.Writer) (nudgeTarget, error) {

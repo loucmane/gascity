@@ -2041,7 +2041,11 @@ func TestCmdMailReplyHumanNotifyQueuesNudge(t *testing.T) {
 	if nudge.Source != "mail" {
 		t.Fatalf("nudge.Source = %q, want mail", nudge.Source)
 	}
-	if nudge.Message != "You have mail from human" {
+	wantMessage := "You have mail from human. The complete message is delivered in-band; no mail-store read is required.\n" +
+		"Mail ID: gc-3\n" +
+		"Subject: Re: Hello\n\n" +
+		"reply body"
+	if nudge.Message != wantMessage {
 		t.Fatalf("nudge.Message = %q", nudge.Message)
 	}
 }
@@ -2127,7 +2131,12 @@ func TestCmdMailReplyExecProviderNotifyResolvesNonHumanSender(t *testing.T) {
 		t.Fatalf("cmdMailReply() = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 
-	assertQueuedMailNudgeMessage(t, cityPath, sessionID, "You have mail from bob", stderr.String())
+	assertQueuedMailNudgeMessage(t, cityPath, sessionID,
+		"You have mail from bob. The complete message is delivered in-band; no mail-store read is required.\n"+
+			"Mail ID: exec-reply-1\n"+
+			"Subject: RE: Hello\n\n"+
+			"reply body",
+		stderr.String())
 }
 
 func setupExecMailReplyNudgeTest(t *testing.T) (string, string, string) {
@@ -2191,7 +2200,12 @@ esac
 
 func assertQueuedMailNudge(t *testing.T, cityPath, sessionID, stderr string) {
 	t.Helper()
-	assertQueuedMailNudgeMessage(t, cityPath, sessionID, "You have mail from human", stderr)
+	assertQueuedMailNudgeMessage(t, cityPath, sessionID,
+		"You have mail from human. The complete message is delivered in-band; no mail-store read is required.\n"+
+			"Mail ID: exec-reply-1\n"+
+			"Subject: RE: Hello\n\n"+
+			"reply body",
+		stderr)
 }
 
 func assertQueuedMailNudgeMessage(t *testing.T, cityPath, sessionID, message, stderr string) {
