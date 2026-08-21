@@ -253,7 +253,10 @@ assert_eq "slots_dir.under_city_root" "$SLOTS_FROM_CITY" "$CITY_ENV/.gc/gate-slo
 NOCITY="$WORK/no-city-repo"
 mkdir -p "$NOCITY"
 (cd "$NOCITY" && git init -q .) 2>/dev/null || true
-SLOTS_FALLBACK="$(cd "$NOCITY" && GC_CITY_PATH="" GC_CITY="" GC_CITY_ROOT="" HOME="$WORK/unrelated-home" push_gate_slots_dir)"
+# Make the repository root the discovery ceiling. A host may legitimately
+# carry an unrelated legacy /tmp/.gc city; the fallback fixture must not walk
+# out of its own repository and adopt that ambient state.
+SLOTS_FALLBACK="$(cd "$NOCITY" && GC_CITY_PATH="" GC_CITY="" GC_CITY_ROOT="" HOME="$NOCITY" push_gate_slots_dir)"
 assert_eq "slots_dir.falls_back_to_repo_relative" "$SLOTS_FALLBACK" "$NOCITY/.git/gate-slots"
 
 LINKED_REPO="$WORK/linked-repo"
@@ -263,14 +266,15 @@ mkdir -p "$LINKED_REPO"
 git -C "$LINKED_REPO" init -q
 git -C "$LINKED_REPO" config user.name "Push Gate Test"
 git -C "$LINKED_REPO" config user.email "push-gate-test@example.invalid"
+git -C "$LINKED_REPO" config commit.gpgsign false
 : >"$LINKED_REPO/tracked"
 git -C "$LINKED_REPO" add tracked
 git -C "$LINKED_REPO" commit -qm "seed linked worktree fixture"
 git -C "$LINKED_REPO" worktree add -q --detach "$LINKED_A"
 git -C "$LINKED_REPO" worktree add -q --detach "$LINKED_B"
 
-SLOTS_LINKED_A="$(cd "$LINKED_A" && GC_CITY_PATH="" GC_CITY="" GC_CITY_ROOT="" HOME="$WORK/unrelated-home" push_gate_slots_dir)"
-SLOTS_LINKED_B="$(cd "$LINKED_B" && GC_CITY_PATH="" GC_CITY="" GC_CITY_ROOT="" HOME="$WORK/unrelated-home" push_gate_slots_dir)"
+SLOTS_LINKED_A="$(cd "$LINKED_A" && GC_CITY_PATH="" GC_CITY="" GC_CITY_ROOT="" HOME="$LINKED_A" push_gate_slots_dir)"
+SLOTS_LINKED_B="$(cd "$LINKED_B" && GC_CITY_PATH="" GC_CITY="" GC_CITY_ROOT="" HOME="$LINKED_B" push_gate_slots_dir)"
 LINKED_COMMON="$(cd "$LINKED_REPO/.git" && pwd -P)"
 SLOTS_LINKED_A_N="$(cd "$(dirname "$SLOTS_LINKED_A")" && pwd -P)/gate-slots"
 assert_eq "slots_dir.linked_worktree_uses_common_git_dir" "$SLOTS_LINKED_A_N" "$LINKED_COMMON/gate-slots"

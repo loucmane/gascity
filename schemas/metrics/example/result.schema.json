@@ -206,7 +206,10 @@
               "logout",
               "whoami",
               "runtime-heartbeat",
-              "pack-registry-requests"
+              "pack-registry-requests",
+              "platform-install",
+              "platform-rollback",
+              "platform-manifest"
             ]
           },
           "event_id": {

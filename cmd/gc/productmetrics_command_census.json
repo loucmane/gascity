@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "next_id": 197,
+  "next_id": 200,
   "permanent_ids": [
     {
       "name": "help",
@@ -3025,6 +3025,67 @@
       "classification": "perf-session-new",
       "owner": "immediate",
       "id": 115
+    },
+    {
+      "path": "gc platform",
+      "aliases": [],
+      "conditional_modes": [],
+      "hidden": false,
+      "effective_hidden": false,
+      "disable_flag_parsing": false,
+      "shape": "runnable-group",
+      "recording_policy": "recordable",
+      "mode": "standard",
+      "notice_policy": "eligible",
+      "classification": "help",
+      "canonical_target": "@help",
+      "owner": "immediate",
+      "id": 1
+    },
+    {
+      "path": "gc platform install",
+      "aliases": [],
+      "conditional_modes": [],
+      "hidden": false,
+      "effective_hidden": false,
+      "disable_flag_parsing": false,
+      "shape": "runnable",
+      "recording_policy": "recordable",
+      "mode": "standard",
+      "notice_policy": "eligible",
+      "classification": "platform-install",
+      "owner": "immediate",
+      "id": 197
+    },
+    {
+      "path": "gc platform manifest",
+      "aliases": [],
+      "conditional_modes": [],
+      "hidden": false,
+      "effective_hidden": false,
+      "disable_flag_parsing": false,
+      "shape": "runnable",
+      "recording_policy": "recordable",
+      "mode": "standard",
+      "notice_policy": "eligible",
+      "classification": "platform-manifest",
+      "owner": "immediate",
+      "id": 199
+    },
+    {
+      "path": "gc platform rollback",
+      "aliases": [],
+      "conditional_modes": [],
+      "hidden": false,
+      "effective_hidden": false,
+      "disable_flag_parsing": false,
+      "shape": "runnable",
+      "recording_policy": "recordable",
+      "mode": "standard",
+      "notice_policy": "eligible",
+      "classification": "platform-rollback",
+      "owner": "immediate",
+      "id": 198
     },
     {
       "path": "gc prime",
