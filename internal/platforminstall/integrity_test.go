@@ -1,6 +1,7 @@
 package platforminstall
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -36,6 +37,9 @@ func TestInspectIntegrityReportsAllDriftClasses(t *testing.T) {
 	if err := os.WriteFile(manifest.Integrity.Files[0].Path, []byte("rules drift"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(manifest.Integrity.Files[0].Path, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	git(t, manifest.Integrity.Repositories[0].Path, "checkout", "--detach", "HEAD^")
 	provider := manifest.Integrity.Providers[0]
 	if err := os.Remove(provider.Path); err != nil {
@@ -67,6 +71,50 @@ func TestInspectIntegrityReportsAllDriftClasses(t *testing.T) {
 		if !containsString(fields, want) {
 			t.Errorf("drift fields = %v, want %q", fields, want)
 		}
+	}
+}
+
+func TestInspectIntegrityReportsProviderDigestAndVersionDrift(t *testing.T) {
+	dir := t.TempDir()
+	manifest := integrityManifest(t, dir)
+	if _, err := Install(manifest); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	provider := manifest.Integrity.Providers[0]
+	if err := os.WriteFile(provider.ResolvedPath, []byte("#!/bin/sh\nprintf 'codex-cli 0.148.0\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := InspectIntegrity(context.Background(), manifest)
+	if err != nil {
+		t.Fatalf("InspectIntegrity() error = %v", err)
+	}
+	fields := driftFields(report)
+	for _, want := range []string{"providers[codex].sha256", "providers[codex].version"} {
+		if !containsString(fields, want) {
+			t.Errorf("drift fields = %v, want %q", fields, want)
+		}
+	}
+}
+
+func TestInspectIntegrityReportsReceiptSelfDigestDrift(t *testing.T) {
+	dir := t.TempDir()
+	manifest := integrityManifest(t, dir)
+	if _, err := Install(manifest); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	receipt := mustReadFile(t, manifest.ReceiptPath)
+	receipt = bytes.Replace(receipt, []byte(manifest.ReleaseID), []byte("different-release-id"), 1)
+	if err := os.WriteFile(manifest.ReceiptPath, receipt, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := InspectIntegrity(context.Background(), manifest)
+	if err != nil {
+		t.Fatalf("InspectIntegrity() error = %v", err)
+	}
+	if fields := driftFields(report); !containsString(fields, "receipt.self_digest") {
+		t.Fatalf("drift fields = %v, want receipt.self_digest", fields)
 	}
 }
 
@@ -174,4 +222,13 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func driftFields(report IntegrityReport) []string {
+	fields := make([]string, 0, len(report.Drifts))
+	for _, drift := range report.Drifts {
+		fields = append(fields, drift.Field)
+	}
+	sort.Strings(fields)
+	return fields
 }

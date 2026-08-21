@@ -148,6 +148,9 @@ func validateManifest(manifest Manifest) error {
 	if manifest.Core.Mode != 0o755 {
 		return fmt.Errorf("manifest core.mode = %#o, want 0755", manifest.Core.Mode)
 	}
+	if err := validateIntegritySpec(manifest.Integrity); err != nil {
+		return err
+	}
 	return nil
 }
 
