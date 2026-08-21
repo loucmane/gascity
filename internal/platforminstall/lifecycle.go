@@ -68,6 +68,19 @@ func Rollback(manifest Manifest) error {
 	return newInstaller().rollbackTransactionAndRemoveMetadata(manifest, state, true)
 }
 
+// Revert restores the prior filesystem and then activates and verifies the
+// manifest-pinned previous runtime. This RED scaffold is replaced by the
+// verified rollback transition.
+func Revert(context.Context, Manifest, Lifecycle) (RuntimeProof, error) {
+	return RuntimeProof{}, fmt.Errorf("verified platform revert is disabled")
+}
+
+// RollbackPlan returns the ordered rollback without mutating the filesystem.
+// This RED scaffold is replaced by the canonical rollback planner.
+func RollbackPlan(Manifest) ([]PlanStep, error) {
+	return nil, fmt.Errorf("platform rollback planning is disabled")
+}
+
 func finalizeActivationReceipt(ctx context.Context, manifest Manifest, receipt Receipt, proof RuntimeProof) (Receipt, error) {
 	persisted := receipt
 	persisted.Result = ResultInstalled

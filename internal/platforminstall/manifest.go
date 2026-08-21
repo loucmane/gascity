@@ -87,6 +87,8 @@ type Receipt struct {
 type ActivationSpec struct {
 	ExpectedCommit  string `json:"expected_commit"`
 	ExpectedVersion string `json:"expected_version"`
+	PreviousCommit  string `json:"previous_commit"`
+	PreviousVersion string `json:"previous_version"`
 }
 
 // RuntimeProof is the post-restart identity recorded in the install receipt.

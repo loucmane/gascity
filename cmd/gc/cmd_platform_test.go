@@ -133,6 +133,8 @@ func platformCommandFixture(t *testing.T) (string, platforminstall.Manifest) {
 		Activation: &platforminstall.ActivationSpec{
 			ExpectedCommit:  "0123456789abcdef0123456789abcdef01234567",
 			ExpectedVersion: "gc version 1.4.1-test",
+			PreviousCommit:  "89abcdef0123456789abcdef0123456789abcdef",
+			PreviousVersion: "gc version previous",
 		},
 	}
 	digest, err := platforminstall.ManifestDigest(manifest)
