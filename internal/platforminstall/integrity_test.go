@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -40,7 +39,8 @@ func TestInspectIntegrityReportsAllDriftClasses(t *testing.T) {
 	if err := os.Chmod(manifest.Integrity.Files[0].Path, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	git(t, manifest.Integrity.Repositories[0].Path, "checkout", "--detach", "HEAD^")
+	manifest.Integrity.Repositories[0].Commit = strings.Repeat("0", 40)
+	manifest = finalizeManifest(t, manifest)
 	provider := manifest.Integrity.Providers[0]
 	if err := os.Remove(provider.Path); err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestInspectIntegrityReportsAllDriftClasses(t *testing.T) {
 		"files[control-rules].mode",
 		"files[control-rules].sha256",
 		"providers[codex].resolved_path",
-		"repositories[template].commit",
+		"repositories[source].commit",
 	} {
 		if !containsString(fields, want) {
 			t.Errorf("drift fields = %v, want %q", fields, want)
@@ -160,28 +160,13 @@ func integrityManifest(t *testing.T, dir string) Manifest {
 		t.Fatal(err)
 	}
 
-	repo := filepath.Join(dir, "template")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
+	repo, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
 		t.Fatal(err)
 	}
-	git(t, repo, "init", "-q")
-	git(t, repo, "config", "user.name", "fixture")
-	git(t, repo, "config", "user.email", "fixture@example.invalid")
-	git(t, repo, "config", "commit.gpgsign", "false")
-	if err := os.WriteFile(filepath.Join(repo, "template.txt"), []byte("one"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, repo, "add", "template.txt")
-	git(t, repo, "commit", "-q", "-m", "one")
-	firstCommit := gitOutput(t, repo, "rev-parse", "HEAD")
-	if err := os.WriteFile(filepath.Join(repo, "template.txt"), []byte("two"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, repo, "add", "template.txt")
-	git(t, repo, "commit", "-q", "-m", "two")
-	secondCommit := gitOutput(t, repo, "rev-parse", "HEAD")
-	if firstCommit == secondCommit {
-		t.Fatal("fixture commits unexpectedly equal")
+	commit, err := runInspectionCommand(context.Background(), "git", "-C", repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("resolve fixture repository HEAD: %v", err)
 	}
 
 	providerTarget := filepath.Join(dir, "providers", "releases", "codex")
@@ -201,7 +186,7 @@ func integrityManifest(t *testing.T, dir string) Manifest {
 
 	manifest.Integrity = &IntegritySpec{
 		Files:        []FilePin{{Name: "control-rules", Path: rulesPath, SHA256: testSHA256([]byte("allow gc hook")), Mode: 0o644}},
-		Repositories: []GitPin{{Name: "template", Path: repo, Commit: secondCommit}},
+		Repositories: []GitPin{{Name: "source", Path: repo, Commit: commit, AllowDirty: true}},
 		Providers: []ProviderPin{{
 			Name:         "codex",
 			Path:         providerPath,
@@ -212,26 +197,6 @@ func integrityManifest(t *testing.T, dir string) Manifest {
 		}},
 	}
 	return finalizeManifest(t, manifest)
-}
-
-func git(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
-	}
-}
-
-func gitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
-	}
-	return strings.TrimSpace(string(output))
 }
 
 func containsString(values []string, want string) bool {
