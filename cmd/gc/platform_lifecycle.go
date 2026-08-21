@@ -146,7 +146,7 @@ func inspectPlatformRuntime(ctx context.Context, oldPID int, requireReplacement 
 }
 
 func platformRuntimeVersionOutput(ctx context.Context, executable string) ([]byte, error) {
-	return exec.CommandContext(ctx, executable, "--version").CombinedOutput()
+	return exec.CommandContext(ctx, executable, "version").CombinedOutput()
 }
 
 func sha256File(path string) (string, error) {
