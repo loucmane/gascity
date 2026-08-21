@@ -28,8 +28,14 @@ func Plan(manifest Manifest) ([]PlanStep, error) {
 		{Action: "verify-manifest", Path: DefaultManifestPath(manifest.CityPath), SHA256: manifest.ManifestSHA256},
 		{Action: "verify-candidate", Path: manifest.Core.Source, SHA256: manifest.Core.SHA256},
 		{Action: "verify-live-baseline", Path: manifest.Core.Destination, SHA256: state.previousSHA256},
-		{Action: "write-backup", Path: manifest.BackupPath, SHA256: manifest.PreviousSHA256, Mutates: !noop && !state.reuseBackup},
 	}
+	if state.previousMetadata != nil {
+		steps = append(steps,
+			PlanStep{Action: "write-previous-manifest-backup", Path: manifest.PreviousMetadata.ManifestBackupPath, SHA256: manifest.PreviousMetadata.ManifestSHA256, Mutates: !noop && !state.previousMetadata.reuseManifestBackup},
+			PlanStep{Action: "write-previous-receipt-backup", Path: manifest.PreviousMetadata.ReceiptBackupPath, SHA256: manifest.PreviousMetadata.ReceiptSHA256, Mutates: !noop && !state.previousMetadata.reuseReceiptBackup},
+		)
+	}
+	steps = append(steps, PlanStep{Action: "write-backup", Path: manifest.BackupPath, SHA256: manifest.PreviousSHA256, Mutates: !noop && !state.reuseBackup})
 	for _, file := range state.managedFiles {
 		if !file.previousPresent {
 			continue

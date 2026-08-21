@@ -229,6 +229,23 @@ func validateManifestContent(manifest Manifest) error {
 		}
 	}
 	paths := []string{manifest.Core.Source, manifest.Core.Destination, manifest.BackupPath, manifest.ReceiptPath, DefaultManifestPath(manifest.CityPath)}
+	if manifest.PreviousMetadata != nil {
+		if err := validateSHA256("previous_metadata.manifest_sha256", manifest.PreviousMetadata.ManifestSHA256); err != nil {
+			return err
+		}
+		if err := validateSHA256("previous_metadata.receipt_sha256", manifest.PreviousMetadata.ReceiptSHA256); err != nil {
+			return err
+		}
+		for name, path := range map[string]string{
+			"previous_metadata.manifest_backup_path": manifest.PreviousMetadata.ManifestBackupPath,
+			"previous_metadata.receipt_backup_path":  manifest.PreviousMetadata.ReceiptBackupPath,
+		} {
+			if !filepath.IsAbs(path) {
+				return fmt.Errorf("manifest %s must be an absolute path: %q", name, path)
+			}
+			paths = append(paths, path)
+		}
+	}
 	managedNames := make(map[string]struct{}, len(manifest.ManagedFiles))
 	previousName := ""
 	for index, file := range manifest.ManagedFiles {

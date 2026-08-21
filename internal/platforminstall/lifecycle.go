@@ -55,8 +55,9 @@ func Apply(ctx context.Context, manifest Manifest, lifecycle Lifecycle) (Receipt
 }
 
 // Rollback restores the exact pre-install filesystem state from manifest-bound
-// backups and removes the candidate's manifest and receipt. Backups are
-// retained as evidence and as independently verifiable recovery inputs.
+// backups. A successive release also restores the preceding canonical manifest
+// and receipt; a first managed release removes its candidate metadata. Backups
+// are retained as evidence and independently verifiable recovery inputs.
 func Rollback(manifest Manifest) error {
 	state, err := preflightManifest(manifest)
 	if err != nil {
@@ -65,7 +66,7 @@ func Rollback(manifest Manifest) error {
 	if !state.coreAlreadyInstalled || !allManagedFilesInstalled(state.managedFiles) {
 		return fmt.Errorf("rollback requires the complete candidate filesystem state")
 	}
-	return newInstaller().rollbackTransactionAndRemoveMetadata(manifest, state, true)
+	return newInstaller().rollbackTransactionAndRestoreMetadata(manifest, state)
 }
 
 // Revert restores the prior filesystem and then activates and verifies the
@@ -135,10 +136,19 @@ func RollbackPlan(manifest Manifest) ([]PlanStep, error) {
 			Mutates: true,
 		})
 	}
+	steps = append(steps, PlanStep{Action: "restore-core", Path: manifest.Core.Destination, SHA256: manifest.PreviousSHA256, Mutates: true})
+	if manifest.PreviousMetadata == nil {
+		steps = append(steps,
+			PlanStep{Action: "remove-receipt", Path: manifest.ReceiptPath, Mutates: true},
+			PlanStep{Action: "remove-manifest", Path: DefaultManifestPath(manifest.CityPath), Mutates: true},
+		)
+	} else {
+		steps = append(steps,
+			PlanStep{Action: "restore-receipt", Path: manifest.ReceiptPath, SHA256: manifest.PreviousMetadata.ReceiptSHA256, Mutates: true},
+			PlanStep{Action: "restore-manifest", Path: DefaultManifestPath(manifest.CityPath), SHA256: manifest.PreviousMetadata.ManifestSHA256, Mutates: true},
+		)
+	}
 	steps = append(steps,
-		PlanStep{Action: "restore-core", Path: manifest.Core.Destination, SHA256: manifest.PreviousSHA256, Mutates: true},
-		PlanStep{Action: "remove-receipt", Path: manifest.ReceiptPath, Mutates: true},
-		PlanStep{Action: "remove-manifest", Path: DefaultManifestPath(manifest.CityPath), Mutates: true},
 		PlanStep{Action: "restart-supervisor", Path: manifest.Core.Destination, SHA256: manifest.PreviousSHA256, Mutates: true},
 		PlanStep{Action: "verify-previous-runtime", Path: manifest.Core.Destination, SHA256: manifest.PreviousSHA256},
 	)

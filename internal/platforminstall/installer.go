@@ -13,16 +13,25 @@ import (
 const receiptSchemaV1 = "gc.platform-install-receipt.v1"
 
 type preflight struct {
-	candidate            []byte
-	previous             []byte
-	previousSHA256       string
-	manifest             []byte
-	managedFiles         []managedFilePreflight
-	noopReceipt          *Receipt
-	reuseBackup          bool
-	reuseManifest        bool
-	coreAlreadyInstalled bool
-	corePublished        bool
+	candidate               []byte
+	previous                []byte
+	previousSHA256          string
+	manifest                []byte
+	previousMetadata        *previousMetadataPreflight
+	managedFiles            []managedFilePreflight
+	noopReceipt             *Receipt
+	reuseBackup             bool
+	reuseManifest           bool
+	receiptAlreadyInstalled bool
+	coreAlreadyInstalled    bool
+	corePublished           bool
+}
+
+type previousMetadataPreflight struct {
+	manifest            []byte
+	receipt             []byte
+	reuseManifestBackup bool
+	reuseReceiptBackup  bool
 }
 
 type managedFilePreflight struct {
@@ -59,6 +68,12 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 		filepath.Dir(manifest.BackupPath),
 		filepath.Dir(manifest.Core.Destination),
 	}
+	if manifest.PreviousMetadata != nil {
+		directories = append(directories,
+			filepath.Dir(manifest.PreviousMetadata.ManifestBackupPath),
+			filepath.Dir(manifest.PreviousMetadata.ReceiptBackupPath),
+		)
+	}
 	for _, file := range state.managedFiles {
 		directories = append(directories, filepath.Dir(file.file.Destination))
 		if file.previousPresent {
@@ -68,6 +83,24 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 	for _, directory := range directories {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return Receipt{}, fmt.Errorf("create install directory %q: %w", directory, err)
+		}
+	}
+	if state.previousMetadata != nil {
+		if !state.previousMetadata.reuseManifestBackup {
+			if err := i.writeAtomic(manifest.PreviousMetadata.ManifestBackupPath, state.previousMetadata.manifest, 0o644); err != nil {
+				return Receipt{}, fmt.Errorf("write exact prior-manifest backup: %w", err)
+			}
+		}
+		if !state.previousMetadata.reuseReceiptBackup {
+			if err := i.writeAtomic(manifest.PreviousMetadata.ReceiptBackupPath, state.previousMetadata.receipt, 0o644); err != nil {
+				return Receipt{}, fmt.Errorf("write exact prior-receipt backup: %w", err)
+			}
+		}
+		if err := verifyRegularFileDigest(manifest.PreviousMetadata.ManifestBackupPath, manifest.PreviousMetadata.ManifestSHA256, "prior-manifest backup"); err != nil {
+			return Receipt{}, err
+		}
+		if err := verifyRegularFileDigest(manifest.PreviousMetadata.ReceiptBackupPath, manifest.PreviousMetadata.ReceiptSHA256, "prior-receipt backup"); err != nil {
+			return Receipt{}, err
 		}
 	}
 
@@ -135,18 +168,16 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 		}
 		return Receipt{}, fmt.Errorf("finalize install receipt: %w", err)
 	}
-	manifestPublished := false
 	if !state.reuseManifest {
 		if err := i.writeAtomic(manifestPath, state.manifest, 0o644); err != nil {
-			if rollbackErr := i.rollbackTransactionAndRemoveMetadata(manifest, state, true); rollbackErr != nil {
+			if rollbackErr := i.rollbackTransactionAndRestoreMetadata(manifest, state); rollbackErr != nil {
 				return Receipt{}, fmt.Errorf("write install manifest: %w; rollback also failed: %w", err, rollbackErr)
 			}
 			return Receipt{}, fmt.Errorf("write install manifest: %w", err)
 		}
-		manifestPublished = true
 	}
 	if err := i.writeReceipt(manifest.ReceiptPath, receipt); err != nil {
-		if rollbackErr := i.rollbackTransactionAndRemoveMetadata(manifest, state, manifestPublished); rollbackErr != nil {
+		if rollbackErr := i.rollbackTransactionAndRestoreMetadata(manifest, state); rollbackErr != nil {
 			return Receipt{}, fmt.Errorf("write install receipt: %w; rollback also failed: %w", err, rollbackErr)
 		}
 		return Receipt{}, fmt.Errorf("write install receipt: %w", err)
@@ -154,13 +185,13 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 	if manifest.Activation == nil {
 		report, inspectErr := InspectIntegrity(context.Background(), manifest)
 		if inspectErr != nil {
-			if rollbackErr := i.rollbackTransactionAndRemoveMetadata(manifest, state, true); rollbackErr != nil {
+			if rollbackErr := i.rollbackTransactionAndRestoreMetadata(manifest, state); rollbackErr != nil {
 				return Receipt{}, fmt.Errorf("inspect installed platform: %w; rollback also failed: %w", inspectErr, rollbackErr)
 			}
 			return Receipt{}, fmt.Errorf("inspect installed platform: %w", inspectErr)
 		}
 		if len(report.Drifts) != 0 {
-			if rollbackErr := i.rollbackTransactionAndRemoveMetadata(manifest, state, true); rollbackErr != nil {
+			if rollbackErr := i.rollbackTransactionAndRestoreMetadata(manifest, state); rollbackErr != nil {
 				return Receipt{}, fmt.Errorf("installed platform integrity drift: %+v; rollback also failed: %w", report.Drifts, rollbackErr)
 			}
 			return Receipt{}, fmt.Errorf("installed platform integrity drift: %+v", report.Drifts)
@@ -184,7 +215,7 @@ func preflightManifest(manifest Manifest) (*preflight, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal canonical install manifest: %w", err)
 	}
-	reuseManifest, err := existingRegularFileEquals(DefaultManifestPath(manifest.CityPath), manifestBytes)
+	reuseManifest, receiptAlreadyInstalled, previousMetadata, err := preflightPlatformMetadata(manifest, manifestBytes)
 	if err != nil {
 		return nil, fmt.Errorf("preflight canonical manifest: %w", err)
 	}
@@ -204,12 +235,14 @@ func preflightManifest(manifest Manifest) (*preflight, error) {
 		return nil, fmt.Errorf("installed artifact sha256 mismatch: got %s want current %s or candidate %s", installedSHA, manifest.PreviousSHA256, manifest.Core.SHA256)
 	}
 	state := &preflight{
-		candidate:            candidate,
-		previous:             installed,
-		previousSHA256:       installedSHA,
-		manifest:             manifestBytes,
-		reuseManifest:        reuseManifest,
-		coreAlreadyInstalled: installedSHA == manifest.Core.SHA256,
+		candidate:               candidate,
+		previous:                installed,
+		previousSHA256:          installedSHA,
+		manifest:                manifestBytes,
+		previousMetadata:        previousMetadata,
+		reuseManifest:           reuseManifest,
+		receiptAlreadyInstalled: receiptAlreadyInstalled,
+		coreAlreadyInstalled:    installedSHA == manifest.Core.SHA256,
 	}
 	if state.coreAlreadyInstalled {
 		backup, backupErr := readRegularFile(manifest.BackupPath, "rollback backup")
@@ -228,23 +261,14 @@ func preflightManifest(manifest Manifest) (*preflight, error) {
 		return nil, err
 	}
 	state.managedFiles = managedFiles
-
-	receiptInfo, receiptStatErr := os.Lstat(manifest.ReceiptPath)
-	if receiptStatErr != nil && !errors.Is(receiptStatErr, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect install receipt: %w", receiptStatErr)
-	}
-	receiptExists := receiptStatErr == nil
-	if receiptExists && !receiptInfo.Mode().IsRegular() {
-		return nil, fmt.Errorf("receipt path must be a regular file, got mode %s", receiptInfo.Mode())
-	}
 	if state.coreAlreadyInstalled {
 		if !allManagedFilesInstalled(state.managedFiles) {
-			if receiptExists {
+			if state.receiptAlreadyInstalled {
 				return nil, errors.New("receipt exists but one or more managed files do not match the candidate")
 			}
 			return state, nil
 		}
-		if !receiptExists {
+		if !state.receiptAlreadyInstalled {
 			return state, nil
 		}
 		receipt, loadErr := loadReceipt(manifest.ReceiptPath)
@@ -260,21 +284,169 @@ func preflightManifest(manifest Manifest) (*preflight, error) {
 		state.noopReceipt = &receipt
 		return state, nil
 	}
+	if state.receiptAlreadyInstalled {
+		return nil, errors.New("receipt identifies the candidate while the installed filesystem does not")
+	}
 
 	backupExists, err := existingRegularFileMatches(manifest.BackupPath, installedSHA)
 	if err != nil {
 		return nil, fmt.Errorf("preflight backup: %w", err)
 	}
 	state.reuseBackup = backupExists
-	if err := requireAbsentOrRegular(manifest.ReceiptPath, "receipt"); err != nil {
-		return nil, err
-	}
-	if _, err := os.Lstat(manifest.ReceiptPath); err == nil {
-		return nil, errors.New("receipt path already exists for a different installed artifact")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect receipt path: %w", err)
-	}
 	return state, nil
+}
+
+func preflightPlatformMetadata(manifest Manifest, candidateManifest []byte) (bool, bool, *previousMetadataPreflight, error) {
+	manifestPath := DefaultManifestPath(manifest.CityPath)
+	currentManifest, manifestExists, err := readOptionalRegularFile(manifestPath, "canonical manifest")
+	if err != nil {
+		return false, false, nil, err
+	}
+	currentReceipt, receiptExists, err := readOptionalRegularFile(manifest.ReceiptPath, "install receipt")
+	if err != nil {
+		return false, false, nil, err
+	}
+
+	reuseManifest := manifestExists && bytes.Equal(currentManifest, candidateManifest)
+	receiptAlreadyInstalled := false
+	if receiptExists {
+		receipt, decodeErr := decodeReceipt(currentReceipt)
+		if decodeErr != nil {
+			return false, false, nil, fmt.Errorf("load current receipt: %w", decodeErr)
+		}
+		receiptAlreadyInstalled = receiptMatchesManifest(receipt, manifest)
+	}
+
+	if manifest.PreviousMetadata == nil {
+		if manifestExists && !reuseManifest {
+			return false, false, nil, fmt.Errorf("path %q already exists with different canonical bytes", manifestPath)
+		}
+		if receiptExists && !receiptAlreadyInstalled {
+			return false, false, nil, errors.New("receipt path already exists for a different release")
+		}
+		if receiptAlreadyInstalled && !reuseManifest {
+			return false, false, nil, errors.New("candidate receipt exists but canonical manifest is absent")
+		}
+		return reuseManifest, receiptAlreadyInstalled, nil, nil
+	}
+
+	spec := manifest.PreviousMetadata
+	previous := &previousMetadataPreflight{}
+	if !manifestExists {
+		return false, false, nil, errors.New("successive release requires the previous or candidate canonical manifest")
+	}
+	if manifestExists && !reuseManifest {
+		if got := sha256Hex(currentManifest); got != spec.ManifestSHA256 {
+			return false, false, nil, fmt.Errorf("previous canonical manifest sha256 got %s want %s", got, spec.ManifestSHA256)
+		}
+		previous.manifest = currentManifest
+	} else {
+		previous.manifest, err = readRegularFile(spec.ManifestBackupPath, "previous canonical manifest backup")
+		if err != nil {
+			return false, false, nil, err
+		}
+		if got := sha256Hex(previous.manifest); got != spec.ManifestSHA256 {
+			return false, false, nil, fmt.Errorf("previous canonical manifest backup sha256 got %s want %s", got, spec.ManifestSHA256)
+		}
+	}
+	previous.reuseManifestBackup, err = existingRegularFileMatches(spec.ManifestBackupPath, spec.ManifestSHA256)
+	if err != nil {
+		return false, false, nil, fmt.Errorf("preflight previous manifest backup: %w", err)
+	}
+
+	currentReceiptIsPrevious := receiptExists && sha256Hex(currentReceipt) == spec.ReceiptSHA256
+	if currentReceiptIsPrevious {
+		previous.receipt = currentReceipt
+	} else {
+		previous.receipt, err = readRegularFile(spec.ReceiptBackupPath, "previous install receipt backup")
+		if err != nil {
+			return false, false, nil, err
+		}
+		if got := sha256Hex(previous.receipt); got != spec.ReceiptSHA256 {
+			return false, false, nil, fmt.Errorf("previous install receipt backup sha256 got %s want %s", got, spec.ReceiptSHA256)
+		}
+	}
+	previous.reuseReceiptBackup, err = existingRegularFileMatches(spec.ReceiptBackupPath, spec.ReceiptSHA256)
+	if err != nil {
+		return false, false, nil, fmt.Errorf("preflight previous receipt backup: %w", err)
+	}
+
+	previousManifest, err := LoadManifest(previous.manifest)
+	if err != nil {
+		return false, false, nil, fmt.Errorf("load previous canonical manifest: %w", err)
+	}
+	previousReceipt, err := decodeReceipt(previous.receipt)
+	if err != nil {
+		return false, false, nil, fmt.Errorf("load previous install receipt: %w", err)
+	}
+	if !receiptMatchesManifest(previousReceipt, previousManifest) {
+		return false, false, nil, errors.New("previous receipt does not identify the previous canonical manifest")
+	}
+	if err := validateSuccessor(manifest, previousManifest); err != nil {
+		return false, false, nil, err
+	}
+	if receiptExists && !currentReceiptIsPrevious && !receiptAlreadyInstalled {
+		return false, false, nil, errors.New("current receipt identifies neither the previous nor candidate release")
+	}
+	if receiptAlreadyInstalled && !reuseManifest {
+		return false, false, nil, errors.New("candidate receipt exists while the previous canonical manifest is still active")
+	}
+	return reuseManifest, receiptAlreadyInstalled, previous, nil
+}
+
+func validateSuccessor(candidate, previous Manifest) error {
+	if candidate.ReleaseID == previous.ReleaseID {
+		return errors.New("successive release_id must differ from the previous release")
+	}
+	if candidate.CityPath != previous.CityPath || candidate.Core.Destination != previous.Core.Destination || candidate.Core.Mode != previous.Core.Mode || candidate.ReceiptPath != previous.ReceiptPath {
+		return errors.New("successive release must retain the previous city, core destination and mode, and receipt path")
+	}
+	if candidate.PreviousSHA256 != previous.Core.SHA256 {
+		return fmt.Errorf("successive previous_sha256 got %s want previous core %s", candidate.PreviousSHA256, previous.Core.SHA256)
+	}
+	if (candidate.Activation == nil) != (previous.Activation == nil) {
+		return errors.New("successive release must preserve whether runtime activation is managed")
+	}
+	if candidate.Activation != nil {
+		if previous.Activation == nil {
+			return errors.New("activated successive release requires activated previous metadata")
+		}
+		if candidate.Activation.PreviousCommit != previous.Activation.ExpectedCommit || candidate.Activation.PreviousVersion != previous.Activation.ExpectedVersion {
+			return errors.New("successive activation previous identity does not match the previous manifest")
+		}
+	}
+	candidateFiles := make(map[string]ManagedFile, len(candidate.ManagedFiles))
+	for _, file := range candidate.ManagedFiles {
+		candidateFiles[file.Name] = file
+	}
+	for _, previousFile := range previous.ManagedFiles {
+		candidateFile, ok := candidateFiles[previousFile.Name]
+		if !ok {
+			return fmt.Errorf("successive release omits previously managed file %q", previousFile.Name)
+		}
+		if candidateFile.Destination != previousFile.Destination || candidateFile.Mode != previousFile.Mode || candidateFile.PreviousSHA256 != previousFile.SHA256 {
+			return fmt.Errorf("successive managed file %q does not preserve the previous destination, mode, and sha256 baseline", previousFile.Name)
+		}
+	}
+	return nil
+}
+
+func readOptionalRegularFile(path, name string) ([]byte, bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("inspect %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, false, fmt.Errorf("%s must be a regular file, got mode %s", name, info.Mode())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false, fmt.Errorf("read %s: %w", name, err)
+	}
+	return data, true, nil
 }
 
 func preflightManagedFiles(files []ManagedFile) ([]managedFilePreflight, error) {
@@ -312,6 +484,17 @@ func preflightManagedFiles(files []ManagedFile) ([]managedFilePreflight, error) 
 		if installedSHA == file.SHA256 {
 			state.alreadyInstalled = true
 			if file.PreviousSHA256 != "" {
+				if file.PreviousSHA256 == file.SHA256 {
+					state.previous = installed
+					state.previousPresent = true
+					backupExists, backupErr := existingRegularFileMatches(file.BackupPath, file.PreviousSHA256)
+					if backupErr != nil {
+						return nil, fmt.Errorf("preflight unchanged managed file %q backup: %w", file.Name, backupErr)
+					}
+					state.reuseBackup = backupExists
+					states = append(states, state)
+					continue
+				}
 				backup, backupErr := readRegularFile(file.BackupPath, "managed file "+file.Name+" backup")
 				if backupErr != nil {
 					return nil, fmt.Errorf("managed file %q matches candidate: %w", file.Name, backupErr)
@@ -385,27 +568,6 @@ func receiptMatchesManifest(receipt Receipt, manifest Manifest) bool {
 	return true
 }
 
-func existingRegularFileEquals(path string, want []byte) (bool, error) {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if !info.Mode().IsRegular() {
-		return false, fmt.Errorf("path %q is not a regular file", path)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	if !bytes.Equal(got, want) {
-		return false, fmt.Errorf("path %q already exists with different canonical bytes", path)
-	}
-	return true, nil
-}
-
 func readRegularFile(path, name string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -462,6 +624,17 @@ func digestRegularFile(path string) (string, error) {
 		return "", err
 	}
 	return sha256Hex(data), nil
+}
+
+func verifyRegularFileDigest(path, want, name string) error {
+	got, err := digestRegularFile(path)
+	if err != nil {
+		return fmt.Errorf("verify %s: %w", name, err)
+	}
+	if got != want {
+		return fmt.Errorf("verify %s: sha256 got %s want %s", name, got, want)
+	}
+	return nil
 }
 
 func (i *installer) writeAtomic(path string, data []byte, mode os.FileMode) error {
@@ -551,17 +724,28 @@ func (i *installer) rollbackTransaction(manifest Manifest, state *preflight) err
 	return nil
 }
 
-func (i *installer) rollbackTransactionAndRemoveMetadata(manifest Manifest, state *preflight, removeManifest bool) error {
+func (i *installer) rollbackTransactionAndRestoreMetadata(manifest Manifest, state *preflight) error {
 	if err := i.rollbackTransaction(manifest, state); err != nil {
 		return err
+	}
+	if state.previousMetadata != nil {
+		if err := i.writeAtomic(manifest.ReceiptPath, state.previousMetadata.receipt, 0o644); err != nil {
+			return fmt.Errorf("restore previous receipt: %w", err)
+		}
+		if err := verifyRegularFileDigest(manifest.ReceiptPath, manifest.PreviousMetadata.ReceiptSHA256, "restored previous receipt"); err != nil {
+			return err
+		}
+		manifestPath := DefaultManifestPath(manifest.CityPath)
+		if err := i.writeAtomic(manifestPath, state.previousMetadata.manifest, 0o644); err != nil {
+			return fmt.Errorf("restore previous manifest: %w", err)
+		}
+		return verifyRegularFileDigest(manifestPath, manifest.PreviousMetadata.ManifestSHA256, "restored previous manifest")
 	}
 	if err := i.removeRegularFileIfPresent(manifest.ReceiptPath, "failed receipt"); err != nil {
 		return err
 	}
-	if removeManifest {
-		if err := i.removeRegularFileIfPresent(DefaultManifestPath(manifest.CityPath), "failed manifest"); err != nil {
-			return err
-		}
+	if err := i.removeRegularFileIfPresent(DefaultManifestPath(manifest.CityPath), "failed manifest"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -617,6 +801,10 @@ func loadReceipt(path string) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
+	return decodeReceipt(data)
+}
+
+func decodeReceipt(data []byte) (Receipt, error) {
 	var receipt Receipt
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
