@@ -35,13 +35,14 @@ type Artifact struct {
 
 // Manifest is the digest-pinned input to one platform installation.
 type Manifest struct {
-	Schema         string   `json:"schema"`
-	ReleaseID      string   `json:"release_id"`
-	Core           Artifact `json:"core"`
-	PreviousSHA256 string   `json:"previous_sha256"`
-	BackupPath     string   `json:"backup_path"`
-	ReceiptPath    string   `json:"receipt_path"`
-	ManifestSHA256 string   `json:"manifest_sha256,omitempty"`
+	Schema         string         `json:"schema"`
+	ReleaseID      string         `json:"release_id"`
+	Core           Artifact       `json:"core"`
+	PreviousSHA256 string         `json:"previous_sha256"`
+	BackupPath     string         `json:"backup_path"`
+	ReceiptPath    string         `json:"receipt_path"`
+	Integrity      *IntegritySpec `json:"integrity,omitempty"`
+	ManifestSHA256 string         `json:"manifest_sha256,omitempty"`
 }
 
 // Receipt is the durable result of an installation attempt that reached a
