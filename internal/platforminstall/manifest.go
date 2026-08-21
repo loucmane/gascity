@@ -239,6 +239,14 @@ func validateManifest(manifest Manifest) error {
 	if manifest.Core.Mode != 0o755 {
 		return fmt.Errorf("manifest core.mode = %#o, want 0755", manifest.Core.Mode)
 	}
+	if manifest.Activation != nil {
+		if err := validateGitCommit("activation.expected_commit", manifest.Activation.ExpectedCommit); err != nil {
+			return err
+		}
+		if strings.TrimSpace(manifest.Activation.ExpectedVersion) == "" {
+			return errors.New("manifest activation.expected_version is required")
+		}
+	}
 	if err := validateIntegritySpec(manifest.Integrity); err != nil {
 		return err
 	}

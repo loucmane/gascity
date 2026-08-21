@@ -1,5 +1,10 @@
 package platforminstall
 
+import (
+	"context"
+	"fmt"
+)
+
 // PlanStep is one deterministic, ordered preflight or mutation in an install.
 type PlanStep struct {
 	Order   int
@@ -14,6 +19,9 @@ func Plan(manifest Manifest) ([]PlanStep, error) {
 	state, err := preflightManifest(manifest)
 	if err != nil {
 		return nil, err
+	}
+	if report := inspectPinnedIntegrity(context.Background(), manifest); len(report.Drifts) != 0 {
+		return nil, fmt.Errorf("preflight platform integrity drift: %+v", report.Drifts)
 	}
 	noop := state.noopReceipt != nil
 	steps := []PlanStep{
@@ -35,8 +43,15 @@ func Plan(manifest Manifest) ([]PlanStep, error) {
 	steps = append(steps,
 		PlanStep{Action: "publish-manifest", Path: DefaultManifestPath(manifest.CityPath), SHA256: manifest.ManifestSHA256, Mutates: !noop && !state.reuseManifest},
 		PlanStep{Action: "write-receipt", Path: manifest.ReceiptPath, Mutates: !noop},
-		PlanStep{Action: "verify-integrity", Path: manifest.CityPath},
 	)
+	if manifest.Activation != nil {
+		steps = append(steps,
+			PlanStep{Action: "verify-runtime-or-restart", Path: manifest.Core.Destination, SHA256: manifest.Core.SHA256},
+			PlanStep{Action: "restart-supervisor-if-needed", Path: manifest.Core.Destination, SHA256: manifest.Core.SHA256, Mutates: true},
+			PlanStep{Action: "write-activation-receipt", Path: manifest.ReceiptPath, Mutates: true},
+		)
+	}
+	steps = append(steps, PlanStep{Action: "verify-integrity", Path: manifest.CityPath})
 	for index := range steps {
 		steps[index].Order = index + 1
 	}

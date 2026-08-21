@@ -83,8 +83,18 @@ func InspectIntegrity(ctx context.Context, manifest Manifest) (IntegrityReport, 
 		}
 	}
 	inspectReceipt(&report, manifest)
+	pinned := inspectPinnedIntegrity(ctx, manifest)
+	report.Drifts = append(report.Drifts, pinned.Drifts...)
+	sort.Slice(report.Drifts, func(i, j int) bool {
+		return report.Drifts[i].Field < report.Drifts[j].Field
+	})
+	return report, nil
+}
+
+func inspectPinnedIntegrity(ctx context.Context, manifest Manifest) IntegrityReport {
+	report := IntegrityReport{}
 	if manifest.Integrity == nil {
-		return report, nil
+		return report
 	}
 	for _, pin := range manifest.Integrity.Files {
 		inspectRegularFile(&report, "files["+pin.Name+"]", pin.Path, pin.SHA256, pin.Mode)
@@ -98,7 +108,7 @@ func InspectIntegrity(ctx context.Context, manifest Manifest) (IntegrityReport, 
 	sort.Slice(report.Drifts, func(i, j int) bool {
 		return report.Drifts[i].Field < report.Drifts[j].Field
 	})
-	return report, nil
+	return report
 }
 
 func validateIntegritySpec(spec *IntegritySpec) error {
@@ -240,6 +250,29 @@ func inspectReceipt(report *IntegrityReport, manifest Manifest) {
 		if receipt.ManagedFiles[index] != wantManaged[index] {
 			report.add("receipt.managed_files", fmt.Sprintf("%+v", wantManaged), fmt.Sprintf("%+v", receipt.ManagedFiles))
 			return
+		}
+	}
+	if manifest.Activation == nil {
+		if receipt.Activation != nil {
+			report.add("receipt.activation", "absent", "present")
+		}
+		return
+	}
+	if receipt.Activation == nil {
+		report.add("receipt.activation", "verified", "missing")
+		return
+	}
+	for _, comparison := range []struct {
+		field    string
+		expected string
+		actual   string
+	}{
+		{"receipt.activation.executable_sha256", manifest.Core.SHA256, receipt.Activation.ExecutableSHA256},
+		{"receipt.activation.commit", manifest.Activation.ExpectedCommit, receipt.Activation.Commit},
+		{"receipt.activation.version", manifest.Activation.ExpectedVersion, receipt.Activation.Version},
+	} {
+		if comparison.actual != comparison.expected {
+			report.add(comparison.field, comparison.expected, comparison.actual)
 		}
 	}
 }

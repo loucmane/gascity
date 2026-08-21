@@ -2,10 +2,8 @@ package platforminstall
 
 import (
 	"context"
-	"errors"
+	"fmt"
 )
-
-var errActivationDisabled = errors.New("platform activation is disabled")
 
 // Lifecycle is the supervisor transition boundary used by Apply. Production
 // supplies the Gas City supervisor implementation; tests use a deterministic
@@ -16,13 +14,102 @@ type Lifecycle interface {
 }
 
 // Apply installs the manifest and completes its explicitly authorized runtime
-// activation. This RED scaffold is replaced by the transactional implementation.
-func Apply(context.Context, Manifest, Lifecycle) (Receipt, error) {
-	return Receipt{}, errActivationDisabled
+// activation. A fresh install restarts once. A replay first verifies the
+// current runtime, allowing a crash after restart but before receipt finalizing
+// to complete without an unnecessary second restart.
+func Apply(ctx context.Context, manifest Manifest, lifecycle Lifecycle) (Receipt, error) {
+	if lifecycle == nil {
+		return Receipt{}, fmt.Errorf("platform activation lifecycle is required")
+	}
+	if manifest.Activation == nil {
+		return Receipt{}, fmt.Errorf("manifest activation is required")
+	}
+	receipt, err := Install(manifest)
+	if err != nil {
+		return Receipt{}, err
+	}
+
+	if receipt.Result == ResultNoop {
+		proof, verifyErr := lifecycle.Verify(ctx, manifest)
+		if verifyErr == nil {
+			if proofErr := validateRuntimeProof(manifest, proof); proofErr == nil {
+				if receipt.Activation == nil {
+					return finalizeActivationReceipt(ctx, manifest, receipt, proof)
+				}
+				return receipt, nil
+			}
+		}
+	}
+
+	if err := lifecycle.Restart(ctx, manifest); err != nil {
+		return Receipt{}, rollbackActivationFailure(manifest, fmt.Errorf("restart supervisor: %w", err))
+	}
+	proof, err := lifecycle.Verify(ctx, manifest)
+	if err != nil {
+		return Receipt{}, rollbackActivationFailure(manifest, fmt.Errorf("verify restarted supervisor: %w", err))
+	}
+	if err := validateRuntimeProof(manifest, proof); err != nil {
+		return Receipt{}, rollbackActivationFailure(manifest, err)
+	}
+	return finalizeActivationReceipt(ctx, manifest, receipt, proof)
 }
 
 // Rollback restores the exact pre-install filesystem state from manifest-bound
-// backups. This RED scaffold is replaced by the transactional implementation.
-func Rollback(Manifest) error {
-	return errActivationDisabled
+// backups and removes the candidate's manifest and receipt. Backups are
+// retained as evidence and as independently verifiable recovery inputs.
+func Rollback(manifest Manifest) error {
+	state, err := preflightManifest(manifest)
+	if err != nil {
+		return fmt.Errorf("preflight rollback: %w", err)
+	}
+	if !state.coreAlreadyInstalled || !allManagedFilesInstalled(state.managedFiles) {
+		return fmt.Errorf("rollback requires the complete candidate filesystem state")
+	}
+	return newInstaller().rollbackTransactionAndRemoveMetadata(manifest, state, true)
+}
+
+func finalizeActivationReceipt(ctx context.Context, manifest Manifest, receipt Receipt, proof RuntimeProof) (Receipt, error) {
+	persisted := receipt
+	persisted.Result = ResultInstalled
+	persisted.Activation = &proof
+	if err := finalizeReceipt(&persisted); err != nil {
+		return Receipt{}, rollbackActivationFailure(manifest, fmt.Errorf("finalize activation receipt: %w", err))
+	}
+	if err := newInstaller().writeReceipt(manifest.ReceiptPath, persisted); err != nil {
+		return Receipt{}, rollbackActivationFailure(manifest, fmt.Errorf("write activation receipt: %w", err))
+	}
+	report, err := InspectIntegrity(ctx, manifest)
+	if err != nil {
+		return Receipt{}, rollbackActivationFailure(manifest, fmt.Errorf("inspect activated platform: %w", err))
+	}
+	if len(report.Drifts) != 0 {
+		return Receipt{}, rollbackActivationFailure(manifest, fmt.Errorf("activated platform integrity drift: %+v", report.Drifts))
+	}
+	if receipt.Result == ResultNoop {
+		persisted.Result = ResultNoop
+		if err := finalizeReceipt(&persisted); err != nil {
+			return Receipt{}, err
+		}
+	}
+	return persisted, nil
+}
+
+func validateRuntimeProof(manifest Manifest, proof RuntimeProof) error {
+	if proof.ExecutableSHA256 != manifest.Core.SHA256 {
+		return fmt.Errorf("runtime executable sha256 mismatch: got %s want %s", proof.ExecutableSHA256, manifest.Core.SHA256)
+	}
+	if proof.Commit != manifest.Activation.ExpectedCommit {
+		return fmt.Errorf("runtime commit mismatch: got %s want %s", proof.Commit, manifest.Activation.ExpectedCommit)
+	}
+	if proof.Version != manifest.Activation.ExpectedVersion {
+		return fmt.Errorf("runtime version mismatch: got %q want %q", proof.Version, manifest.Activation.ExpectedVersion)
+	}
+	return nil
+}
+
+func rollbackActivationFailure(manifest Manifest, cause error) error {
+	if rollbackErr := Rollback(manifest); rollbackErr != nil {
+		return fmt.Errorf("%w; rollback also failed: %w", cause, rollbackErr)
+	}
+	return cause
 }

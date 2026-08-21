@@ -2,6 +2,7 @@ package platforminstall
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,9 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 	state, err := preflightManifest(manifest)
 	if err != nil {
 		return Receipt{}, err
+	}
+	if report := inspectPinnedIntegrity(context.Background(), manifest); len(report.Drifts) != 0 {
+		return Receipt{}, fmt.Errorf("preflight platform integrity drift: %+v", report.Drifts)
 	}
 	if state.noopReceipt != nil {
 		result := *state.noopReceipt
@@ -146,6 +150,21 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 			return Receipt{}, fmt.Errorf("write install receipt: %w; rollback also failed: %w", err, rollbackErr)
 		}
 		return Receipt{}, fmt.Errorf("write install receipt: %w", err)
+	}
+	if manifest.Activation == nil {
+		report, inspectErr := InspectIntegrity(context.Background(), manifest)
+		if inspectErr != nil {
+			if rollbackErr := i.rollbackTransactionAndRemoveMetadata(manifest, state, true); rollbackErr != nil {
+				return Receipt{}, fmt.Errorf("inspect installed platform: %w; rollback also failed: %w", inspectErr, rollbackErr)
+			}
+			return Receipt{}, fmt.Errorf("inspect installed platform: %w", inspectErr)
+		}
+		if len(report.Drifts) != 0 {
+			if rollbackErr := i.rollbackTransactionAndRemoveMetadata(manifest, state, true); rollbackErr != nil {
+				return Receipt{}, fmt.Errorf("installed platform integrity drift: %+v; rollback also failed: %w", report.Drifts, rollbackErr)
+			}
+			return Receipt{}, fmt.Errorf("installed platform integrity drift: %+v", report.Drifts)
+		}
 	}
 	return receipt, nil
 }
@@ -352,6 +371,14 @@ func receiptMatchesManifest(receipt Receipt, manifest Manifest) bool {
 	}
 	for index := range want {
 		if receipt.ManagedFiles[index] != want[index] {
+			return false
+		}
+	}
+	if manifest.Activation == nil {
+		return receipt.Activation == nil
+	}
+	if receipt.Activation != nil {
+		if receipt.Activation.ExecutableSHA256 != manifest.Core.SHA256 || receipt.Activation.Commit != manifest.Activation.ExpectedCommit || receipt.Activation.Version != manifest.Activation.ExpectedVersion {
 			return false
 		}
 	}

@@ -155,6 +155,45 @@ func TestApplyInterruptedBeforeRestartVerifiesThenRestartsOnce(t *testing.T) {
 	}
 }
 
+func TestActivationPlanNamesPotentialRestartAndFinalVerification(t *testing.T) {
+	dir := t.TempDir()
+	manifest := activationManifest(t, dir)
+
+	steps, err := Plan(manifest)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	want := map[string]bool{
+		"verify-runtime-or-restart":    false,
+		"restart-supervisor-if-needed": true,
+		"write-activation-receipt":     true,
+		"verify-integrity":             false,
+	}
+	for _, step := range steps {
+		if mutates, exists := want[step.Action]; exists {
+			if step.Mutates != mutates {
+				t.Errorf("Plan() step %q mutates=%t, want %t", step.Action, step.Mutates, mutates)
+			}
+			delete(want, step.Action)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("Plan() missing activation steps: %v", want)
+	}
+}
+
+func TestLoadManifestRejectsInvalidActivationIdentity(t *testing.T) {
+	dir := t.TempDir()
+	manifest := activationManifest(t, dir)
+	manifest.Activation.ExpectedCommit = "short"
+	manifest = finalizeManifest(t, manifest)
+
+	_, err := LoadManifest(marshalManifest(t, manifest))
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("activation.expected_commit")) {
+		t.Fatalf("LoadManifest() error = %v, want invalid activation commit", err)
+	}
+}
+
 type dynamicLifecycle struct {
 	restart func(context.Context, Manifest) error
 	verify  func(context.Context, Manifest) (RuntimeProof, error)

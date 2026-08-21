@@ -118,6 +118,25 @@ func TestInspectIntegrityReportsReceiptSelfDigestDrift(t *testing.T) {
 	}
 }
 
+func TestInstallRejectsPinnedIntegrityDriftBeforeMutation(t *testing.T) {
+	dir := t.TempDir()
+	manifest := integrityManifest(t, dir)
+	coreBefore := mustReadFile(t, manifest.Core.Destination)
+	if err := os.WriteFile(manifest.Integrity.Files[0].Path, []byte("preflight drift"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Install(manifest)
+	if err == nil || !strings.Contains(err.Error(), "preflight platform integrity drift") {
+		t.Fatalf("Install() error = %v, want preflight integrity drift", err)
+	}
+	if got := mustReadFile(t, manifest.Core.Destination); !bytes.Equal(got, coreBefore) {
+		t.Fatalf("core changed after pinned-integrity preflight failure: got %q want %q", got, coreBefore)
+	}
+	assertPathAbsent(t, manifest.BackupPath)
+	assertPathAbsent(t, manifest.ReceiptPath)
+}
+
 func TestLoadManifestRejectsUnsafeIntegrityPins(t *testing.T) {
 	dir := t.TempDir()
 	manifest := integrityManifest(t, dir)
