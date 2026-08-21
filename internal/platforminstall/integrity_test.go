@@ -13,6 +13,9 @@ import (
 func TestInspectIntegrityAcceptsExactFingerprint(t *testing.T) {
 	dir := t.TempDir()
 	manifest := integrityManifest(t, dir)
+	if _, err := Install(manifest); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
 
 	report, err := InspectIntegrity(context.Background(), manifest)
 	if err != nil {
