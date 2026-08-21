@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -87,6 +88,9 @@ func InspectIntegrity(ctx context.Context, manifest Manifest) (IntegrityReport, 
 	for _, pin := range manifest.Integrity.Providers {
 		inspectProvider(ctx, &report, pin)
 	}
+	sort.Slice(report.Drifts, func(i, j int) bool {
+		return report.Drifts[i].Field < report.Drifts[j].Field
+	})
 	return report, nil
 }
 
