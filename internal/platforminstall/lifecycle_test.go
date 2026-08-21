@@ -207,6 +207,25 @@ func TestLoadManifestRejectsInvalidActivationIdentity(t *testing.T) {
 	}
 }
 
+func TestActivationAcceptsAndVerifiesPinnedLegacyPreviousBuildID(t *testing.T) {
+	dir := t.TempDir()
+	manifest := activationManifest(t, dir)
+	manifest.Activation.PreviousCommit = "2b5e5c106-dirty"
+	manifest = finalizeManifest(t, manifest)
+
+	if _, err := Apply(context.Background(), manifest, exactFakeLifecycle(manifest)); err != nil {
+		t.Fatalf("Apply() with pinned legacy previous build ID error = %v", err)
+	}
+	previous := previousFakeLifecycle(manifest)
+	proof, err := Revert(context.Background(), manifest, previous)
+	if err != nil {
+		t.Fatalf("Revert() with pinned legacy previous build ID error = %v", err)
+	}
+	if proof.Commit != "2b5e5c106-dirty" {
+		t.Fatalf("Revert() commit = %q, want exact pinned legacy build ID", proof.Commit)
+	}
+}
+
 func TestRevertRestoresPriorPlatformAndVerifiesOneRestart(t *testing.T) {
 	dir := t.TempDir()
 	manifest := activationManifest(t, dir)
