@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,20 @@ import (
 	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/spf13/cobra"
 )
+
+var platformLifecycleFactory = func() platforminstall.Lifecycle {
+	return disabledPlatformLifecycle{}
+}
+
+type disabledPlatformLifecycle struct{}
+
+func (disabledPlatformLifecycle) Restart(context.Context, platforminstall.Manifest) error {
+	return fmt.Errorf("platform supervisor lifecycle is not wired")
+}
+
+func (disabledPlatformLifecycle) Verify(context.Context, platforminstall.Manifest) (platforminstall.RuntimeProof, error) {
+	return platforminstall.RuntimeProof{}, fmt.Errorf("platform supervisor lifecycle is not wired")
+}
 
 func newPlatformCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{

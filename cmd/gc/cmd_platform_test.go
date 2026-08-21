@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -42,7 +43,7 @@ func TestPlatformInstallDryRunPrintsOrderedPlanWithoutMutation(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v; stderr=%s", err, stderr.String())
 	}
-	for _, want := range []string{"01 CHECK verify-manifest", "04 MUTATE write-backup", "08 CHECK verify-integrity"} {
+	for _, want := range []string{"01 CHECK verify-manifest", "04 MUTATE write-backup", "09 MUTATE restart-supervisor-if-needed", "11 CHECK verify-integrity"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -70,6 +71,14 @@ func TestPlatformInstallDryRunPrintsOrderedPlanWithoutMutation(t *testing.T) {
 
 func TestPlatformInstallApplyUsesManifestTransaction(t *testing.T) {
 	manifestPath, manifest := platformCommandFixture(t)
+	lifecycle := &platformCommandLifecycle{proof: platforminstall.RuntimeProof{
+		ExecutableSHA256: manifest.Core.SHA256,
+		Commit:           manifest.Activation.ExpectedCommit,
+		Version:          manifest.Activation.ExpectedVersion,
+	}}
+	previousFactory := platformLifecycleFactory
+	platformLifecycleFactory = func() platforminstall.Lifecycle { return lifecycle }
+	t.Cleanup(func() { platformLifecycleFactory = previousFactory })
 	var stdout, stderr bytes.Buffer
 	cmd := newPlatformCmd(&stdout, &stderr)
 	cmd.SetArgs([]string{"install", "--manifest", manifestPath, "--apply"})
@@ -81,6 +90,9 @@ func TestPlatformInstallApplyUsesManifestTransaction(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "result=installed") || !strings.Contains(stdout.String(), manifest.ManifestSHA256) {
 		t.Fatalf("stdout = %q, want installed result and manifest digest", stdout.String())
+	}
+	if lifecycle.restarts != 1 || lifecycle.verifies != 1 {
+		t.Fatalf("lifecycle calls restart=%d verify=%d, want 1/1", lifecycle.restarts, lifecycle.verifies)
 	}
 }
 
@@ -118,6 +130,10 @@ func platformCommandFixture(t *testing.T) (string, platforminstall.Manifest) {
 		PreviousSHA256: platformCommandSHA(previous),
 		BackupPath:     filepath.Join(dir, ".gc", "platform", "gc.previous"),
 		ReceiptPath:    filepath.Join(dir, ".gc", "platform", "install-receipt.json"),
+		Activation: &platforminstall.ActivationSpec{
+			ExpectedCommit:  "0123456789abcdef0123456789abcdef01234567",
+			ExpectedVersion: "gc version 1.4.1-test",
+		},
 	}
 	digest, err := platforminstall.ManifestDigest(manifest)
 	if err != nil {
@@ -133,6 +149,22 @@ func platformCommandFixture(t *testing.T) (string, platforminstall.Manifest) {
 		t.Fatal(err)
 	}
 	return inputPath, manifest
+}
+
+type platformCommandLifecycle struct {
+	restarts int
+	verifies int
+	proof    platforminstall.RuntimeProof
+}
+
+func (lifecycle *platformCommandLifecycle) Restart(context.Context, platforminstall.Manifest) error {
+	lifecycle.restarts++
+	return nil
+}
+
+func (lifecycle *platformCommandLifecycle) Verify(context.Context, platforminstall.Manifest) (platforminstall.RuntimeProof, error) {
+	lifecycle.verifies++
+	return lifecycle.proof, nil
 }
 
 func platformCommandSHA(data []byte) string {
