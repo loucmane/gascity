@@ -112,7 +112,7 @@ absolute. Modes are JSON numbers: `493` is `0755`; `420` is `0644`.
   "activation": {
     "expected_commit": "<candidate-full-commit>",
     "expected_version": "<exact-candidate-version-output>",
-    "previous_commit": "<previous-full-commit>",
+    "previous_commit": "<exact-previous-runtime-build-id>",
     "previous_version": "<exact-previous-version-output>"
   },
   "integrity": {
@@ -144,6 +144,12 @@ absolute. Modes are JSON numbers: `493` is `0755`; `420` is `0644`.
   }
 }
 ```
+
+`expected_commit` is always the candidate's full 40-character commit. For a
+legacy rollback target, `previous_commit` is the exact build ID reported by
+the running supervisor; the schema accepts a 7-to-40-character lowercase
+hexadecimal ID with an optional `-dirty` suffix so that verification can pin
+the observed legacy runtime without pretending it was rebuilt.
 
 Sort `managed_files` strictly by `name`. Use an empty
 `previous_sha256` only when the destination is required to be absent; rollback

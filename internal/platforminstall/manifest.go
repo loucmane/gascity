@@ -286,7 +286,7 @@ func validateManifestContent(manifest Manifest) error {
 		if strings.TrimSpace(manifest.Activation.ExpectedVersion) == "" {
 			return errors.New("manifest activation.expected_version is required")
 		}
-		if err := validateGitCommit("activation.previous_commit", manifest.Activation.PreviousCommit); err != nil {
+		if err := validateRuntimeBuildID("activation.previous_commit", manifest.Activation.PreviousCommit); err != nil {
 			return err
 		}
 		if strings.TrimSpace(manifest.Activation.PreviousVersion) == "" {
@@ -303,6 +303,22 @@ func validateSHA256(name, value string) error {
 	decoded, err := hex.DecodeString(value)
 	if err != nil || len(decoded) != sha256.Size || value != strings.ToLower(value) {
 		return fmt.Errorf("manifest %s must be a lowercase SHA-256 digest", name)
+	}
+	return nil
+}
+
+func validateRuntimeBuildID(field, value string) error {
+	base := strings.TrimSuffix(value, "-dirty")
+	if base != value && value != base+"-dirty" {
+		return fmt.Errorf("manifest %s must be a lowercase 7-to-40 character hexadecimal build ID with optional -dirty suffix", field)
+	}
+	if len(base) < 7 || len(base) > 40 {
+		return fmt.Errorf("manifest %s must be a lowercase 7-to-40 character hexadecimal build ID with optional -dirty suffix", field)
+	}
+	for _, character := range base {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return fmt.Errorf("manifest %s must be a lowercase 7-to-40 character hexadecimal build ID with optional -dirty suffix", field)
+		}
 	}
 	return nil
 }
