@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+tmp_root=$(mktemp -d "${TMPDIR:-/tmp}/gc-platform-release-imports.XXXXXX")
+trap 'rm -rf -- "$tmp_root"' EXIT
+
+gc_bin=${GC_BIN:-}
+if [[ -z "$gc_bin" ]]; then
+  gc_bin="$tmp_root/gc"
+  go build -o "$gc_bin" ./cmd/gc
+fi
+
+checked=0
+for asset_dir in "$repo_root"/release/platform-assets/*; do
+  [[ -d "$asset_dir" ]] || continue
+  [[ -f "$asset_dir/pack.toml" && -f "$asset_dir/packs.lock" ]] || {
+    echo "managed platform release asset is incomplete: $asset_dir" >&2
+    exit 1
+  }
+
+  release_id=$(basename "$asset_dir")
+  city_dir="$tmp_root/$release_id/city"
+  gc_home="$tmp_root/$release_id/gc-home"
+  mkdir -p "$city_dir" "$gc_home"
+  cp "$asset_dir/pack.toml" "$city_dir/pack.toml"
+  cp "$asset_dir/packs.lock" "$city_dir/packs.lock"
+
+  GC_HOME="$gc_home" "$gc_bin" import install --city "$city_dir" >/dev/null
+
+  if ! cmp -s "$asset_dir/pack.toml" "$city_dir/pack.toml"; then
+    echo "$release_id: gc import install rewrote pack.toml" >&2
+    diff -u "$asset_dir/pack.toml" "$city_dir/pack.toml" >&2 || true
+    exit 1
+  fi
+  if ! cmp -s "$asset_dir/packs.lock" "$city_dir/packs.lock"; then
+    echo "$release_id: packs.lock is not the resolver's normalized output" >&2
+    diff -u "$asset_dir/packs.lock" "$city_dir/packs.lock" >&2 || true
+    exit 1
+  fi
+
+  GC_HOME="$gc_home" "$gc_bin" import check --city "$city_dir" >/dev/null
+  checked=$((checked + 1))
+done
+
+if [[ "$checked" -eq 0 ]]; then
+  echo "no managed platform release assets found" >&2
+  exit 1
+fi
+
+echo "managed platform release imports OK: $checked release(s)"

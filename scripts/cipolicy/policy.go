@@ -20,7 +20,7 @@ const (
 	// policy review, while workflow, job, step, and input descriptions remain
 	// free to change. A failure prints the projection and candidate digest.
 	expectedCITriggersHash       = "d1a8bcd089019589658d8f154af9c26a70877285d84a384c2dcea299efc9554a"
-	expectedCIExecutionHash      = "81a5e5802ff7656161f039aa088bb02f3fa80f1d7559846d6333034f82298b32" // reviewed merge: retain integration workflow shape and pin BD_VERSION v1.2.2
+	expectedCIExecutionHash      = "436f26c0dd69e133aacbea94cecf51dfc0b89c553515e82a6d5b9955fbeca11c" // reviewed delta: add normalized managed-release import gate
 	expectedNightlyTriggersHash  = "0a4400a09ac567e90adf8be1232eef1f14e36efd8dba3e143aa6e36f5b7a36f5"
 	expectedNightlyExecutionHash = "4b17e6d5c9c6c13c0935051aff0c50ddbbc6b6c5aa10947ed4447d25c29a2a23" // reviewed delta: BD_VERSION v1.1.0 -> v1.2.2 (beads pin hotfix)
 	expectedSetupActionHash      = "6a7fa725afa5cdf18cc459ea401a74bbd83cef757bf4e5d0dcd131a010df6ac0"
