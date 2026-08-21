@@ -121,6 +121,13 @@ func ManifestDigest(manifest Manifest) (string, error) {
 	return sha256Hex(data), nil
 }
 
+// FinalizeManifest validates an unsigned manifest and returns its canonical,
+// self-digested representation. This RED scaffold is replaced by the strict
+// manifest authoring boundary.
+func FinalizeManifest([]byte) (Manifest, []byte, error) {
+	return Manifest{}, nil, errors.New("platform manifest finalization is disabled")
+}
+
 // LoadManifest decodes and validates a platform-install manifest.
 func LoadManifest(data []byte) (Manifest, error) {
 	var manifest Manifest

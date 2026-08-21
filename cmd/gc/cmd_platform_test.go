@@ -187,9 +187,75 @@ func TestPlatformRollbackApplyRestoresAndVerifiesPreviousRuntime(t *testing.T) {
 	}
 }
 
+func TestPlatformManifestWritesCanonicalOutputAndExactReplayIsNoop(t *testing.T) {
+	_, manifest := platformCommandFixture(t)
+	manifest.ManifestSHA256 = ""
+	inputPath := filepath.Join(t.TempDir(), "platform-manifest.unsigned.json")
+	outputPath := filepath.Join(filepath.Dir(inputPath), "platform-manifest.json")
+	data, err := platforminstall.MarshalManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inputPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd := newPlatformCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"manifest", "--input", inputPath, "--output", outputPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v; stderr=%s", err, stderr.String())
+	}
+	first := mustPlatformCommandStat(t, outputPath)
+	finalized, err := platforminstall.LoadManifest(mustPlatformCommandRead(t, outputPath))
+	if err != nil {
+		t.Fatalf("LoadManifest(output) error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), finalized.ManifestSHA256) {
+		t.Fatalf("stdout = %q, want manifest digest %s", stdout.String(), finalized.ManifestSHA256)
+	}
+
+	stdout.Reset()
+	cmd = newPlatformCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"manifest", "--input", inputPath, "--output", outputPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("replay Execute() error = %v", err)
+	}
+	second := mustPlatformCommandStat(t, outputPath)
+	if !os.SameFile(first, second) || !second.ModTime().Equal(first.ModTime()) {
+		t.Fatal("exact manifest replay changed output identity or mtime")
+	}
+}
+
+func TestPlatformManifestRefusesConflictingExistingOutput(t *testing.T) {
+	_, manifest := platformCommandFixture(t)
+	manifest.ManifestSHA256 = ""
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "platform-manifest.unsigned.json")
+	input, err := platforminstall.MarshalManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, input, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(dir, "platform-manifest.json")
+	if err := os.WriteFile(outputPath, []byte("preserve me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newPlatformCmd(&bytes.Buffer{}, &bytes.Buffer{})
+	cmd.SetArgs([]string{"manifest", "--input", manifestPath, "--output", outputPath})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "output already exists with different bytes") {
+		t.Fatalf("Execute() error = %v, want conflicting-output refusal", err)
+	}
+	if got := string(mustPlatformCommandRead(t, outputPath)); got != "preserve me" {
+		t.Fatalf("conflicting output changed to %q", got)
+	}
+}
+
 func TestRootRegistersPlatformCommand(t *testing.T) {
 	root := newRootCmdWithOptions(&bytes.Buffer{}, &bytes.Buffer{}, rootCommandOptions{})
-	for _, name := range []string{"install", "rollback"} {
+	for _, name := range []string{"install", "manifest", "rollback"} {
 		command, _, err := root.Find([]string{"platform", name})
 		if err != nil || command == nil || command.Name() != name {
 			t.Fatalf("root.Find(platform %s) = command=%v err=%v", name, command, err)
