@@ -47,6 +47,12 @@ type agentBuildParams struct {
 	// desired-state build so per-agent resolution does not rescan the store.
 	sessionBeads *sessionBeadSnapshot
 
+	// workStores maps canonical demand store refs ("city" or "rig:<name>")
+	// to the stores that own routed work. Desired-state construction uses it
+	// to attach durable operator evidence to a demand bead when provider
+	// resolution fails before a session bead can exist.
+	workStores map[string]beads.Store
+
 	// assignedWorkBeads is the actionable assigned-work snapshot for this
 	// build. Pool new-tier materialization uses it to avoid treating sessions
 	// that already own work as available generic capacity.
