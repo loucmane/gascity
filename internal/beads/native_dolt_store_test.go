@@ -390,6 +390,38 @@ func TestNativeDoltStoreReadyOnlyIncludesOpenAndDeferredUpstreamStatuses(t *test
 	}
 }
 
+func TestNativeDoltStoreReadyDoesNotTrustUpstreamFailedBlockerProjection(t *testing.T) {
+	store := newNativeDoltStoreForTest(newNativeDoltMemStorage())
+
+	blocker, err := store.Create(Bead{Title: "failed control", Type: "task"})
+	if err != nil {
+		t.Fatalf("Create(blocker): %v", err)
+	}
+	dependent, err := store.Create(Bead{
+		Title: "downstream work",
+		Type:  "task",
+		Needs: []string{"blocks:" + blocker.ID},
+	})
+	if err != nil {
+		t.Fatalf("Create(dependent): %v", err)
+	}
+	if closed, err := store.CloseAll([]string{blocker.ID}, map[string]string{"gc.outcome": "fail"}); err != nil {
+		t.Fatalf("CloseAll: %v", err)
+	} else if closed != 1 {
+		t.Fatalf("CloseAll closed %d beads, want 1", closed)
+	}
+
+	got, err := store.Ready()
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	for _, bead := range got {
+		if bead.ID == dependent.ID {
+			t.Fatalf("Ready trusted upstream projection and released dependent %s after blocker %s failed", dependent.ID, blocker.ID)
+		}
+	}
+}
+
 func TestNativeDoltStoreReadyExcludesFutureDeferredBeads(t *testing.T) {
 	store := newNativeDoltStoreForTest(newNativeDoltMemStorage())
 

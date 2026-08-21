@@ -1440,11 +1440,15 @@ func runSupervisor(stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "gc supervisor: api: %v\n", err) //nolint:errcheck
 		}
 	}()
-	defer func() {
-		shutCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
-		defer c()
-		apiMux.Shutdown(shutCtx) //nolint:errcheck
-	}()
+	var apiShutdownOnce sync.Once
+	shutdownAPI := func() {
+		apiShutdownOnce.Do(func() {
+			shutCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
+			defer c()
+			apiMux.Shutdown(shutCtx) //nolint:errcheck
+		})
+	}
+	defer shutdownAPI()
 	fmt.Fprintf(stdout, "Supervisor API listening on http://%s\n", addr) //nolint:errcheck
 	writeSupervisorDashboardStartup(stdout, dashboardMounted, readOnly, bind, port)
 
@@ -1513,7 +1517,7 @@ func runSupervisor(stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "gc supervisor: reconcile panicked: %v\n", r) //nolint:errcheck
 			}
 		}()
-		reconcileCities(reg, registry, supCfg.Publication, stdout, stderr)
+		reconcileCities(reg, registry, supCfg.Publication, apiMux.QuiesceCity, stdout, stderr)
 		// Pet the service-manager watchdog (WatchdogSec=) only after a
 		// reconcile cycle completes; a panic above skips this, so a
 		// wedged reconcile loop surfaces as a watchdog timeout even
@@ -1551,6 +1555,9 @@ func runSupervisor(stdout, stderr io.Writer) int {
 			}
 		case <-ctx.Done():
 			notifySdState(stderr, sdnotify.Stopping)
+			// Stop API admission and join/cancel accepted asynchronous work before
+			// city runtimes release their stores, providers, and fence paths.
+			shutdownAPI()
 			// Shutdown all cities. Collect under lock, then stop outside
 			// to avoid blocking API requests during graceful shutdown.
 			var toStop map[string]*managedCity
@@ -1633,6 +1640,7 @@ func reconcileCities(
 	reg *supervisor.Registry,
 	cr *cityRegistry,
 	publication supervisor.PublicationConfig,
+	quiesceCity func(context.Context, string) error,
 	stdout, stderr io.Writer,
 ) {
 	entries, err := reg.List()
@@ -1674,7 +1682,15 @@ func reconcileCities(
 			cityName = filepath.Base(path)
 		}
 		fmt.Fprintf(stdout, "Unregistered city '%s', stopping...\n", cityName) //nolint:errcheck
-		stopErr := stopManagedCity(mc, path, stderr)
+		var stopErr error
+		if quiesceCity != nil {
+			stopErr = quiesceCity(context.Background(), cityName)
+		}
+		if stopErr == nil {
+			stopErr = stopManagedCity(mc, path, stderr)
+		} else {
+			stopErr = fmt.Errorf("quiescing city %q API tasks: %w", cityName, stopErr)
+		}
 		// Clear backoff so re-registering starts immediately.
 		cr.BatchUpdate(func(
 			_ map[string]*managedCity,
@@ -1754,6 +1770,14 @@ func reconcileCities(
 	})
 	for i, mc := range nameDriftCities {
 		fmt.Fprintf(stdout, "City name changed at '%s', restarting...\n", nameDriftPaths[i]) //nolint:errcheck
+		var quiesceErr error
+		if quiesceCity != nil {
+			quiesceErr = quiesceCity(context.Background(), mc.name)
+		}
+		if quiesceErr != nil {
+			fmt.Fprintf(stderr, "gc supervisor: city '%s': API quiescence: %v\n", mc.name, quiesceErr) //nolint:errcheck
+			continue
+		}
 		_ = stopManagedCity(mc, nameDriftPaths[i], stderr)
 	}
 

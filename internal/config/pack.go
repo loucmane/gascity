@@ -8,6 +8,7 @@ import (
 	iofs "io/fs"
 	"log"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -524,7 +525,7 @@ func expandPacks(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map[stri
 					overrides:          allOverrides,
 				})
 			}
-		} else if err := applyOverrides(rigAgents, allOverrides, rig.Name); err != nil {
+		} else if err := applyOverridesWithGenericRigPools(rigAgents, cfg.Agents, allOverrides); err != nil {
 			return fmt.Errorf("rig %q: %w", rig.Name, err)
 		}
 
@@ -2727,7 +2728,11 @@ func applyDeferredRigPatches(cfg *City, deferred []deferredRigPatches) error {
 				return fmt.Errorf("rig %q: agent at deferred range index %d changed before deferred rig patches: got %q, want %q", d.rigName, d.agentStart+i, got, want)
 			}
 		}
-		if err := applyOverrides(cfg.Agents[d.agentStart:d.agentEnd], d.overrides, d.rigName); err != nil {
+		if err := applyOverridesWithGenericRigPools(
+			cfg.Agents[d.agentStart:d.agentEnd],
+			cfg.Agents,
+			d.overrides,
+		); err != nil {
 			return fmt.Errorf("rig %q: %w", d.rigName, err)
 		}
 	}
@@ -2742,26 +2747,49 @@ func qualifiedAgentNames(agents []Agent) []string {
 	return names
 }
 
-// applyOverrides applies per-rig overrides to pack-stamped agents.
-// Each override targets an agent by name within the pack.
-func applyOverrides(agents []Agent, overrides []AgentOverride, _ string) error {
+// applyOverridesWithGenericRigPools preserves the pack-targeted override
+// behavior while accepting a narrow runtime-bound case: option_defaults for
+// an unbound city-local scope="rig" pool. The generic template must remain
+// unchanged here because each registered rig receives a distinct bound copy
+// during desired-state reconciliation.
+func applyOverridesWithGenericRigPools(packAgents, allAgents []Agent, overrides []AgentOverride) error {
 	for i, ov := range overrides {
 		if ov.Agent == "" {
 			return fmt.Errorf("overrides[%d]: agent name is required", i)
 		}
 		found := false
-		for j := range agents {
-			if agents[j].Name == ov.Agent {
-				applyAgentOverride(&agents[j], &ov)
+		for j := range packAgents {
+			if packAgents[j].Name == ov.Agent {
+				applyAgentOverride(&packAgents[j], &ov)
 				found = true
 				break
 			}
 		}
-		if !found {
-			return fmt.Errorf("overrides[%d]: agent %q not found in pack", i, ov.Agent)
+		if found || genericRigPoolOptionDefaultsTarget(allAgents, &ov) {
+			continue
 		}
+		return fmt.Errorf("overrides[%d]: agent %q not found in pack", i, ov.Agent)
 	}
 	return nil
+}
+
+func genericRigPoolOptionDefaultsTarget(agents []Agent, ov *AgentOverride) bool {
+	if ov == nil || len(ov.OptionDefaults) == 0 {
+		return false
+	}
+	mutation := *ov
+	mutation.Agent = ""
+	mutation.OptionDefaults = nil
+	if !reflect.ValueOf(mutation).IsZero() {
+		return false
+	}
+	for i := range agents {
+		agent := &agents[i]
+		if agent.Name == ov.Agent && agent.Dir == "" && strings.TrimSpace(agent.Scope) == "rig" && agent.SupportsGenericEphemeralSessions() {
+			return true
+		}
+	}
+	return false
 }
 
 // applyAgentOverride applies a single rig-scoped override to an agent. The

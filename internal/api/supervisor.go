@@ -91,6 +91,13 @@ type cachedCityServer struct {
 	srv   *Server
 }
 
+// cityCacheLock serializes cache lifecycle transitions for one city. users
+// counts both the goroutine holding mu and goroutines waiting to acquire it.
+type cityCacheLock struct {
+	mu    sync.Mutex
+	users int
+}
+
 // SupervisorMux owns the single Huma API for the entire control plane.
 // Every typed operation — supervisor-scope and per-city — is registered
 // on humaAPI:
@@ -135,6 +142,8 @@ type SupervisorMux struct {
 	// the State pointer changes (city restarted → new controllerState).
 	cacheMu sync.RWMutex
 	cache   map[string]cachedCityServer
+	servers map[*Server]struct{}
+	cityMu  map[string]*cityCacheLock
 
 	// idem caches responses for Idempotency-Key replay on supervisor-scope
 	// create endpoints (POST /v0/city). Per-city creates use the per-city
@@ -162,6 +171,8 @@ func NewSupervisorMux(resolver CityResolver, initializer cityInitializer, readOn
 		humaMux:     humaMux,
 		humaAPI:     newSupervisorHumaAPI(humaMux, readOnly),
 		cache:       make(map[string]cachedCityServer),
+		servers:     make(map[*Server]struct{}),
+		cityMu:      make(map[string]*cityCacheLock),
 		idem:        newIdempotencyCache(30 * time.Minute),
 	}
 	sm.registerSupervisorRoutes()
@@ -414,7 +425,25 @@ func (sm *SupervisorMux) Serve(lis net.Listener) error {
 
 // Shutdown gracefully shuts down the server.
 func (sm *SupervisorMux) Shutdown(ctx context.Context) error {
-	return sm.server.Shutdown(ctx)
+	httpErr := sm.server.Shutdown(ctx)
+
+	sm.cacheMu.RLock()
+	servers := make(map[*Server]struct{}, len(sm.servers)+len(sm.cache))
+	for srv := range sm.servers {
+		servers[srv] = struct{}{}
+	}
+	for _, cached := range sm.cache {
+		servers[cached.srv] = struct{}{}
+	}
+	sm.cacheMu.RUnlock()
+
+	var backgroundErrs []error
+	for srv := range servers {
+		if err := srv.shutdownBackground(ctx); err != nil {
+			backgroundErrs = append(backgroundErrs, err)
+		}
+	}
+	return errors.Join(httpErr, errors.Join(backgroundErrs...))
 }
 
 // ServeHTTP delegates every request to humaMux. Every typed
@@ -432,18 +461,12 @@ func (sm *SupervisorMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // serveCityRequest resolves a city's State and dispatches to a per-city Server.
 func (sm *SupervisorMux) serveCityRequest(w http.ResponseWriter, r *http.Request, cityName, path string) {
 	t0 := time.Now()
-	state := sm.resolver.CityState(cityName)
-	if state == nil {
-		sm.cacheMu.Lock()
-		delete(sm.cache, cityName)
-		sm.cacheMu.Unlock()
+	srv := sm.resolveCityServer(cityName)
+	if srv == nil {
 		problemCityNotFound.writeTo(w)
 		return
 	}
 	t1 := time.Now()
-
-	srv := sm.getCityServer(cityName, state)
-	t2 := time.Now()
 
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = path
@@ -453,8 +476,8 @@ func (sm *SupervisorMux) serveCityRequest(w http.ResponseWriter, r *http.Request
 
 	total := t3.Sub(t0)
 	if total > 500*time.Millisecond {
-		log.Printf("SLOW serveCityRequest %s: resolve=%s getServer=%s handler=%s total=%s",
-			path, t1.Sub(t0), t2.Sub(t1), t3.Sub(t2), total)
+		log.Printf("SLOW serveCityRequest %s: resolveServer=%s handler=%s total=%s",
+			path, t1.Sub(t0), t3.Sub(t1), total)
 	}
 }
 
@@ -468,6 +491,14 @@ func (sm *SupervisorMux) getCityServer(name string, state State) *Server {
 	}
 	sm.cacheMu.RUnlock()
 
+	srv := sm.newCityServer(state)
+
+	releaseCity := sm.lockCityCache(name)
+	defer releaseCity()
+	return sm.installCityServerLocked(name, state, srv)
+}
+
+func (sm *SupervisorMux) newCityServer(state State) *Server {
 	srv := New(state)
 	if sm.readOnly {
 		srv = NewReadOnly(state)
@@ -478,17 +509,80 @@ func (sm *SupervisorMux) getCityServer(name string, state State) *Server {
 	// cached server observes the final provider.
 	srv.dashboardBase = sm.dashboardBase
 	srv.runCensusSource = sm.runCensusSource
+	return srv
+}
 
+func (sm *SupervisorMux) installCityServerLocked(name string, state State, srv *Server) *Server {
 	sm.cacheMu.Lock()
-	defer sm.cacheMu.Unlock()
 	// A concurrent miss may have installed a Server for this State while this
 	// candidate was being built. Return the published instance so per-city
 	// caches and refresh coalescing remain process-unique.
 	if cached, ok := sm.cache[name]; ok && cached.state == state {
+		sm.cacheMu.Unlock()
 		return cached.srv
 	}
+	old := sm.cache[name].srv
+	delete(sm.cache, name)
+	sm.cacheMu.Unlock()
+
+	// State replacement is a city-lifetime transition. Close admission to the
+	// old Server and join every accepted task before publishing a Server backed
+	// by the replacement State; the old State's store/provider may be released
+	// as soon as the resolver publishes the replacement.
+	if old != nil {
+		_ = old.shutdownBackground(context.Background())
+	}
+
+	sm.cacheMu.Lock()
 	sm.cache[name] = cachedCityServer{state: state, srv: srv}
+	sm.servers[srv] = struct{}{}
+	sm.cacheMu.Unlock()
 	return srv
+}
+
+func (sm *SupervisorMux) lockCityCache(name string) func() {
+	sm.cacheMu.Lock()
+	entry := sm.cityMu[name]
+	if entry == nil {
+		entry = &cityCacheLock{}
+		sm.cityMu[name] = entry
+	}
+	entry.users++
+	sm.cacheMu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		// Unlock before dropping the registry reference. A waiter is already
+		// counted in users, so the entry remains discoverable until every
+		// holder and waiter has left this serialization domain.
+		entry.mu.Unlock()
+		sm.cacheMu.Lock()
+		entry.users--
+		if entry.users == 0 && sm.cityMu[name] == entry {
+			delete(sm.cityMu, name)
+		}
+		sm.cacheMu.Unlock()
+	}
+}
+
+// QuiesceCity closes asynchronous admission for one cached city and joins all
+// accepted tasks. The supervisor reconciler calls this boundary before it
+// releases the managed city's store and runtime provider.
+func (sm *SupervisorMux) QuiesceCity(ctx context.Context, name string) error {
+	releaseCity := sm.lockCityCache(name)
+	defer releaseCity()
+	return sm.quiesceCityLocked(ctx, name)
+}
+
+func (sm *SupervisorMux) quiesceCityLocked(ctx context.Context, name string) error {
+	sm.cacheMu.Lock()
+	cached, ok := sm.cache[name]
+	delete(sm.cache, name)
+	sm.cacheMu.Unlock()
+	if !ok {
+		return nil
+	}
+	return cached.srv.shutdownBackground(ctx)
 }
 
 // buildMultiplexer creates a Multiplexer from all running cities'

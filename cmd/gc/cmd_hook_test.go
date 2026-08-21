@@ -15,9 +15,47 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/dispatch"
 	"github.com/gastownhall/gascity/internal/events"
+	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/session"
 )
+
+// startHookClaimFixtureSession provisions hook-claim identity through the same
+// Manager start path production uses. That path writes the controller-owned
+// claim-fence projection before the fake provider starts; tests must not invent
+// runtime identity environment without the corresponding lifecycle projection.
+func startHookClaimFixtureSession(t *testing.T, cityDir, template, alias, sessionName, origin string) {
+	t.Helper()
+	manager := session.NewManagerWithOptions(
+		beads.NewMemStore(),
+		runtime.NewFake(),
+		session.WithCityPath(cityDir),
+	)
+	info, err := manager.CreateSession(context.Background(), session.CreateOptions{
+		Template:     template,
+		Title:        template,
+		Alias:        alias,
+		ExplicitName: sessionName,
+		Command:      "test-provider",
+		Provider:     "fake",
+		ExtraMeta: map[string]string{
+			"session_origin": origin,
+		},
+	})
+	if err != nil {
+		t.Fatalf("start hook-claim fixture session: %v", err)
+	}
+	for key, value := range map[string]string{
+		"GC_SESSION_ID":     info.ID,
+		"GC_SESSION_NAME":   info.SessionName,
+		"GC_INSTANCE_TOKEN": info.InstanceToken,
+		"GC_RUNTIME_EPOCH":  info.Generation,
+	} {
+		t.Setenv(key, value)
+	}
+}
 
 // setHookRunExecutableForTest stubs the re-exec target of `gc hook run` to the
 // shell so tests can drive the wrapper with `sh -c` scripts instead of the real
@@ -40,6 +78,67 @@ func TestNewHookCmdUsesRoutedWorkHelp(t *testing.T) {
 	}
 	if !strings.Contains(cmd.Long, "Finds routed work using the agent's work_query config.") {
 		t.Fatalf("Long = %q, want routed-work description", cmd.Long)
+	}
+}
+
+// TestClaimHookWorkGeneratedQuerySurfacesPrimaryReadyFailure is the live-shape
+// regression for ga-br5. The default generated work query used to silence a
+// failing canonical `bd ready` and finish with `[]`, so the hook drained as
+// healthy no_work instead of emitting the primary-store query failure. Keep
+// the real generated query and shell runner in this test: injecting a runner
+// error alone cannot catch failure laundering inside the generated shell.
+func TestClaimHookWorkGeneratedQuerySurfacesPrimaryReadyFailure(t *testing.T) {
+	tmp := t.TempDir()
+	bdPath := filepath.Join(tmp, "bd")
+	if err := os.WriteFile(bdPath, []byte(`#!/bin/sh
+set -eu
+case "$1" in
+  list|query)
+    printf '[]'
+    ;;
+  ready)
+    printf 'ga-br5 transport witness: primary store unavailable\n' >&2
+    exit 42
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`), 0o755); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+
+	query := (&config.Agent{Name: "implementation-worker", Dir: "gascity"}).EffectiveWorkQuery()
+	store := hookStore{
+		dir: tmp,
+		env: []string{"PATH=" + tmp + string(os.PathListSeparator) + os.Getenv("PATH")},
+	}
+	emitted := false
+	var stdout, stderr bytes.Buffer
+	code := claimHookWorkWithRunner(
+		query,
+		tmp,
+		store.env,
+		[]hookStore{store},
+		hookClaimOptions{JSON: true},
+		hookClaimOps{},
+		shellWorkQueryWithEnv,
+		func(string, error) { emitted = true },
+		&stdout,
+		&stderr,
+	)
+
+	if code != 1 {
+		t.Fatalf("claimHookWorkWithRunner = %d, want fatal query exit 1", code)
+	}
+	if !emitted {
+		t.Fatal("primary-store query failure was laundered into no_work instead of emitted")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want no no_work protocol output on query failure", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "ga-br5 transport witness") {
+		t.Fatalf("stderr = %q, want original primary-store failure", stderr.String())
 	}
 }
 
@@ -1361,9 +1460,8 @@ esac
 	t.Setenv("GC_CITY", cityDir)
 	t.Setenv("GC_TEMPLATE", "worker")
 	t.Setenv("GC_ALIAS", "worker-1")
-	t.Setenv("GC_SESSION_ID", "session-id-1")
-	t.Setenv("GC_SESSION_NAME", "worker-1")
 	t.Setenv("GC_SESSION_ORIGIN", "ephemeral")
+	startHookClaimFixtureSession(t, cityDir, "worker", "worker-1", "worker-1", "ephemeral")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -1625,8 +1723,7 @@ printf '[]'
 	// GC_SESSION_NAME are this instance's own suffixed runtime identity.
 	t.Setenv("GC_TEMPLATE", "builder")
 	t.Setenv("GC_ALIAS", "builder-1")
-	t.Setenv("GC_SESSION_NAME", "builder-1")
-	t.Setenv("GC_SESSION_ID", "session-builder-1")
+	startHookClaimFixtureSession(t, cityDir, "builder", "builder-1", "builder-1", "ephemeral")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -1697,8 +1794,7 @@ mode = "on_demand"
 	// Named holder / canonical slot: GC_ALIAS IS the bare template.
 	t.Setenv("GC_TEMPLATE", "builder")
 	t.Setenv("GC_ALIAS", "builder")
-	t.Setenv("GC_SESSION_NAME", "builder-session")
-	t.Setenv("GC_SESSION_ID", "session-builder")
+	startHookClaimFixtureSession(t, cityDir, "builder", "builder", "builder-session", "named")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)

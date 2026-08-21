@@ -133,7 +133,7 @@ func (s *Server) humaHandleSessionCreate(ctx context.Context, input *SessionCrea
 		return nil, apierr.Internal.Msg(cursorErr.Error())
 	}
 
-	go func() {
+	s.runBackgroundTask(func(taskCtx context.Context) {
 		defer s.recoverAsRequestFailed(reqID, RequestOperationSessionCreate)
 		if transport == "acp" {
 			var mcpMetaErr error
@@ -190,7 +190,7 @@ func (s *Server) humaHandleSessionCreate(ctx context.Context, input *SessionCrea
 				return nameErr
 			}
 			var err error
-			info, err = handle.Create(context.Background(), createMode)
+			info, err = handle.Create(taskCtx, createMode)
 			return err
 		})
 		if createErr != nil {
@@ -199,7 +199,7 @@ func (s *Server) humaHandleSessionCreate(ctx context.Context, input *SessionCrea
 		}
 		if waitForCommandable {
 			s.state.Poke()
-			waitCtx, cancel := context.WithTimeout(context.Background(), sessionCreateCommandableTimeout)
+			waitCtx, cancel := context.WithTimeout(taskCtx, sessionCreateCommandableTimeout)
 			info, createErr = waiter.WaitForSessionCommandable(waitCtx, info.ID)
 			cancel()
 			if createErr != nil {
@@ -217,10 +217,10 @@ func (s *Server) humaHandleSessionCreate(ctx context.Context, input *SessionCrea
 		}
 
 		titleProvider := s.resolveTitleProvider()
-		MaybeGenerateTitleAsync(store, info.ID, body.Title, body.Message, titleProvider, info.WorkDir, func(format string, args ...any) {
+		maybeGenerateTitle(taskCtx, store, info.ID, body.Title, body.Message, titleProvider, info.WorkDir, func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "session %s: "+format+"\n", append([]any{info.ID}, args...)...)
 		})
-	}()
+	})
 
 	out := &SessionCreateOutput{Status: http.StatusAccepted}
 	out.Body.Status = "accepted"
@@ -323,7 +323,7 @@ func (s *Server) humaCreateProviderSession(_ context.Context, store beads.Sessio
 	if cursorErr != nil {
 		return nil, apierr.Internal.Msg(cursorErr.Error())
 	}
-	go func() {
+	s.runBackgroundTask(func(taskCtx context.Context) {
 		defer s.recoverAsRequestFailed(reqID, RequestOperationSessionCreate)
 		resolvedCfg, cfgErr := resolvedSessionConfigForProvider(s.state.CityPath(), configuredWorkspaceSessionEnv(s.state.Config()), alias, "", template, title, transport, extraMeta, resolved, command, workDir, mcpServers)
 		if cfgErr != nil {
@@ -341,7 +341,7 @@ func (s *Server) humaCreateProviderSession(_ context.Context, store beads.Sessio
 				return aliasErr
 			}
 			var err error
-			info, err = handle.Create(context.Background(), worker.CreateModeStarted)
+			info, err = handle.Create(taskCtx, worker.CreateModeStarted)
 			return err
 		})
 		if createErr != nil {
@@ -349,7 +349,7 @@ func (s *Server) humaCreateProviderSession(_ context.Context, store beads.Sessio
 			return
 		}
 		if msg := strings.TrimSpace(body.Message); msg != "" {
-			if _, sendErr := s.submitMessageToSession(context.Background(), store.Store, info.ID, msg, session.SubmitIntentDefault); sendErr != nil {
+			if _, sendErr := s.submitMessageToSession(taskCtx, store.Store, info.ID, msg, session.SubmitIntentDefault); sendErr != nil {
 				if rollbackErr := s.rollbackCreatedSession(store, info.ID); rollbackErr != nil {
 					s.emitSessionCreateFailed(reqID, "message_delivery_failed",
 						fmt.Sprintf("initial message delivery failed: %v (rollback failed: %v)", sendErr, rollbackErr))
@@ -364,10 +364,10 @@ func (s *Server) humaCreateProviderSession(_ context.Context, store beads.Sessio
 		s.emitSessionCreateSucceeded(reqID, resp)
 		s.persistSessionMeta(store, info.ID, body.ProjectID, optMeta)
 		titleProvider := s.resolveTitleProvider()
-		MaybeGenerateTitleAsync(store, info.ID, body.Title, body.Message, titleProvider, info.WorkDir, func(format string, args ...any) {
+		maybeGenerateTitle(taskCtx, store, info.ID, body.Title, body.Message, titleProvider, info.WorkDir, func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "session %s: "+format+"\n", append([]any{info.ID}, args...)...)
 		})
-	}()
+	})
 
 	out := &SessionCreateOutput{Status: http.StatusAccepted}
 	out.Body.Status = "accepted"
@@ -713,20 +713,20 @@ func (s *Server) humaHandleSessionSubmit(ctx context.Context, input *SessionSubm
 	}
 	message := input.Body.Message
 	sessionTarget := input.ID
-	go func() {
+	s.runBackgroundTask(func(taskCtx context.Context) {
 		defer s.recoverAsRequestFailed(reqID, RequestOperationSessionSubmit)
-		id, err := s.resolveSessionIDMaterializingNamedWithContext(context.Background(), store.Store, sessionTarget)
+		id, err := s.resolveSessionIDMaterializingNamedWithContext(taskCtx, store.Store, sessionTarget)
 		if err != nil {
 			s.emitSessionSubmitFailed(reqID, "resolve_failed", err.Error())
 			return
 		}
-		outcome, submitErr := s.submitMessageToSession(context.Background(), store.Store, id, message, intent)
+		outcome, submitErr := s.submitMessageToSession(taskCtx, store.Store, id, message, intent)
 		if submitErr != nil {
 			s.emitSessionSubmitFailed(reqID, "submit_failed", submitErr.Error())
 		} else {
 			s.emitSessionSubmitSucceeded(reqID, id, outcome.Queued, string(intent))
 		}
-	}()
+	})
 
 	out := &SessionSubmitOutput{}
 	out.Body.Status = "accepted"
@@ -765,7 +765,7 @@ func (s *Server) humaHandleSessionMessage(ctx context.Context, input *SessionMes
 	}
 	message := input.Body.Message
 	sessionTarget := input.ID
-	go func() {
+	s.runBackgroundTask(func(taskCtx context.Context) {
 		defer s.recoverAsRequestFailed(reqID, RequestOperationSessionMessage)
 
 		type messageResult struct {
@@ -776,7 +776,7 @@ func (s *Server) humaHandleSessionMessage(ctx context.Context, input *SessionMes
 
 		resultCh := make(chan messageResult, 1)
 		var terminalEmitted atomic.Bool
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(taskCtx)
 		defer cancel()
 		sendResult := func(result messageResult) {
 			if terminalEmitted.Load() {
@@ -837,7 +837,7 @@ func (s *Server) humaHandleSessionMessage(ctx context.Context, input *SessionMes
 			terminalEmitted.Store(true)
 			s.emitSessionMessageFailed(reqID, "timeout", fmt.Sprintf("session.message timed out after %s", sessionMessageAsyncTimeout))
 		}
-	}()
+	})
 
 	out := &SessionMessageOutput{}
 	out.Body.Status = "accepted"
@@ -1052,11 +1052,11 @@ func (s *Server) humaHandleSessionWake(ctx context.Context, input *SessionIDInpu
 	if err != nil {
 		return nil, humaSessionManagerError(err)
 	}
-	go func() {
-		if err := handle.Start(context.Background()); err != nil {
+	s.runBackgroundTask(func(taskCtx context.Context) {
+		if err := handle.Start(taskCtx); err != nil {
 			log.Printf("gc api: waking session %s: %v", id, err)
 		}
-	}()
+	})
 
 	out := &OKWithIDResponse{}
 	out.Body.Status = "ok"

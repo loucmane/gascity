@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1024,14 +1025,18 @@ func pendingCreateLeaseExpiredForRollbackInfo(i sessionpkg.Info, clk clock.Clock
 	if !pendingCreateRollbackState(string(state)) {
 		return false
 	}
+	// The lifecycle projection can mark a dead-looking creating runtime asleep
+	// after the generic one-minute stale window. That advisory state must not
+	// bypass the longer configured provider Start lease: use the same in-flight
+	// decision before every state-specific rollback path.
+	if pendingCreateStartInFlightInfo(i, clk, startupTimeout) {
+		return false
+	}
 	if state == sessionpkg.StateAsleep {
 		if strings.TrimSpace(i.LastWokeAt) == "" {
 			return pendingCreateNeverStartedExpiredInfo(i, clk)
 		}
 		return pendingCreateAttemptStaleInfo(i, clk)
-	}
-	if pendingCreateStartInFlightInfo(i, clk, startupTimeout) {
-		return false
 	}
 	if strings.TrimSpace(i.LastWokeAt) == "" {
 		return pendingCreateNeverStartedExpiredInfo(i, clk)
@@ -2158,6 +2163,28 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 			// alive) by name, enabling zombie (present && !alive) expression.
 			shadowTick.captureRuntime(id, "observeRuntimeProviderLiveness", name, triFromBool(running), triFromBool(alive))
 		}
+		// A runtime can survive a supervisor binary upgrade even though the old
+		// binary never wrote its worker-readable claim fence. Publish the identity
+		// as soon as this tick observes the adopted runtime alive, before any later
+		// branch can respawn its agent in place. Explicit lifecycle blockers are
+		// intentionally not publishable; asleep is the one recovery state that a
+		// live observation may bridge back to active.
+		fenceState := infoByID[id].State
+		fenceClaimEligible := (sessionpkg.SessionFenceProjection{State: string(fenceState)}).ClaimEligible()
+		if alive && (fenceClaimEligible || fenceState == sessionpkg.StateAsleep) {
+			if err := sessionpkg.WithSessionMutationLock(id, func() error {
+				return sessionpkg.PublishLiveSessionFenceProjection(cityPath, infoByID[id])
+			}); err != nil {
+				// A matching tombstone is an expected refusal: preserve it and let
+				// drain/stop reconciliation finish. Every other failure remains
+				// fail-closed so an eligible runtime cannot respawn before its claim
+				// identity is readable.
+				if !errors.Is(err, sessionpkg.ErrLiveSessionFenceProjectionRefused) {
+					fmt.Fprintf(stderr, "session reconciler: publishing adopted live session claim fence for %s: %v\n", name, err) //nolint:errcheck
+					continue
+				}
+			}
+		}
 		peek := cachedSessionPeek(cityPath, store, sp, cfg, id, tp.Hints.ProcessNames)
 		recordResetStallIfDue(infoByID[id], tp.TemplateName, name, alive, startupTimeout, clk.Now().UTC(), dt, rec, stderr, trace)
 
@@ -2463,6 +2490,22 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 						claimKnown = false
 					} else {
 						holdsClaim = has
+					}
+				}
+				if !exempt && holdsClaim {
+					claimedWorkAttentionThreshold := claimHolderThreshold
+					if claimedWorkAttentionThreshold == 0 {
+						// Operator attention predates the destructive claim-holder
+						// recycle policy and was originally governed by the sole
+						// progress-stall timeout. Preserve that surfacing for cities
+						// that leave claim-holder recycling disabled; once configured,
+						// the more conservative claim-holder threshold governs both.
+						claimedWorkAttentionThreshold = claimlessThreshold
+					}
+					if err := markProgressStalledClaimedWorkNeedsOperator(
+						cityPath, cfg, store, rigStores, infoByID[id], lastActivity, claimedWorkAttentionThreshold, clk.Now(),
+					); err != nil {
+						fmt.Fprintf(stderr, "session reconciler: marking claimed work for progress-stall attention for %s: %v\n", name, err) //nolint:errcheck
 					}
 				}
 				providerHealthy := true
@@ -3927,6 +3970,74 @@ func sessionHasOpenAssignedWorkForConfigInfo(store beads.Store, rigStores map[st
 // not suppress claim-less parked-session recovery.
 func sessionHasInProgressAssignedWorkForConfig(store beads.Store, rigStores map[string]beads.Store, info sessionpkg.Info, cfg *config.City) (bool, error) {
 	return sessionHasAssignedWorkInStoresForStatuses(store, rigStores, sessionAssignmentIdentifiersForConfigInfo(info, cfg), []string{"in_progress"})
+}
+
+// markProgressStalledClaimedWorkNeedsOperator turns a claimed-session stall
+// into durable operator-visible state without recycling the session or asking
+// the worker to report its own failure. Provider output and the worker's
+// mechanical bead heartbeat are the only progress sources: generic bead
+// UpdatedAt cannot be used because this controller update itself advances it.
+// The signature deduplicates unchanged ticks and naturally re-arms after a real
+// provider/heartbeat transition.
+func markProgressStalledClaimedWorkNeedsOperator(
+	cityPath string,
+	cfg *config.City,
+	store beads.Store,
+	rigStores map[string]beads.Store,
+	info sessionpkg.Info,
+	providerLastActivity time.Time,
+	threshold time.Duration,
+	now time.Time,
+) error {
+	assigned, err := collectSessionAssignedWorkInfo(cityPath, cfg, store, rigStores, info)
+	if err != nil {
+		return err
+	}
+	for _, item := range assigned {
+		if item.bead.Status != "in_progress" {
+			continue
+		}
+		lastProgress := providerLastActivity
+		if heartbeatAt, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(item.bead.Metadata[beadmeta.LastHeartbeatAtMetadataKey])); parseErr == nil && heartbeatAt.After(lastProgress) {
+			lastProgress = heartbeatAt
+		}
+		if lastProgress.IsZero() || now.Sub(lastProgress) <= threshold {
+			continue
+		}
+
+		fingerprint := strings.Join([]string{
+			info.ID,
+			item.bead.ID,
+			item.bead.Status,
+			item.bead.Assignee,
+			lastProgress.UTC().Format(time.RFC3339Nano),
+		}, "\x00")
+		signature := fmt.Sprintf("%x", sha256.Sum256([]byte(fingerprint)))
+		if item.bead.Metadata[beadmeta.ProgressStallSignatureMetadataKey] == signature {
+			continue
+		}
+
+		lastProgressText := lastProgress.UTC().Format(time.RFC3339Nano)
+		reason := fmt.Sprintf(
+			"claimed work has had no observable progress since %s; inspect session %s and decide whether to resume, repair, or stop",
+			lastProgressText,
+			strings.TrimSpace(info.SessionNameMetadata),
+		)
+		if err := item.store.Update(item.bead.ID, beads.UpdateOpts{
+			Labels: []string{"needs/operator"},
+			Metadata: map[string]string{
+				beadmeta.ControllerErrorMetadataKey:        reason,
+				beadmeta.FailureOwnerMetadataKey:           "gc.session-reconciler",
+				beadmeta.FailureReasonMetadataKey:          "progress_stall",
+				beadmeta.FailureSubjectMetadataKey:         info.ID,
+				beadmeta.ProgressStallSignatureMetadataKey: signature,
+				beadmeta.ProgressLastObservedMetadataKey:   lastProgressText,
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // sessionHasOpenAssignedWorkForReachableStore reports whether any open or
@@ -5683,12 +5794,30 @@ func relaunchAgentForLaunchDrift(
 		fmt.Fprintf(stderr, "session reconciler: launch-drift relaunch for %s minted a speculative resume key (no prior conversation); falling back to full restart\n", name) //nolint:errcheck
 		return false, relaunchAbortResidueFold(preparedInfo, sessFront, hadResumeKeyBeforePrepare)
 	}
-	if err := r.Relaunch(ctx, name, prepared.cfg); err != nil {
+	// Preparation can mutate the session identity (most notably by minting an
+	// instance token on legacy rows). Publish the post-prepare identity directly
+	// before the provider respawns the agent, even though the tick's adopted-live
+	// pass already refreshed the pre-prepare projection. A publication failure
+	// falls back to the full restart path, whose Provider.Start is independently
+	// gated by waitForStartIdentityReadable.
+	projectionPublished := false
+	relaunchErr := sessionpkg.WithSessionMutationLock(preparedInfo.ID, func() error {
+		if err := sessionpkg.PublishLiveSessionFenceProjection(cityPath, preparedInfo); err != nil {
+			return err
+		}
+		projectionPublished = true
+		return r.Relaunch(ctx, name, prepared.cfg)
+	})
+	if relaunchErr != nil {
+		if !projectionPublished {
+			fmt.Fprintf(stderr, "session reconciler: publishing claim fence before relaunching %s: %v; falling back to full restart\n", name, relaunchErr) //nolint:errcheck
+			return false, relaunchAbortResidueFold(preparedInfo, sessFront, hadResumeKeyBeforePrepare)
+		}
 		// ErrRelaunchUnsupported (a wrapper whose backend cannot relaunch) or a
 		// genuine failure (e.g. the warm box vanished → ErrSessionNotFound). Fall
 		// back to the full restart so the launch change is still applied.
-		if !errors.Is(err, runtime.ErrRelaunchUnsupported) {
-			fmt.Fprintf(stderr, "session reconciler: relaunch %s: %v; falling back to full restart\n", name, err) //nolint:errcheck
+		if !errors.Is(relaunchErr, runtime.ErrRelaunchUnsupported) {
+			fmt.Fprintf(stderr, "session reconciler: relaunch %s: %v; falling back to full restart\n", name, relaunchErr) //nolint:errcheck
 		}
 		return false, relaunchAbortResidueFold(preparedInfo, sessFront, hadResumeKeyBeforePrepare)
 	}

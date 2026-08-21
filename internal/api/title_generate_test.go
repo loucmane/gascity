@@ -72,7 +72,7 @@ func TestTruncateTitle(t *testing.T) {
 }
 
 func TestGenerateTitle_NoProvider(t *testing.T) {
-	got := generateTitle(nil, "hello world", "")
+	got := generateTitle(nil, "hello world")
 	if got != "hello world" {
 		t.Errorf("generateTitle(nil) = %q, want truncated message", got)
 	}
@@ -83,7 +83,7 @@ func TestGenerateTitle_NoPrintArgs(t *testing.T) {
 		Command: "claude",
 		// PrintArgs intentionally empty
 	}
-	got := generateTitle(provider, "hello world", "")
+	got := generateTitle(provider, "hello world")
 	if got != "hello world" {
 		t.Errorf("generateTitle(no PrintArgs) = %q, want truncated message", got)
 	}
@@ -95,7 +95,7 @@ func TestGenerateTitle_SubprocessFailure(t *testing.T) {
 		PrintArgs: []string{},
 	}
 	// PrintArgs is empty (len 0), so should fall back to truncation
-	got := generateTitle(provider, "hello world", "")
+	got := generateTitle(provider, "hello world")
 	if got != "hello world" {
 		t.Errorf("generateTitle(failing subprocess) = %q, want truncated message", got)
 	}
@@ -230,7 +230,7 @@ func captureGenerateTitleArgs(t *testing.T, spec config.ProviderSpec, message st
 		OptionsSchema: spec.OptionsSchema,
 	}
 
-	got := generateTitle(provider, message, "")
+	got := generateTitle(provider, message)
 	if got != "Generated Title" {
 		t.Fatalf("generateTitle() = %q, want Generated Title", got)
 	}

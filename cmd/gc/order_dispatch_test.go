@@ -1497,9 +1497,10 @@ source = "`+doltDir+`"
 		"mol-dog-compactor":  "gc dolt compact",
 		"mol-dog-doctor":     "$PACK_DIR/assets/scripts/mol-dog-doctor.sh",
 		"mol-dog-phantom-db": "$PACK_DIR/assets/scripts/mol-dog-phantom-db.sh",
+		"mol-dog-stale-db":   "$PACK_DIR/assets/scripts/mol-dog-stale-db.sh",
 	}
 	gotExecDogOrders := map[string]bool{}
-	const wantFormulaDogOrders = 1
+	const wantFormulaDogOrders = 0
 	var gotFormulaDogOrders int
 	for _, a := range aa {
 		if !strings.HasPrefix(a.Name, "mol-dog-") {

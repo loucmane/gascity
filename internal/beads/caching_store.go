@@ -32,6 +32,7 @@ type CachingStore struct {
 	mu              sync.RWMutex
 	beads           map[string]Bead
 	deps            map[string][]Dep
+	failedBlockers  map[string]struct{}
 	depsComplete    bool
 	dirty           map[string]struct{}
 	beadSeq         map[string]uint64
@@ -293,16 +294,17 @@ func (c *CachingStore) SetPrimeRetryDelayForTest(fn func(attempt int) time.Durat
 
 func newCachingStore(backing Store, idPrefix string, onChange func(eventType, beadID, runID, sessionID, stepID string, payload json.RawMessage)) *CachingStore {
 	return &CachingStore{
-		backing:     backing,
-		idPrefix:    normalizeIDPrefix(idPrefix),
-		beads:       make(map[string]Bead),
-		deps:        make(map[string][]Dep),
-		dirty:       make(map[string]struct{}),
-		beadSeq:     make(map[string]uint64),
-		localBeadAt: make(map[string]time.Time),
-		deletedSeq:  make(map[string]uint64),
-		problemLog:  make(map[string]cacheProblemLogState),
-		onChange:    onChange,
+		backing:        backing,
+		idPrefix:       normalizeIDPrefix(idPrefix),
+		beads:          make(map[string]Bead),
+		deps:           make(map[string][]Dep),
+		failedBlockers: make(map[string]struct{}),
+		dirty:          make(map[string]struct{}),
+		beadSeq:        make(map[string]uint64),
+		localBeadAt:    make(map[string]time.Time),
+		deletedSeq:     make(map[string]uint64),
+		problemLog:     make(map[string]cacheProblemLogState),
+		onChange:       onChange,
 		problemf: func(msg string) {
 			log.Printf("beads cache: %s", msg)
 		},
@@ -469,6 +471,7 @@ func (c *CachingStore) evictLocked(id string) {
 // startSeq captured before this section. Caller must hold c.mu in write mode.
 func (c *CachingStore) tombstoneLocked(id string, seq uint64) {
 	c.evictLocked(id)
+	delete(c.failedBlockers, id)
 	c.deletedSeq[id] = seq
 }
 
@@ -743,6 +746,11 @@ func (c *CachingStore) PrimeActive() error {
 		partialErr = errors.Join(partialErr, depErr)
 		c.recordProblem("prime active dep cache", depErr)
 	}
+	failedBlockers, failedBlockersErr := c.fetchFailedReadyBlockers(beadMap, depMap)
+	if failedBlockersErr != nil {
+		partialErr = errors.Join(partialErr, failedBlockersErr)
+		c.recordProblem("prime active failed blockers", failedBlockersErr)
+	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -770,6 +778,9 @@ func (c *CachingStore) PrimeActive() error {
 	}
 	if c.state == cacheUninitialized {
 		c.state = cachePartial
+	}
+	if failedBlockersErr == nil && c.mutationSeq == startSeq {
+		c.failedBlockers = failedBlockers
 	}
 	c.primePartialErr = partialErr
 	c.markFreshLocked(now)
@@ -862,6 +873,11 @@ func (c *CachingStore) prime(ctx context.Context) error {
 	if depErr != nil {
 		c.recordProblem("prime dep cache", depErr)
 	}
+	failedBlockers, failedBlockersErr := c.fetchFailedReadyBlockers(beadMap, depMap)
+	if failedBlockersErr != nil {
+		partialErr = errors.Join(partialErr, failedBlockersErr)
+		c.recordProblem("prime failed blockers", failedBlockersErr)
+	}
 	if err := c.cacheContextErr(ctx); err != nil {
 		return err
 	}
@@ -901,6 +917,9 @@ func (c *CachingStore) prime(ctx context.Context) error {
 		c.beadSeq = nextBeadSeq
 		c.localBeadAt = nextLocalBeadAt
 		c.deletedSeq = make(map[string]uint64)
+		if failedBlockersErr == nil {
+			c.failedBlockers = failedBlockers
+		}
 	} else {
 		for id, b := range beadMap {
 			if c.deletedSeq[id] > startSeq {
@@ -1237,6 +1256,10 @@ type readyProjectionEnrichmentStore interface {
 	enrichReadyProjectionForCache([]Bead) ([]Bead, error)
 }
 
+type failedReadyBlockerStore interface {
+	failedReadyBlockersForCache([]string) (map[string]struct{}, error)
+}
+
 func (c *CachingStore) enrichReadyProjectionForCache(items []Bead) ([]Bead, error) {
 	if backing, ok := c.backing.(readyProjectionEnrichmentStore); ok {
 		return backing.enrichReadyProjectionForCache(items)
@@ -1269,6 +1292,67 @@ func (c *CachingStore) fetchDepsForIDs(ids []string) (map[string][]Dep, bool, er
 		depMap[id] = cloneDeps(deps)
 	}
 	return depMap, true, nil
+}
+
+func (c *CachingStore) fetchFailedReadyBlockers(beadMap map[string]Bead, depMap map[string][]Dep) (map[string]struct{}, error) {
+	targetIDs := make(map[string]struct{})
+	for _, deps := range depMap {
+		for _, dep := range deps {
+			if !IsReadyBlockingDependencyType(dep.Type) {
+				continue
+			}
+			if blocker, ok := beadMap[dep.DependsOnID]; ok {
+				if !IsReadyBlockingDependencySatisfied(blocker) && blocker.Status == "closed" {
+					targetIDs[dep.DependsOnID] = struct{}{}
+				}
+				continue
+			}
+			targetIDs[dep.DependsOnID] = struct{}{}
+		}
+	}
+
+	failed := make(map[string]struct{})
+	missing := make([]string, 0, len(targetIDs))
+	for id := range targetIDs {
+		blocker, ok := beadMap[id]
+		if !ok {
+			missing = append(missing, id)
+			continue
+		}
+		if blocker.Status == "closed" && !IsReadyBlockingDependencySatisfied(blocker) {
+			failed[id] = struct{}{}
+		}
+	}
+	backing, ok := c.backing.(failedReadyBlockerStore)
+	if !ok || len(missing) == 0 {
+		return failed, nil
+	}
+	backingFailed, err := backing.failedReadyBlockersForCache(missing)
+	if err != nil {
+		return nil, err
+	}
+	for id := range backingFailed {
+		failed[id] = struct{}{}
+	}
+	return failed, nil
+}
+
+func failedReadyBlockersByID(ids []string, get func(string) (Bead, error)) (map[string]struct{}, error) {
+	failed := make(map[string]struct{})
+	for _, id := range ids {
+		blocker, err := get(id)
+		switch {
+		case err == nil:
+		case errors.Is(err, ErrNotFound):
+			continue
+		default:
+			return nil, fmt.Errorf("reading blocking dependency %s: %w", id, err)
+		}
+		if blocker.Status == "closed" && !IsReadyBlockingDependencySatisfied(blocker) {
+			failed[id] = struct{}{}
+		}
+	}
+	return failed, nil
 }
 
 func depsFromBeads(beadMap map[string]Bead, depMap map[string][]Dep, useDepMap bool) map[string][]Dep {

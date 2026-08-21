@@ -131,7 +131,7 @@ func stageStartFiles(cfg runtime.Config, warnings io.Writer) error {
 		}
 		_ = overlay.CopyFileOrDir(cf.Src, dst, io.Discard)
 	}
-	return nil
+	return runtime.FinalizeSessionWorkDir(cfg)
 }
 
 func ensureInstanceToken(env map[string]string) (map[string]string, error) {

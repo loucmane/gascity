@@ -663,6 +663,37 @@ func TestMemStoreReadyRespectsBlockingDeps(t *testing.T) {
 	}
 }
 
+func TestMemStoreReadyDoesNotReleaseFailedBlockingDependency(t *testing.T) {
+	s := beads.NewMemStore()
+
+	blocker, err := s.Create(beads.Bead{Title: "failed control", Type: "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependent, err := s.Create(beads.Bead{Title: "downstream work", Type: "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DepAdd(dependent.ID, blocker.ID, "blocks"); err != nil {
+		t.Fatal(err)
+	}
+	if closed, err := s.CloseAll([]string{blocker.ID}, map[string]string{"gc.outcome": "fail"}); err != nil {
+		t.Fatal(err)
+	} else if closed != 1 {
+		t.Fatalf("CloseAll closed %d beads, want 1", closed)
+	}
+
+	got, err := s.Ready()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bead := range got {
+		if bead.ID == dependent.ID {
+			t.Fatalf("Ready released dependent %s after blocker %s closed with gc.outcome=fail", dependent.ID, blocker.ID)
+		}
+	}
+}
+
 func TestMemStoreReadyIgnoresParentChildDeps(t *testing.T) {
 	s := beads.NewMemStore()
 

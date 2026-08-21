@@ -79,6 +79,7 @@ func TestDogExecScriptsAreBashSyntaxValid(t *testing.T) {
 		"mol-dog-backup.sh",
 		"mol-dog-doctor.sh",
 		"mol-dog-phantom-db.sh",
+		"mol-dog-stale-db.sh",
 	} {
 		t.Run(scriptName, func(t *testing.T) {
 			cmd := exec.Command("bash", "-n", filepath.Join(root, "assets", "scripts", scriptName))

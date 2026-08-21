@@ -1885,8 +1885,10 @@ func TestMailReplyNotifySuccess(t *testing.T) {
 	mp.Send("alice", "bob", "Hello", "first") //nolint:errcheck
 
 	var nudged string
-	nf := func(recipient string) error {
+	var delivered mail.Message
+	nf := func(recipient string, message mail.Message) error {
 		nudged = recipient
+		delivered = message
 		return nil
 	}
 
@@ -1901,6 +1903,9 @@ func TestMailReplyNotifySuccess(t *testing.T) {
 	if nudged != "alice" {
 		t.Errorf("nudgeFn called with %q, want %q", nudged, "alice")
 	}
+	if delivered.ID != "gc-2" || delivered.From != "bob" || delivered.To != "alice" || delivered.Subject != "RE: Hello" || delivered.Body != "reply body" {
+		t.Fatalf("nudge message = %+v, want the complete persisted reply", delivered)
+	}
 }
 
 func TestMailReplyNotifyNudgeError(t *testing.T) {
@@ -1908,7 +1913,7 @@ func TestMailReplyNotifyNudgeError(t *testing.T) {
 	mp := beadmail.New(store)
 	mp.Send("alice", "bob", "Hello", "first") //nolint:errcheck
 
-	nf := func(_ string) error {
+	nf := func(_ string, _ mail.Message) error {
 		return fmt.Errorf("session not found")
 	}
 
@@ -2036,7 +2041,11 @@ func TestCmdMailReplyHumanNotifyQueuesNudge(t *testing.T) {
 	if nudge.Source != "mail" {
 		t.Fatalf("nudge.Source = %q, want mail", nudge.Source)
 	}
-	if nudge.Message != "You have mail from human" {
+	wantMessage := "You have mail from human. The complete message is delivered in-band; no mail-store read is required.\n" +
+		"Mail ID: gc-3\n" +
+		"Subject: Re: Hello\n\n" +
+		"reply body"
+	if nudge.Message != wantMessage {
 		t.Fatalf("nudge.Message = %q", nudge.Message)
 	}
 }
@@ -2122,7 +2131,12 @@ func TestCmdMailReplyExecProviderNotifyResolvesNonHumanSender(t *testing.T) {
 		t.Fatalf("cmdMailReply() = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 
-	assertQueuedMailNudgeMessage(t, cityPath, sessionID, "You have mail from bob", stderr.String())
+	assertQueuedMailNudgeMessage(t, cityPath, sessionID,
+		"You have mail from bob. The complete message is delivered in-band; no mail-store read is required.\n"+
+			"Mail ID: exec-reply-1\n"+
+			"Subject: RE: Hello\n\n"+
+			"reply body",
+		stderr.String())
 }
 
 func setupExecMailReplyNudgeTest(t *testing.T) (string, string, string) {
@@ -2186,7 +2200,12 @@ esac
 
 func assertQueuedMailNudge(t *testing.T, cityPath, sessionID, stderr string) {
 	t.Helper()
-	assertQueuedMailNudgeMessage(t, cityPath, sessionID, "You have mail from human", stderr)
+	assertQueuedMailNudgeMessage(t, cityPath, sessionID,
+		"You have mail from human. The complete message is delivered in-band; no mail-store read is required.\n"+
+			"Mail ID: exec-reply-1\n"+
+			"Subject: RE: Hello\n\n"+
+			"reply body",
+		stderr)
 }
 
 func assertQueuedMailNudgeMessage(t *testing.T, cityPath, sessionID, message, stderr string) {
@@ -2991,8 +3010,10 @@ func TestMailSendNotifySuccess(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true}
 
 	var nudged string
-	nf := func(recipient string) error {
+	var delivered mail.Message
+	nf := func(recipient string, message mail.Message) error {
 		nudged = recipient
+		delivered = message
 		return nil
 	}
 
@@ -3007,6 +3028,9 @@ func TestMailSendNotifySuccess(t *testing.T) {
 	if nudged != "mayor" {
 		t.Errorf("nudgeFn called with %q, want %q", nudged, "mayor")
 	}
+	if delivered.ID != "gc-1" || delivered.From != "human" || delivered.To != "mayor" || delivered.Body != "wake up" {
+		t.Fatalf("nudge message = %+v, want the complete persisted mail body", delivered)
+	}
 }
 
 func TestMailSendNotifyNudgeError(t *testing.T) {
@@ -3014,7 +3038,7 @@ func TestMailSendNotifyNudgeError(t *testing.T) {
 	mp := beadmail.New(store)
 	recipients := map[string]bool{"human": true, "mayor": true}
 
-	nf := func(_ string) error {
+	nf := func(_ string, _ mail.Message) error {
 		return fmt.Errorf("session not found")
 	}
 
@@ -3039,7 +3063,7 @@ func TestMailSendNotifyToHuman(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true}
 
 	nudgeCalled := false
-	nf := func(_ string) error {
+	nf := func(_ string, _ mail.Message) error {
 		nudgeCalled = true
 		return nil
 	}

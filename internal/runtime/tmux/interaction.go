@@ -32,7 +32,7 @@ func (p *Provider) Respond(name string, response runtime.InteractionResponse) er
 // Pane-based approval detection
 // ---------------------------------------------------------------------------
 
-// approvalPatterns detect Claude Code's interactive prompts in tmux pane output.
+// approvalPatterns detect interactive prompts in tmux pane output.
 var (
 	// "This command requires approval" or "Approve edits?" patterns
 	requiresApprovalRe = regexp.MustCompile(`(?m)(This command requires approval|Approve edits\?)`)
@@ -40,18 +40,28 @@ var (
 	// Tool call header: "● ToolName(args)" or "● ToolName"
 	// Uses greedy match to last ")" to handle nested parens in args.
 	toolHeaderRe = regexp.MustCompile(`● (\w+)(?:\((.+)\))?`)
+
+	// Codex renders a selection menu that requires an explicit Enter after the
+	// numeric choice. Keep this marker exact so conversational text cannot be
+	// mistaken for an active prompt.
+	codexApprovalMarker = "Would you like to run the following command?"
 )
 
 // parsedApproval holds the parsed approval prompt from a tmux pane capture.
 type parsedApproval struct {
 	ToolName string
 	Input    string
+	Submit   bool
 }
 
-// parseApprovalPrompt parses the tmux pane text for a Claude Code approval prompt.
+// parseApprovalPrompt parses the tmux pane text for a supported approval prompt.
 // Returns nil if no approval prompt is found or if the prompt can't be associated
 // with a tool header (avoids false positives from conversational text).
 func parseApprovalPrompt(paneText string) *parsedApproval {
+	if approval := parseCodexApprovalPrompt(paneText); approval != nil {
+		return approval
+	}
+
 	if !requiresApprovalRe.MatchString(paneText) {
 		return nil
 	}
@@ -86,6 +96,61 @@ func parseApprovalPrompt(paneText string) *parsedApproval {
 	}
 
 	return approval
+}
+
+// parseCodexApprovalPrompt recognizes the active Codex TUI escalation menu.
+// Historical menus remain in pane scrollback after approval, so a resolution
+// marker after the latest menu makes that occurrence non-pending.
+func parseCodexApprovalPrompt(paneText string) *parsedApproval {
+	markerIdx := strings.LastIndex(paneText, codexApprovalMarker)
+	if markerIdx < 0 {
+		return nil
+	}
+	tail := paneText[markerIdx:]
+	if strings.Contains(tail, "✔ You approved") ||
+		!strings.Contains(tail, "1. Yes, proceed") ||
+		!strings.Contains(tail, "3. No, and tell Codex what to do differently") ||
+		!strings.Contains(tail, "Press enter to confirm or esc to cancel") {
+		return nil
+	}
+
+	lines := strings.Split(tail, "\n")
+	commandStart := -1
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "$ ") {
+			commandStart = i
+			break
+		}
+	}
+	if commandStart < 0 {
+		return nil
+	}
+
+	command := make([]string, 0, 4)
+	for _, line := range lines[commandStart:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if len(command) > 0 {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "› 1.") || strings.HasPrefix(trimmed, "1. Yes, proceed") {
+			break
+		}
+		trimmed = strings.TrimPrefix(trimmed, "$ ")
+		trimmed = strings.TrimPrefix(trimmed, "│ ")
+		command = append(command, trimmed)
+	}
+	if len(command) == 0 {
+		return nil
+	}
+
+	input := strings.Join(command, " ")
+	if len(input) > 500 {
+		input = input[:500] + "…"
+	}
+	return &parsedApproval{ToolName: "Bash", Input: input, Submit: true}
 }
 
 // extractToolInput extracts the indented tool input block from pane text.
@@ -147,7 +212,11 @@ type approvalDedup struct {
 }
 
 func approvalHash(a *parsedApproval) string {
-	h := sha256.Sum256([]byte(a.ToolName + "\x00" + a.Input))
+	payload := a.ToolName + "\x00" + a.Input
+	if a.Submit {
+		payload += "\x00submit"
+	}
+	h := sha256.Sum256([]byte(payload))
 	return fmt.Sprintf("%x", h[:8])
 }
 
@@ -172,7 +241,7 @@ func (d *approvalDedup) clear(session string) {
 // InteractionProvider implementation
 // ---------------------------------------------------------------------------
 
-// Pending checks the tmux pane for an active Claude Code approval prompt.
+// Pending checks the tmux pane for an active Claude or Codex approval prompt.
 // Returns nil with no error if no approval is pending.
 func (t *Tmux) Pending(name string) (*runtime.PendingInteraction, error) {
 	paneText, err := t.CapturePane(name, 40)
@@ -249,7 +318,8 @@ func (t *Tmux) Respond(name string, response runtime.InteractionResponse) error 
 		}
 	}
 
-	// Map action to keystroke. Claude's prompt shows:
+	// Map action to keystroke. Claude and Codex both expose three choices;
+	// Codex additionally requires Enter to submit the selected choice.
 	// 1. Yes
 	// 2. Yes, and don't ask again for: <tool>
 	// 3. No
@@ -276,6 +346,14 @@ func (t *Tmux) Respond(name string, response runtime.InteractionResponse) error 
 			return fmt.Errorf("send-keys failed: %w: %w", runtime.ErrSessionNotFound, err)
 		}
 		return fmt.Errorf("send-keys failed: %w", err)
+	}
+	if current.Submit {
+		if _, err := t.run("send-keys", "-t", name, "Enter"); err != nil {
+			if errors.Is(err, ErrSessionNotFound) {
+				return fmt.Errorf("submit failed: %w: %w", runtime.ErrSessionNotFound, err)
+			}
+			return fmt.Errorf("submit failed: %w", err)
+		}
 	}
 
 	// Poll to verify the prompt cleared. Do NOT re-send the keystroke —

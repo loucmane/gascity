@@ -25,8 +25,7 @@ func withRepoCacheLock(root string, mode int, createRoot bool, fn func() error) 
 		return fmt.Errorf("checking repo cache root: %w", err)
 	}
 	lockPath := root + string(os.PathSeparator) + repoCacheLockName
-	flags := os.O_RDWR | os.O_CREATE
-	lockFile, err := os.OpenFile(lockPath, flags, 0o644)
+	lockFile, err := openRepoCacheLockFile(lockPath, mode == repoCacheLockExclusive)
 	if err != nil {
 		return fmt.Errorf("opening repo cache lock file: %w", err)
 	}

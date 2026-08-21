@@ -81,6 +81,70 @@ name = "changed"
 	}
 }
 
+func TestRevision_IncludesLoadedSiteBindingSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	cityPath := filepath.Join(dir, "city.toml")
+	writeFile(t, dir, "city.toml", `[workspace]
+name = "test"
+
+[[rigs]]
+name = "hpfetcher"
+`)
+	writeFile(t, dir, ".gc/site.toml", `[[rig]]
+name = "hpfetcher"
+path = "/home/loucmane/dev/hpfetcher"
+`)
+
+	cfg, prov, err := LoadWithIncludes(fsys.OSFS{}, cityPath)
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	loadedRevision := Revision(fsys.OSFS{}, prov, cfg, dir)
+
+	writeFile(t, dir, ".gc/site.toml", `[[rig]]
+name = "hpfetcher"
+path = "/home/loucmane/dev/hpfetcher-gc-main"
+`)
+	if got := Revision(fsys.OSFS{}, prov, cfg, dir); got != loadedRevision {
+		t.Fatalf("loaded revision changed after site binding write; got %q, want loaded snapshot %q", got, loadedRevision)
+	}
+
+	reloadedCfg, reloadedProv, err := LoadWithIncludes(fsys.OSFS{}, cityPath)
+	if err != nil {
+		t.Fatalf("reloading config: %v", err)
+	}
+	if got := Revision(fsys.OSFS{}, reloadedProv, reloadedCfg, dir); got == loadedRevision {
+		t.Fatal("revision did not change after reloading a changed .gc/site.toml")
+	}
+}
+
+func TestWatchTargets_IncludesSiteBinding(t *testing.T) {
+	dir := t.TempDir()
+	cityPath := filepath.Join(dir, "city.toml")
+	writeFile(t, dir, "city.toml", `[workspace]
+name = "test"
+
+[[rigs]]
+name = "hpfetcher"
+`)
+	writeFile(t, dir, ".gc/site.toml", `[[rig]]
+name = "hpfetcher"
+path = "/home/loucmane/dev/hpfetcher"
+`)
+
+	cfg, prov, err := LoadWithIncludes(fsys.OSFS{}, cityPath)
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	want := SiteBindingPath(dir)
+	for _, target := range WatchTargets(prov, cfg, dir) {
+		if target.Path == want {
+			return
+		}
+	}
+	t.Fatalf("WatchTargets() omitted site binding %q", want)
+}
+
 func TestRevision_UsesLoadedSnapshotForResolvedInputs(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -472,11 +536,14 @@ func TestWatchDirs_ConfigOnly(t *testing.T) {
 	}
 
 	dirs := WatchDirs(prov, &City{}, dir)
-	if len(dirs) != 1 {
-		t.Fatalf("got %d dirs, want 1", len(dirs))
+	if len(dirs) != 2 {
+		t.Fatalf("got %d paths, want 2", len(dirs))
 	}
 	if dirs[0] != dir {
 		t.Errorf("dir = %q, want %q", dirs[0], dir)
+	}
+	if dirs[1] != SiteBindingPath(dir) {
+		t.Errorf("site binding = %q, want %q", dirs[1], SiteBindingPath(dir))
 	}
 }
 
@@ -494,11 +561,11 @@ func TestWatchDirs_WithFragments(t *testing.T) {
 	dirs := WatchDirs(prov, &City{}, dir)
 	sort.Strings(dirs)
 
-	expected := []string{dir, filepath.Join(dir, "conf")}
+	expected := []string{dir, SiteBindingPath(dir), filepath.Join(dir, "conf")}
 	sort.Strings(expected)
 
-	if len(dirs) != 2 {
-		t.Fatalf("got %d dirs, want 2: %v", len(dirs), dirs)
+	if len(dirs) != 3 {
+		t.Fatalf("got %d paths, want 3: %v", len(dirs), dirs)
 	}
 	for i := range expected {
 		if dirs[i] != expected[i] {
@@ -516,9 +583,9 @@ func TestWatchDirs_WithPack(t *testing.T) {
 
 	dirs := WatchDirs(prov, cfg, dir)
 
-	// Should include city dir + pack dir.
-	if len(dirs) != 2 {
-		t.Fatalf("got %d dirs, want 2: %v", len(dirs), dirs)
+	// Should include city dir + site binding + pack dir.
+	if len(dirs) != 3 {
+		t.Fatalf("got %d paths, want 3: %v", len(dirs), dirs)
 	}
 
 	found := false
@@ -643,7 +710,7 @@ func TestWatchDirs_Deduplicates(t *testing.T) {
 	}
 
 	dirs := WatchDirs(prov, &City{}, dir)
-	if len(dirs) != 1 {
-		t.Errorf("got %d dirs, want 1 (deduplicated): %v", len(dirs), dirs)
+	if len(dirs) != 2 {
+		t.Errorf("got %d paths, want 2 (deduplicated config dir plus site binding): %v", len(dirs), dirs)
 	}
 }

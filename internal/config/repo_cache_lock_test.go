@@ -27,10 +27,95 @@ func TestWithRepoCacheReadLockDoesNotCreateMissingRoot(t *testing.T) {
 	}
 }
 
-func TestWithRepoCacheReadLockCreatesLockFileForExistingRoot(t *testing.T) {
+func TestWithRepoCacheReadLockCreatesLockFileForExistingWritableRoot(t *testing.T) {
 	root := t.TempDir()
-	if err := WithRepoCacheReadLock(root, func() error { return nil }); err != nil {
+	called := false
+	if err := WithRepoCacheReadLock(root, func() error {
+		called = true
+		return nil
+	}); err != nil {
 		t.Fatalf("WithRepoCacheReadLock: %v", err)
+	}
+	if !called {
+		t.Fatal("read lock callback was not called")
+	}
+	if _, err := os.Stat(filepath.Join(root, repoCacheLockName)); err != nil {
+		t.Fatalf("lock file stat: %v", err)
+	}
+}
+
+func TestWithRepoCacheReadLockFailsClosedWhenMissingLockCannotBeCreated(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatalf("chmod read-only root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+
+	called := false
+	err := WithRepoCacheReadLock(root, func() error {
+		called = true
+		return nil
+	})
+	if err == nil {
+		t.Fatal("WithRepoCacheReadLock succeeded without a lock in a read-only cache")
+	}
+	if called {
+		t.Fatal("read lock callback ran without an acquired lock")
+	}
+	if _, statErr := os.Stat(filepath.Join(root, repoCacheLockName)); !os.IsNotExist(statErr) {
+		t.Fatalf("lock file stat err = %v, want not exist", statErr)
+	}
+}
+
+func TestWithRepoCacheReadLockOpensExistingLockReadOnly(t *testing.T) {
+	root := t.TempDir()
+	lockPath := filepath.Join(root, repoCacheLockName)
+	wantContents := []byte("lock-sentinel\n")
+	if err := os.WriteFile(lockPath, wantContents, 0o444); err != nil {
+		t.Fatalf("write read-only lock file: %v", err)
+	}
+	if err := os.Chmod(lockPath, 0o444); err != nil {
+		t.Fatalf("chmod read-only lock file: %v", err)
+	}
+
+	called := false
+	if err := WithRepoCacheReadLock(root, func() error {
+		called = true
+		return nil
+	}); err != nil {
+		t.Fatalf("WithRepoCacheReadLock on read-only lock file: %v", err)
+	}
+	if !called {
+		t.Fatal("read lock callback was not called")
+	}
+	gotContents, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read lock file: %v", err)
+	}
+	if string(gotContents) != string(wantContents) {
+		t.Fatalf("lock contents = %q, want %q", gotContents, wantContents)
+	}
+	info, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatalf("stat lock file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o444 {
+		t.Fatalf("lock mode = %04o, want 0444", got)
+	}
+}
+
+func TestWithRepoCacheWriteLockCreatesLockFile(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	called := false
+	result, err := WithRepoCacheWriteLock(root, func() (string, error) {
+		called = true
+		return "ok", nil
+	})
+	if err != nil {
+		t.Fatalf("WithRepoCacheWriteLock: %v", err)
+	}
+	if !called || result != "ok" {
+		t.Fatalf("write callback called=%v result=%q, want true and ok", called, result)
 	}
 	if _, err := os.Stat(filepath.Join(root, repoCacheLockName)); err != nil {
 		t.Fatalf("lock file stat: %v", err)

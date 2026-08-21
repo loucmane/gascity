@@ -1372,6 +1372,18 @@ func runController(
 	// real scoped path (/v0/city/{cityName}/...) — matching the
 	// published OpenAPI contract. Clients should use NewCityScopedClient
 	// with the city name (accessible via the supervisor's /v0/cities).
+	var apiMux *api.SupervisorMux
+	var apiShutdownOnce sync.Once
+	shutdownAPI := func() {
+		apiShutdownOnce.Do(func() {
+			if apiMux == nil {
+				return
+			}
+			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			apiMux.Shutdown(shutCtx) //nolint:errcheck // best-effort cleanup
+		})
+	}
 	if cfg.API.Port > 0 {
 		bind := cfg.API.BindOrDefault()
 		nonLocal := bind != "127.0.0.1" && bind != "localhost" && bind != "::1"
@@ -1384,7 +1396,7 @@ func runController(
 		// async POST /v0/city, so leave the initializer nil and let the
 		// handler return 501 for create/unregister routes.
 		cityResolver := &singleCityStateResolver{state: cs}
-		apiMux := api.NewSupervisorMux(cityResolver, nil, readOnly, "controller", commit, time.Now())
+		apiMux = api.NewSupervisorMux(cityResolver, nil, readOnly, "controller", commit, time.Now())
 		apiMux.WithAnyHostAllowed()
 		censusPlane := newRunCensusPlane(apiMux, cityResolver)
 		censusPlane.Start(ctx)
@@ -1434,17 +1446,14 @@ func runController(
 					fmt.Fprintf(stderr, "api: %v\n", err) //nolint:errcheck // best-effort stderr
 				}
 			}()
-			defer func() {
-				shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				apiMux.Shutdown(shutCtx) //nolint:errcheck // best-effort cleanup
-			}()
+			defer shutdownAPI()
 			fmt.Fprintf(stdout, "API server listening on http://%s\n", addr) //nolint:errcheck // best-effort stdout
 		}
 	}
 
 	runPoolOnBoot(cfg, cityPath, shellRunHook, stderr)
 	cr.run(ctx)
+	shutdownAPI()
 	cr.shutdown()
 
 	rec.Record(events.Event{Type: events.ControllerStopped, Actor: "gc"})

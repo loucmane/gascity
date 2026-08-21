@@ -1306,6 +1306,13 @@ func (s *NativeDoltStore) Ready(queries ...ReadyQuery) ([]Bead, error) {
 				if !IsReadyCandidateForTier(bead, now, q.TierMode) || seen[bead.ID] {
 					continue
 				}
+				satisfied, err := nativeReadyBlockingDependenciesSatisfied(ctx, storage, bead)
+				if err != nil {
+					return err
+				}
+				if !satisfied {
+					continue
+				}
 				seen[bead.ID] = true
 				beads = append(beads, bead)
 				if q.Limit > 0 && len(beads) >= q.Limit {
@@ -1320,6 +1327,30 @@ func (s *NativeDoltStore) Ready(queries ...ReadyQuery) ([]Bead, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func nativeReadyBlockingDependenciesSatisfied(ctx context.Context, storage beadslib.Storage, dependent Bead) (bool, error) {
+	dependencies, err := storage.GetDependenciesWithMetadata(ctx, dependent.ID)
+	if err != nil {
+		return false, nativeStoreError(dependent.ID, err)
+	}
+	for _, dependency := range dependencies {
+		if !IsReadyBlockingDependencyType(string(dependency.DependencyType)) {
+			continue
+		}
+		blocker, err := beadFromNativeIssue(&dependency.Issue)
+		if err != nil {
+			return false, err
+		}
+		if !IsReadyBlockingDependencySatisfiedFor(dependent, blocker) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (s *NativeDoltStore) failedReadyBlockersForCache(ids []string) (map[string]struct{}, error) {
+	return failedReadyBlockersByID(ids, s.Get)
 }
 
 // Children returns all beads whose parent-child dependency points at parentID.
