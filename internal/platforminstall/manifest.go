@@ -55,16 +55,17 @@ type ManagedFile struct {
 
 // Manifest is the digest-pinned input to one platform installation.
 type Manifest struct {
-	Schema         string         `json:"schema"`
-	ReleaseID      string         `json:"release_id"`
-	CityPath       string         `json:"city_path"`
-	Core           Artifact       `json:"core"`
-	ManagedFiles   []ManagedFile  `json:"managed_files,omitempty"`
-	PreviousSHA256 string         `json:"previous_sha256"`
-	BackupPath     string         `json:"backup_path"`
-	ReceiptPath    string         `json:"receipt_path"`
-	Integrity      *IntegritySpec `json:"integrity,omitempty"`
-	ManifestSHA256 string         `json:"manifest_sha256,omitempty"`
+	Schema         string          `json:"schema"`
+	ReleaseID      string          `json:"release_id"`
+	CityPath       string          `json:"city_path"`
+	Core           Artifact        `json:"core"`
+	ManagedFiles   []ManagedFile   `json:"managed_files,omitempty"`
+	PreviousSHA256 string          `json:"previous_sha256"`
+	BackupPath     string          `json:"backup_path"`
+	ReceiptPath    string          `json:"receipt_path"`
+	Activation     *ActivationSpec `json:"activation,omitempty"`
+	Integrity      *IntegritySpec  `json:"integrity,omitempty"`
+	ManifestSHA256 string          `json:"manifest_sha256,omitempty"`
 }
 
 // Receipt is the durable result of an installation attempt that reached a
@@ -76,8 +77,23 @@ type Receipt struct {
 	ArtifactSHA256 string               `json:"artifact_sha256"`
 	PreviousSHA256 string               `json:"previous_sha256,omitempty"`
 	ManagedFiles   []ReceiptManagedFile `json:"managed_files,omitempty"`
+	Activation     *RuntimeProof        `json:"activation,omitempty"`
 	Result         string               `json:"result"`
 	ReceiptSHA256  string               `json:"receipt_sha256,omitempty"`
+}
+
+// ActivationSpec pins the runtime identity that must be observed after the
+// explicitly authorized supervisor restart.
+type ActivationSpec struct {
+	ExpectedCommit  string `json:"expected_commit"`
+	ExpectedVersion string `json:"expected_version"`
+}
+
+// RuntimeProof is the post-restart identity recorded in the install receipt.
+type RuntimeProof struct {
+	ExecutableSHA256 string `json:"executable_sha256"`
+	Commit           string `json:"commit"`
+	Version          string `json:"version"`
 }
 
 // ReceiptManagedFile binds one installed managed file to the receipt.
