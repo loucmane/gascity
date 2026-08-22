@@ -90,6 +90,7 @@ func dispatchGateFixture(t *testing.T) (managedworker.ProvisioningReceipt, []byt
 	}
 	provisioning, _, err := managedworker.FinalizeProvisioningReceipt(managedworker.ProvisioningReceipt{
 		Schema:             managedworker.ProvisioningReceiptSchemaV1,
+		CanaryRunner:       managedworker.FilePin{Path: "/city/bin/managed-worker-canary", SHA256: dispatchGateDigest("canary-runner")},
 		MemberHeads:        []managedworker.MemberHead{{Name: "gct-xnf", Commit: strings.Repeat("a", 40)}},
 		TemplateCommit:     strings.Repeat("b", 40),
 		Pack:               managedworker.PackPin{Source: "https://example.invalid/pack", Commit: strings.Repeat("c", 40), SHA256: dispatchGateDigest("pack")},

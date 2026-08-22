@@ -86,9 +86,6 @@ func runPlatformCanary(ctx context.Context, options platformCanaryOptions, runti
 	if err := validatePlatformCanaryOptions(options); err != nil {
 		return managedworker.CanaryReceipt{}, "", err
 	}
-	if err := verifyPlatformCanaryRunner(runtime.FS, options.runnerPath, options.runnerSHA256); err != nil {
-		return managedworker.CanaryReceipt{}, "", err
-	}
 	cityPath, err := runtime.ResolveCity()
 	if err != nil {
 		return managedworker.CanaryReceipt{}, "", fmt.Errorf("resolve canary city: %w", err)
@@ -98,16 +95,20 @@ func runPlatformCanary(ctx context.Context, options platformCanaryOptions, runti
 	if err != nil {
 		return managedworker.CanaryReceipt{}, "", fmt.Errorf("load canary inputs: %w", err)
 	}
+	runner := managedworker.FilePin{Path: options.runnerPath, SHA256: options.runnerSHA256}
+	if runner != provisioning.CanaryRunner {
+		return managedworker.CanaryReceipt{}, "", errors.New("runner is not bound to provisioning receipt")
+	}
+	if err := verifyPlatformCanaryRunner(runtime.FS, runner.Path, runner.SHA256); err != nil {
+		return managedworker.CanaryReceipt{}, "", err
+	}
 	receipt, err := managedworker.RunGoldenPathCanary(ctx, managedworker.CanaryRunRequest{
 		CityPath:            cityPath,
 		Environment:         environment,
 		MaxWallTime:         options.maxWallTime,
 		ProvisioningReceipt: provisioning,
-		Runner: managedworker.FilePin{
-			Path:   options.runnerPath,
-			SHA256: options.runnerSHA256,
-		},
-		RunID: options.runID,
+		Runner:              runner,
+		RunID:               options.runID,
 	}, managedworker.CanaryRunDeps{
 		FS:  runtime.FS,
 		Now: runtime.Now,

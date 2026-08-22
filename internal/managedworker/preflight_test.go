@@ -222,7 +222,8 @@ func TestPreflightFailsClosedAtEachBoundary(t *testing.T) {
 func finalizedReceipt(t *testing.T) (ProvisioningReceipt, []byte) {
 	t.Helper()
 	receipt := ProvisioningReceipt{
-		Schema: ProvisioningReceiptSchemaV1,
+		Schema:       ProvisioningReceiptSchemaV1,
+		CanaryRunner: testCanaryRunnerPin(),
 		MemberHeads: []MemberHead{
 			{Name: "gct-xnf", Commit: strings.Repeat("a", 40)},
 			{Name: "gct-xndt", Commit: strings.Repeat("b", 40)},

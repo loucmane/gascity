@@ -219,6 +219,9 @@ func validateCanaryReceiptContent(receipt CanaryReceipt) error {
 	if provisioning.ReceiptSHA256 != receipt.Environment.ProvisioningReceiptSHA256 {
 		return fmt.Errorf("provisioning_receipt_sha256 mismatch: environment %q embedded %q", receipt.Environment.ProvisioningReceiptSHA256, provisioning.ReceiptSHA256)
 	}
+	if receipt.Runner != provisioning.CanaryRunner {
+		return errors.New("runner is not bound to provisioning receipt")
+	}
 	if len(receipt.Scenarios) == 0 {
 		return errors.New("scenarios must not be empty")
 	}

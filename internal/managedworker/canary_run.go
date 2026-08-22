@@ -248,6 +248,9 @@ func validateCanaryRunRequest(request CanaryRunRequest, deps CanaryRunDeps) erro
 	if err := validateFilePin("runner", request.Runner); err != nil {
 		return err
 	}
+	if request.Runner != request.ProvisioningReceipt.CanaryRunner {
+		return errors.New("runner is not bound to provisioning receipt")
+	}
 	if request.MaxWallTime <= 0 {
 		return errors.New("canary max wall time must be positive")
 	}

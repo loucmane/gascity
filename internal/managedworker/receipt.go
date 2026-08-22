@@ -61,6 +61,7 @@ type WorkerProfile struct {
 
 // ProvisioningReceipt binds reviewed provisioning inputs and worker profiles.
 type ProvisioningReceipt struct {
+	CanaryRunner       FilePin         `json:"canary_runner"`
 	MemberHeads        []MemberHead    `json:"member_heads"`
 	Pack               PackPin         `json:"pack"`
 	PermissionRevision string          `json:"permission_revision"`
@@ -186,6 +187,9 @@ func validateReceiptContent(receipt ProvisioningReceipt) error {
 	}
 	if len(receipt.MemberHeads) == 0 {
 		return errors.New("member_heads must not be empty")
+	}
+	if err := validateFilePin("canary_runner", receipt.CanaryRunner); err != nil {
+		return err
 	}
 	last := ""
 	for index, head := range receipt.MemberHeads {

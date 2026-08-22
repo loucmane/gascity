@@ -25,6 +25,8 @@ func TestPlatformCanaryRunExecutesPinnedMatrixAndPublishesReceipt(t *testing.T) 
 	if err := os.WriteFile(runnerPath, runnerBytes, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	provisioning = refinalizeProvisioningWithRunner(t, provisioning, managedworker.FilePin{Path: runnerPath, SHA256: digestBytes(runnerBytes)})
+	environment.ProvisioningReceiptSHA256 = provisioning.ReceiptSHA256
 
 	var calls []platformCanaryScenarioCall
 	previousFactory := platformCanaryRuntimeFactory
@@ -93,6 +95,8 @@ func TestPlatformCanaryRefusesRunnerDigestBeforeAnyScenario(t *testing.T) {
 	if err := os.WriteFile(runnerPath, []byte("actual"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	provisioning = refinalizeProvisioningWithRunner(t, provisioning, managedworker.FilePin{Path: runnerPath, SHA256: digestBytes([]byte("other"))})
+	environment.ProvisioningReceiptSHA256 = provisioning.ReceiptSHA256
 	called := false
 	previousFactory := platformCanaryRuntimeFactory
 	platformCanaryRuntimeFactory = func() platformCanaryRuntime {
@@ -216,4 +220,18 @@ func passingPlatformCanaryEvidence(name string) managedworker.CanaryScenarioEvid
 
 func digestBytes(data []byte) string {
 	return dispatchGateDigest(string(data))
+}
+
+func refinalizeProvisioningWithRunner(t *testing.T, receipt managedworker.ProvisioningReceipt, runner managedworker.FilePin) managedworker.ProvisioningReceipt {
+	t.Helper()
+	receipt.ReceiptSHA256 = ""
+	receipt.CanaryRunner = runner
+	for index := range receipt.Profiles {
+		receipt.Profiles[index].WorkerProfileSHA256 = ""
+	}
+	finalized, _, err := managedworker.FinalizeProvisioningReceipt(receipt)
+	if err != nil {
+		t.Fatalf("FinalizeProvisioningReceipt: %v", err)
+	}
+	return finalized
 }
