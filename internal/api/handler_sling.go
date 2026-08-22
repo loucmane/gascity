@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,8 +17,10 @@ import (
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/execenv"
 	gitpkg "github.com/gastownhall/gascity/internal/git"
+	"github.com/gastownhall/gascity/internal/managedworker"
 	"github.com/gastownhall/gascity/internal/sling"
 	"github.com/gastownhall/gascity/internal/sourceworkflow"
 )
@@ -69,6 +72,39 @@ type slingResponse struct {
 
 var apiSlingStderr = func() io.Writer { return os.Stderr }
 
+type managedProductDispatchVerifier interface {
+	VerifyManagedProductDispatch(rigName string) error
+}
+
+func apiManagedProductDispatchGate(state State) func(string) error {
+	return func(rigName string) error {
+		managed := false
+		if cfg := state.Config(); cfg != nil {
+			for _, rig := range cfg.Rigs {
+				if rig.Name == rigName {
+					managed = rig.ManagedProduct
+					break
+				}
+			}
+		}
+		if !managed {
+			return nil
+		}
+		if verifier, ok := state.(managedProductDispatchVerifier); ok {
+			return verifier.VerifyManagedProductDispatch(rigName)
+		}
+		err := managedworker.RefuseDispatch("dispatch_gate", "available", "unavailable")
+		if recorder := state.EventProvider(); recorder != nil {
+			payload, _ := json.Marshal(err)
+			recorder.Record(events.Event{
+				Type: events.ManagedProductDispatchRefused, Actor: "gc-api", Subject: rigName,
+				Message: err.Error(), Payload: payload,
+			})
+		}
+		return err
+	}
+}
+
 // execSling calls the intent-based Sling API directly. The Huma handler
 // humaHandleSling performs all validation before calling this.
 //
@@ -116,12 +152,13 @@ func (s *Server) execSling(ctx context.Context, body slingBody, _ string) (*slin
 	sourceWorkflowScanWarnings := make(map[string]struct{})
 	var sourceWorkflowScanMessages []string
 	deps := sling.SlingDeps{
-		CityName: s.state.CityName(),
-		CityPath: s.state.CityPath(),
-		Cfg:      s.state.Config(),
-		SP:       s.state.SessionProvider(),
-		Store:    store,
-		StoreRef: storeRef,
+		CityName:     s.state.CityName(),
+		CityPath:     s.state.CityPath(),
+		Cfg:          s.state.Config(),
+		SP:           s.state.SessionProvider(),
+		Store:        store,
+		StoreRef:     storeRef,
+		DispatchGate: apiManagedProductDispatchGate(s.state),
 		SourceWorkflowStores: func() ([]sling.SourceWorkflowStore, error) {
 			return s.sourceWorkflowStores(), nil
 		},
@@ -208,6 +245,10 @@ func (s *Server) execSling(ctx context.Context, body slingBody, _ string) (*slin
 	}
 
 	if err != nil {
+		var dispatchRefusal *managedworker.DispatchRefusal
+		if errors.As(err, &dispatchRefusal) {
+			return nil, http.StatusPreconditionFailed, dispatchRefusal.Code, err.Error(), nil
+		}
 		var conflictErr *sourceworkflow.ConflictError
 		if errors.As(err, &conflictErr) {
 			return nil, http.StatusConflict, "conflict", err.Error(), conflictErr

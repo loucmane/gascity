@@ -30,7 +30,28 @@ Describe what this agent should do here.
 // in cmd_config.go and cmd_start.go that intentionally use config.Load to
 // discover remote packs before fetching them.
 func loadCityConfig(cityPath string, warningWriter ...io.Writer) (*config.City, error) {
-	return loadCityConfigFS(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"), warningWriter...)
+	cfg, _, err := loadCityConfigWithProvenance(cityPath, warningWriter...)
+	return cfg, err
+}
+
+// loadCityConfigWithProvenance returns the exact provenance snapshot used to
+// compose cfg so policy gates can bind decisions to the same config revision.
+func loadCityConfigWithProvenance(cityPath string, warningWriter ...io.Writer) (*config.City, *config.Provenance, error) {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	if err := ensureBuiltinPacksForConfigLoad(fsys.OSFS{}, tomlPath, resolveLoadCityConfigWarningWriter(warningWriter...)); err != nil {
+		return nil, nil, err
+	}
+	cfg, prov, err := config.LoadWithIncludes(fsys.OSFS{}, tomlPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	emitLoadCityConfigWarnings(resolveLoadCityConfigWarningWriter(warningWriter...), prov)
+	warnMissingRequiredBuiltinImports(fsys.OSFS{}, cfg, tomlPath, resolveLoadCityConfigWarningWriter(warningWriter...))
+	if err := validatePackRuntimeRegistrations(cfg); err != nil {
+		return nil, nil, err
+	}
+	applyFeatureFlags(cfg)
+	return cfg, prov, nil
 }
 
 // loadCityConfigFS is the testable variant of loadCityConfig that accepts a

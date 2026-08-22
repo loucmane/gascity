@@ -647,6 +647,9 @@ func applyRigPatch(cfg *City, patch *RigPatch) error {
 	for i := range cfg.Rigs {
 		r := &cfg.Rigs[i]
 		if r.Name == patch.Name {
+			if patch.ManagedProduct != nil {
+				r.ManagedProduct = *patch.ManagedProduct
+			}
 			if patch.Path != nil {
 				r.Path = *patch.Path
 			}

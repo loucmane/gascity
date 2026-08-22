@@ -66,6 +66,8 @@ type SlingOpts struct {
 	InlineText bool
 	ScopeKind  string
 	ScopeRef   string
+	// dispatchGatePassed is internal recursion state for convoy expansion.
+	dispatchGatePassed bool
 }
 
 // AgentResolver resolves an agent name to a config.Agent.

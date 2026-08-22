@@ -56,3 +56,26 @@ func TestDoSlingWithoutConfiguredGatePreservesControlPlaneCompatibility(t *testi
 		t.Fatalf("DoSling control compatibility: %v", err)
 	}
 }
+
+func TestDoSlingBatchRunsDispatchGateExactlyOnce(t *testing.T) {
+	cfg := &config.City{Rigs: []config.Rig{{Name: "product", Prefix: "pd", Path: "/srv/product", ManagedProduct: true}}}
+	deps := testDeps(cfg, runtime.NewFake(), newFakeRunner().run)
+	deps.Store = seededStore("PD-42")
+	var calls int
+	deps.DispatchGate = func(rigName string) error {
+		calls++
+		if rigName != "product" {
+			t.Fatalf("gate rig = %q, want product", rigName)
+		}
+		return nil
+	}
+	if _, err := DoSlingBatch(SlingOpts{
+		Target:        config.Agent{Name: "worker", Dir: "product", MaxActiveSessions: intPtr(1)},
+		BeadOrFormula: "PD-42",
+	}, deps, deps.Store); err != nil {
+		t.Fatalf("DoSlingBatch: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("gate calls = %d, want 1", calls)
+	}
+}

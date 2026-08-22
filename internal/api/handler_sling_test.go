@@ -17,14 +17,38 @@ import (
 	"github.com/gastownhall/gascity/internal/api/apierr"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/formulatest"
+	"github.com/gastownhall/gascity/internal/managedworker"
 	"github.com/gastownhall/gascity/internal/molecule"
 )
 
 type getErrStore struct {
 	beads.Store
 	err error
+}
+
+func TestAPIManagedProductDispatchGateFailsClosedWhenCapabilityIsUnavailable(t *testing.T) {
+	state := newFakeState(t)
+	recorder := events.NewFake()
+	state.eventProv = recorder
+	state.cfg.Rigs = []config.Rig{
+		{Name: "product", ManagedProduct: true},
+		{Name: "control"},
+	}
+	gate := apiManagedProductDispatchGate(state)
+	if err := gate("control"); err != nil {
+		t.Fatalf("control-plane gate: %v", err)
+	}
+	err := gate("product")
+	var refusal *managedworker.DispatchRefusal
+	if !errors.As(err, &refusal) || refusal.Field != "dispatch_gate" {
+		t.Fatalf("product gate error = %T %[1]v, want dispatch_gate refusal", err)
+	}
+	if len(recorder.Events) != 1 || recorder.Events[0].Type != events.ManagedProductDispatchRefused {
+		t.Fatalf("events = %+v, want one dispatch refusal", recorder.Events)
+	}
 }
 
 func (s *getErrStore) Get(_ string) (beads.Bead, error) {
