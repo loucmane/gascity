@@ -934,6 +934,8 @@ func TestDoStartSessionReturnsNudgeDeliveryError(t *testing.T) {
 		"hasSession",
 		"isSessionRunning",
 		"sendKeys",
+		"hasSession",
+		"isSessionRunning",
 	})
 }
 
