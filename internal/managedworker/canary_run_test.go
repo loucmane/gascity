@@ -1,6 +1,7 @@
 package managedworker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -24,6 +25,7 @@ func TestRunGoldenPathCanaryPublishesOnlyAfterEveryRequiredScenarioPasses(t *tes
 		Environment:         testCanaryEnvironment(provisioning),
 		MaxWallTime:         time.Minute,
 		ProvisioningReceipt: provisioning,
+		Runner:              testCanaryRunnerPin(),
 		RunID:               "canary-20260822-green",
 	}, CanaryRunDeps{
 		FS:  fakeFS,
@@ -41,6 +43,9 @@ func TestRunGoldenPathCanaryPublishesOnlyAfterEveryRequiredScenarioPasses(t *tes
 	}
 	if receipt.Result != CanaryResultPass || receipt.ReceiptSHA256 == "" {
 		t.Fatalf("receipt = %+v, want finalized pass", receipt)
+	}
+	if receipt.Runner != testCanaryRunnerPin() {
+		t.Fatalf("receipt runner = %+v, want %+v", receipt.Runner, testCanaryRunnerPin())
 	}
 
 	receiptPath := CanaryReceiptPath(cityPath)
@@ -60,6 +65,14 @@ func TestRunGoldenPathCanaryPublishesOnlyAfterEveryRequiredScenarioPasses(t *tes
 	}
 	if !hasFSMethod(fakeFS.Calls, "Rename") {
 		t.Fatalf("filesystem calls = %+v, want atomic rename to %s", fakeFS.Calls, receiptPath)
+	}
+	historyPath := CanaryHistoryReceiptPath(cityPath, receipt.ReceiptSHA256)
+	history, ok := fakeFS.Files[historyPath]
+	if !ok {
+		t.Fatalf("append-only history receipt was not published at %s", historyPath)
+	}
+	if !bytes.Equal(history, encoded) {
+		t.Fatal("history receipt differs from verified current receipt")
 	}
 	for path := range fakeFS.Files {
 		if strings.Contains(filepath.Base(path), ".tmp.") {
@@ -82,6 +95,7 @@ func TestRunGoldenPathCanaryFailureNeverPublishesOrReplacesReceipt(t *testing.T)
 		Environment:         testCanaryEnvironment(provisioning),
 		MaxWallTime:         time.Minute,
 		ProvisioningReceipt: provisioning,
+		Runner:              testCanaryRunnerPin(),
 		RunID:               "canary-20260822-red",
 	}, CanaryRunDeps{
 		FS:  fakeFS,
@@ -165,6 +179,7 @@ func TestRunGoldenPathCanaryRejectsVacuousOrUnsafeEvidence(t *testing.T) {
 				Environment:         testCanaryEnvironment(provisioning),
 				MaxWallTime:         time.Minute,
 				ProvisioningReceipt: provisioning,
+				Runner:              testCanaryRunnerPin(),
 				RunID:               "canary-20260822-invalid",
 			}, CanaryRunDeps{
 				FS:  fakeFS,
@@ -215,4 +230,8 @@ func hasFSMethod(calls []fsys.Call, method string) bool {
 		}
 	}
 	return false
+}
+
+func testCanaryRunnerPin() FilePin {
+	return FilePin{Path: "/city/bin/managed-worker-canary", SHA256: digest("canary-runner")}
 }

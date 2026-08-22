@@ -18,6 +18,7 @@ func TestCanaryReceiptIsStrictSelfDigestedAndPassOnly(t *testing.T) {
 		Result:              CanaryResultPass,
 		Environment:         environment,
 		ProvisioningReceipt: provisioning,
+		Runner:              testCanaryRunnerPin(),
 		Scenarios: []CanaryScenario{
 			{Name: "clean-launcher", Outcome: CanaryResultPass, AttentionLatencyCycles: 0},
 			{Name: "missing-provider", Outcome: CanaryResultPass, AttentionLatencyCycles: 1},
@@ -66,6 +67,7 @@ func TestVerifyCanaryReceiptRequiresExactLiveFingerprint(t *testing.T) {
 		Result:              CanaryResultPass,
 		Environment:         environment,
 		ProvisioningReceipt: provisioning,
+		Runner:              testCanaryRunnerPin(),
 		Scenarios:           []CanaryScenario{{Name: "clean-launcher", Outcome: CanaryResultPass}},
 	})
 	if err != nil {

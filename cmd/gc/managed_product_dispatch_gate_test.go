@@ -109,6 +109,7 @@ func dispatchGateFixture(t *testing.T) (managedworker.ProvisioningReceipt, []byt
 	_, canaryData, err := managedworker.FinalizeCanaryReceipt(managedworker.CanaryReceipt{
 		Schema: managedworker.CanaryReceiptSchemaV1, CanaryRunID: "canary-test", IssuedAt: "2026-08-22T08:00:00Z",
 		Result: managedworker.CanaryResultPass, Environment: environment, ProvisioningReceipt: provisioning,
+		Runner:    managedworker.FilePin{Path: "/city/bin/managed-worker-canary", SHA256: dispatchGateDigest("canary-runner")},
 		Scenarios: []managedworker.CanaryScenario{{Name: "clean-launcher", Outcome: managedworker.CanaryResultPass}},
 	})
 	if err != nil {
