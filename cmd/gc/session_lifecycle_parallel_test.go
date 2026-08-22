@@ -4228,6 +4228,7 @@ func TestCommitStartResult_StartupDeathEmitsCrashAttention(t *testing.T) {
 					Command:      "worker",
 					SessionName:  "dead-startup",
 					TemplateName: "issue-triager",
+					InstanceName: "dead-startup",
 				},
 			},
 		},
