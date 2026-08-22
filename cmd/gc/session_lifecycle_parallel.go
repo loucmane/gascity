@@ -212,6 +212,7 @@ func (c startCandidate) logicalTemplate(cfg *config.City) string {
 type preparedStart struct {
 	candidate     startCandidate
 	cfg           runtime.Config
+	preflight     func(context.Context) error
 	coreHash      string
 	coreBreakdown runtime.BreakdownV1
 	liveHash      string
