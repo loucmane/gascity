@@ -130,7 +130,7 @@ func RetryFailedDrainItem(ctx context.Context, store beads.Store, controlID, mem
 	// Reconstruct only those values from the persisted drain identity, exactly
 	// as initial drain-item materialization does; every non-reserved value still
 	// comes exclusively from the frozen root metadata.
-	runtimeVars := make(map[string]string, len(frozenVars)+2)
+	runtimeVars := make(map[string]string)
 	for key, value := range frozenVars {
 		runtimeVars[key] = value
 	}
