@@ -2,6 +2,7 @@ package platforminstall
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,6 +69,48 @@ fetched = "2026-08-22T00:00:00Z"
 		assertSameFileIdentityAndTime(t, path, beforeInfo[path])
 		if got := mustReadFile(t, path); !bytes.Equal(got, beforeBytes[path]) {
 			t.Fatalf("%s changed after pack-cache preflight failure: got %q want %q", path, got, beforeBytes[path])
+		}
+	}
+	assertPathAbsent(t, manifest.BackupPath)
+	assertPathAbsent(t, manifest.ManagedFiles[0].BackupPath)
+	assertPathAbsent(t, manifest.ManagedFiles[1].BackupPath)
+	assertPathAbsent(t, manifest.ReceiptPath)
+	assertPathAbsent(t, DefaultManifestPath(manifest.CityPath))
+}
+
+func TestInstallPackCacheFailurePrecedesEveryLiveMutation(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testPackReleaseManifest(t, dir, []byte(`schema = 1
+
+[packs."https://example.invalid/gascity-packs.git"]
+version = "sha:0123456789abcdef"
+commit = "0123456789abcdef"
+fetched = "2026-08-22T00:00:00Z"
+`))
+	tracked := []string{
+		manifest.Core.Destination,
+		manifest.ManagedFiles[0].Destination,
+		manifest.ManagedFiles[1].Destination,
+	}
+	beforeInfo := make(map[string]os.FileInfo, len(tracked))
+	beforeBytes := make(map[string][]byte, len(tracked))
+	for _, path := range tracked {
+		beforeInfo[path] = mustStat(t, path)
+		beforeBytes[path] = mustReadFile(t, path)
+	}
+	installer := newInstaller()
+	installer.ensurePackCache = func(Manifest, *preflight) error {
+		return errors.New("injected bad candidate pin")
+	}
+
+	_, err := installer.install(manifest)
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("injected bad candidate pin")) {
+		t.Fatalf("install() error = %v, want injected pack-cache failure", err)
+	}
+	for _, path := range tracked {
+		assertSameFileIdentityAndTime(t, path, beforeInfo[path])
+		if got := mustReadFile(t, path); !bytes.Equal(got, beforeBytes[path]) {
+			t.Fatalf("%s changed after pack-cache failure: got %q want %q", path, got, beforeBytes[path])
 		}
 	}
 	assertPathAbsent(t, manifest.BackupPath)

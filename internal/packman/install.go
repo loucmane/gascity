@@ -87,7 +87,35 @@ func ReadCachedPackImports(source, commit string) (map[string]config.Import, err
 
 // InstallLocked restores every entry recorded in packs.lock into the shared cache.
 func InstallLocked(cityRoot string) (*Lockfile, error) {
-	lock, err := ReadLockfile(fsys.OSFS{}, cityRoot)
+	return installLocked(cityRoot, cityRoot)
+}
+
+// InstallLockedCandidate restores and validates a candidate pack.toml and
+// packs.lock pair before that pair becomes the live city authority. Locks are
+// read from candidateRoot, while credentialCityRoot selects the live city's
+// credential layers for any required network clone.
+func InstallLockedCandidate(candidateRoot, credentialCityRoot string) (*Lockfile, error) {
+	lock, err := installLocked(candidateRoot, credentialCityRoot)
+	if err != nil {
+		return nil, err
+	}
+	imports, err := readPackImports(candidateRoot)
+	if err != nil {
+		return nil, err
+	}
+	report, err := CheckInstalled(candidateRoot, imports)
+	if err != nil {
+		return nil, fmt.Errorf("checking candidate pack pair: %w", err)
+	}
+	if report.HasIssues() {
+		issue := report.Issues[0]
+		return nil, fmt.Errorf("candidate pack pair is not installable (%s): %s", issue.Code, issue.Message)
+	}
+	return lock, nil
+}
+
+func installLocked(lockRoot, credentialCityRoot string) (*Lockfile, error) {
+	lock, err := ReadLockfile(fsys.OSFS{}, lockRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +130,7 @@ func InstallLocked(cityRoot string) (*Lockfile, error) {
 		if pack.Commit == "" {
 			return nil, fmt.Errorf("lock entry %q is missing commit", source)
 		}
-		if _, err := EnsureRepoInCache(cityRoot, source, pack.Commit); err != nil {
+		if _, err := EnsureRepoInCache(credentialCityRoot, source, pack.Commit); err != nil {
 			return nil, err
 		}
 	}

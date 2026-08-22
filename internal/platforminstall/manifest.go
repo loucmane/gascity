@@ -351,13 +351,18 @@ func validateRuntimeBuildID(field, value string) error {
 }
 
 type installer struct {
-	rename       func(string, string) error
-	syncDir      func(string) error
-	writeReceipt func(string, Receipt) error
+	rename          func(string, string) error
+	syncDir         func(string) error
+	writeReceipt    func(string, Receipt) error
+	ensurePackCache func(Manifest, *preflight) error
 }
 
 func newInstaller() *installer {
-	installer := &installer{rename: os.Rename, syncDir: syncDirectory}
+	installer := &installer{
+		rename:          os.Rename,
+		syncDir:         syncDirectory,
+		ensurePackCache: ensureCandidatePackCache,
+	}
 	installer.writeReceipt = installer.writeReceiptFile
 	return installer
 }
