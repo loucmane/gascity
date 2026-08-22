@@ -103,7 +103,11 @@ func runPlatformCanary(ctx context.Context, options platformCanaryOptions, runti
 		Environment:         environment,
 		MaxWallTime:         options.maxWallTime,
 		ProvisioningReceipt: provisioning,
-		RunID:               options.runID,
+		Runner: managedworker.FilePin{
+			Path:   options.runnerPath,
+			SHA256: options.runnerSHA256,
+		},
+		RunID: options.runID,
 	}, managedworker.CanaryRunDeps{
 		FS:  runtime.FS,
 		Now: runtime.Now,

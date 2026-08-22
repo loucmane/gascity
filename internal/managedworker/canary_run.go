@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -99,6 +100,7 @@ type CanaryRunRequest struct {
 	Environment         CanaryEnvironment
 	MaxWallTime         time.Duration
 	ProvisioningReceipt ProvisioningReceipt
+	Runner              FilePin
 	RunID               string
 }
 
@@ -159,6 +161,7 @@ func RunGoldenPathCanary(ctx context.Context, request CanaryRunRequest, deps Can
 		Result:              CanaryResultPass,
 		Environment:         request.Environment,
 		ProvisioningReceipt: request.ProvisioningReceipt,
+		Runner:              request.Runner,
 		Scenarios:           scenarios,
 	}
 	return PublishCanaryReceipt(deps.FS, request.CityPath, receipt)
@@ -180,8 +183,12 @@ func PublishCanaryReceipt(filesystem fsys.FS, cityPath string, receipt CanaryRec
 		return CanaryReceipt{}, fmt.Errorf("finalize canary receipt: %w", err)
 	}
 	path := CanaryReceiptPath(cityPath)
-	if err := filesystem.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	historyPath := CanaryHistoryReceiptPath(cityPath, finalized.ReceiptSHA256)
+	if err := filesystem.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil {
 		return CanaryReceipt{}, fmt.Errorf("create canary receipt directory: %w", err)
+	}
+	if err := publishCanaryHistoryReceipt(filesystem, historyPath, encoded); err != nil {
+		return CanaryReceipt{}, err
 	}
 	if err := fsys.WriteFileAtomic(filesystem, path, encoded, 0o600); err != nil {
 		return CanaryReceipt{}, fmt.Errorf("publish canary receipt: %w", err)
@@ -200,12 +207,46 @@ func PublishCanaryReceipt(filesystem fsys.FS, cityPath string, receipt CanaryRec
 	if !equalDigest(loaded.ReceiptSHA256, finalized.ReceiptSHA256) {
 		return CanaryReceipt{}, fmt.Errorf("verify published canary receipt: digest got %q want %q", loaded.ReceiptSHA256, finalized.ReceiptSHA256)
 	}
+	history, err := filesystem.ReadFile(historyPath)
+	if err != nil {
+		return CanaryReceipt{}, fmt.Errorf("verify canary receipt history: %w", err)
+	}
+	if !bytes.Equal(history, encoded) {
+		return CanaryReceipt{}, errors.New("verify canary receipt history: bytes differ from current receipt")
+	}
 	return loaded, nil
+}
+
+func publishCanaryHistoryReceipt(filesystem fsys.FS, path string, encoded []byte) error {
+	info, err := filesystem.Lstat(path)
+	if err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("publish canary receipt history: existing path is not a regular file: %s", path)
+		}
+		existing, readErr := filesystem.ReadFile(path)
+		if readErr != nil {
+			return fmt.Errorf("publish canary receipt history: read existing receipt: %w", readErr)
+		}
+		if !bytes.Equal(existing, encoded) {
+			return errors.New("publish canary receipt history: immutable receipt bytes differ")
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("publish canary receipt history: inspect existing receipt: %w", err)
+	}
+	if err := fsys.WriteFileAtomic(filesystem, path, encoded, 0o600); err != nil {
+		return fmt.Errorf("publish canary receipt history: %w", err)
+	}
+	return nil
 }
 
 func validateCanaryRunRequest(request CanaryRunRequest, deps CanaryRunDeps) error {
 	if strings.TrimSpace(request.RunID) == "" {
 		return errors.New("canary run id is required")
+	}
+	if err := validateFilePin("runner", request.Runner); err != nil {
+		return err
 	}
 	if request.MaxWallTime <= 0 {
 		return errors.New("canary max wall time must be positive")

@@ -19,6 +19,8 @@ const (
 	CanaryReceiptSchemaV1 = "gc.canary-receipt.v1"
 	// CanaryReceiptRelativePath is the controller-owned current receipt path.
 	CanaryReceiptRelativePath = ".gc/runtime/canary/receipt.json"
+	// CanaryHistoryRelativeDir is the immutable, digest-addressed receipt archive.
+	CanaryHistoryRelativeDir = ".gc/runtime/canary/history"
 	// CanaryResultPass is the only result accepted by a dispatch gate.
 	CanaryResultPass = "pass"
 	// DispatchRefusalCode is the stable machine-readable refusal code.
@@ -64,6 +66,7 @@ type CanaryReceipt struct {
 	ProvisioningReceipt ProvisioningReceipt `json:"provisioning_receipt"`
 	ReceiptSHA256       string              `json:"receipt_sha256,omitempty"`
 	Result              string              `json:"result"`
+	Runner              FilePin             `json:"runner"`
 	Scenarios           []CanaryScenario    `json:"scenarios"`
 	Schema              string              `json:"schema"`
 }
@@ -86,6 +89,11 @@ func (refusal *DispatchRefusal) Error() string {
 // CanaryReceiptPath returns the canonical current receipt path for a city.
 func CanaryReceiptPath(cityPath string) string {
 	return filepath.Join(cityPath, filepath.FromSlash(CanaryReceiptRelativePath))
+}
+
+// CanaryHistoryReceiptPath returns the immutable path for one finalized receipt.
+func CanaryHistoryReceiptPath(cityPath, receiptSHA256 string) string {
+	return filepath.Join(cityPath, filepath.FromSlash(CanaryHistoryRelativeDir), receiptSHA256+".json")
 }
 
 // FinalizeCanaryReceipt validates and self-digests a successful canary receipt.
@@ -193,6 +201,9 @@ func validateCanaryReceiptContent(receipt CanaryReceipt) error {
 	}
 	if receipt.Result != CanaryResultPass {
 		return fmt.Errorf("result must be %q", CanaryResultPass)
+	}
+	if err := validateFilePin("runner", receipt.Runner); err != nil {
+		return err
 	}
 	if err := validateCanaryEnvironment(receipt.Environment); err != nil {
 		return fmt.Errorf("environment: %w", err)
