@@ -13,6 +13,9 @@ import (
 
 func TestLoadProvisioningReceiptIsStrictAndSelfDigested(t *testing.T) {
 	receipt, encoded := finalizedReceipt(t)
+	if !strings.Contains(string(encoded), `"canary_runner":`) {
+		t.Fatalf("provisioning receipt does not bind the reviewed canary runner: %s", encoded)
+	}
 
 	loaded, err := LoadProvisioningReceipt(encoded)
 	if err != nil {

@@ -126,6 +126,46 @@ func TestPlatformCanaryRefusesRunnerDigestBeforeAnyScenario(t *testing.T) {
 	}
 }
 
+func TestPlatformCanaryRefusesRunnerNotBoundToProvisioningReceipt(t *testing.T) {
+	provisioning, _, environment := dispatchGateFixture(t)
+	runnerPath := filepath.Join(t.TempDir(), "unreviewed-runner")
+	runnerBytes := []byte("operator-selected runner")
+	if err := os.WriteFile(runnerPath, runnerBytes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	previousFactory := platformCanaryRuntimeFactory
+	platformCanaryRuntimeFactory = func() platformCanaryRuntime {
+		return platformCanaryRuntime{
+			FS:          fsys.OSFS{},
+			Now:         time.Now,
+			ResolveCity: func() (string, error) { return t.TempDir(), nil },
+			LoadInputs: func(context.Context, string) (managedworker.ProvisioningReceipt, managedworker.CanaryEnvironment, error) {
+				return provisioning, environment, nil
+			},
+			RunScenario: func(context.Context, platformCanaryScenarioCall) (managedworker.CanaryScenarioEvidence, error) {
+				called = true
+				return managedworker.CanaryScenarioEvidence{}, nil
+			},
+		}
+	}
+	t.Cleanup(func() { platformCanaryRuntimeFactory = previousFactory })
+
+	cmd := newPlatformCmd(&bytes.Buffer{}, &bytes.Buffer{})
+	cmd.SetArgs([]string{
+		"canary", "--run-id", "unreviewed-runner", "--runner", runnerPath,
+		"--runner-sha256", digestBytes(runnerBytes), "--launcher-source", "/launcher",
+		"--base-commit", strings.Repeat("c", 40), "--scratch-root", "/scratch", "--max-wall-time", "1m",
+	})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "runner is not bound to provisioning receipt") {
+		t.Fatalf("Execute error = %v, want provisioning-bound runner refusal", err)
+	}
+	if called {
+		t.Fatal("scenario ran with a runner not bound to the provisioning receipt")
+	}
+}
+
 func TestPlatformCanaryScenarioOutputIsStrictJSON(t *testing.T) {
 	evidence := passingPlatformCanaryEvidence(managedworker.CanaryScenarioMissingProvider)
 	encoded, err := encodePlatformCanaryScenarioEvidence(evidence)
