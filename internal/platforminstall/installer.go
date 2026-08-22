@@ -52,6 +52,9 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 	if report := inspectPinnedIntegrity(context.Background(), manifest); len(report.Drifts) != 0 {
 		return Receipt{}, fmt.Errorf("preflight platform integrity drift: %+v", report.Drifts)
 	}
+	if err := i.ensurePackCache(manifest, state); err != nil {
+		return Receipt{}, fmt.Errorf("preflight candidate pack cache: %w", err)
+	}
 	if state.noopReceipt != nil {
 		result := *state.noopReceipt
 		result.Result = ResultNoop

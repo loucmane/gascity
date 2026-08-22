@@ -29,6 +29,18 @@ func Plan(manifest Manifest) ([]PlanStep, error) {
 		{Action: "verify-candidate", Path: manifest.Core.Source, SHA256: manifest.Core.SHA256},
 		{Action: "verify-live-baseline", Path: manifest.Core.Destination, SHA256: state.previousSHA256},
 	}
+	pair, err := candidatePackFiles(manifest, state)
+	if err != nil {
+		return nil, err
+	}
+	if pair != nil {
+		steps = append(steps, PlanStep{
+			Action:  "ensure-pack-cache",
+			Path:    pair.lockFile.Source,
+			SHA256:  pair.lockFile.SHA256,
+			Mutates: true,
+		})
+	}
 	if state.previousMetadata != nil {
 		steps = append(steps,
 			PlanStep{Action: "write-previous-manifest-backup", Path: manifest.PreviousMetadata.ManifestBackupPath, SHA256: manifest.PreviousMetadata.ManifestSHA256, Mutates: !noop && !state.previousMetadata.reuseManifestBackup},
