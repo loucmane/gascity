@@ -209,7 +209,8 @@
               "pack-registry-requests",
               "platform-install",
               "platform-rollback",
-              "platform-manifest"
+              "platform-manifest",
+              "platform-canary"
             ]
           },
           "event_id": {
