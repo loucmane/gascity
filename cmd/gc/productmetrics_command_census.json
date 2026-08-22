@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "next_id": 200,
+  "next_id": 201,
   "permanent_ids": [
     {
       "name": "help",
@@ -952,6 +952,22 @@
       "classification": "convoy-reopen-source",
       "owner": "immediate",
       "id": 41,
+      "canonical_identity": true
+    },
+    {
+      "path": "gc convoy retry-drain-item",
+      "aliases": [],
+      "conditional_modes": [],
+      "hidden": false,
+      "effective_hidden": false,
+      "disable_flag_parsing": false,
+      "shape": "runnable",
+      "recording_policy": "recordable",
+      "mode": "standard",
+      "notice_policy": "eligible",
+      "classification": "convoy-retry-drain-item",
+      "owner": "immediate",
+      "id": 200,
       "canonical_identity": true
     },
     {
@@ -4486,6 +4502,23 @@
       "owner": "immediate",
       "id": 41,
       "canonical_target": "gc convoy reopen-source"
+    },
+    {
+      "path": "gc workflow retry-drain-item",
+      "aliases": [],
+      "conditional_modes": [],
+      "hidden": false,
+      "effective_hidden": true,
+      "disable_flag_parsing": false,
+      "shape": "runnable",
+      "recording_policy": "recordable",
+      "mode": "workflow-compat",
+      "notice_policy": "ineligible",
+      "hidden_exception": "workflow-compat",
+      "classification": "convoy-retry-drain-item",
+      "owner": "immediate",
+      "id": 200,
+      "canonical_target": "gc convoy retry-drain-item"
     }
   ],
   "synthetic": [

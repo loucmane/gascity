@@ -30,6 +30,18 @@ import (
 	"github.com/gastownhall/gascity/internal/sourceworkflow"
 )
 
+func TestConvoyRetryDrainItemRequiresExplicitApply(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := newConvoyRetryDrainItemCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"ga-drain", "ga-member"})
+	if err := cmd.Execute(); !errors.Is(err, errExit) {
+		t.Fatalf("Execute() error = %v, want errExit", err)
+	}
+	if got := stderr.String(); !strings.Contains(got, "refusing mutation without --apply") {
+		t.Fatalf("stderr = %q, want explicit apply refusal", got)
+	}
+}
+
 func TestDrainItemRecipeVarsIncludesRuntimeMetadata(t *testing.T) {
 	recipe := &formula.Recipe{
 		Steps: []formula.RecipeStep{{

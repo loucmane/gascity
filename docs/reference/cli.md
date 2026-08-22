@@ -982,7 +982,8 @@ subsystem. The convoy lifecycle subcommands (create, list, status,
 target, add, close, check, stranded, land) do not operate on
 workflow roots; the dispatch subcommands (control, delete,
 delete-source, reopen-source) manage workflow trees and their
-control beads.
+control beads. retry-drain-item performs an atomic append-forward
+replacement of one terminally failed drain-item workflow.
 
 ```
 gc convoy
@@ -1000,6 +1001,7 @@ gc convoy
 | [gc convoy land](#gc-convoy-land) | Land an owned convoy (terminate + cleanup) |
 | [gc convoy list](#gc-convoy-list) | List open convoys with progress |
 | [gc convoy reopen-source](#gc-convoy-reopen-source) | Reopen a source bead after workflow cleanup |
+| [gc convoy retry-drain-item](#gc-convoy-retry-drain-item) | Append-forward replace one terminally failed drain-item workflow |
 | [gc convoy status](#gc-convoy-status) | Show detailed convoy status |
 | [gc convoy stranded](#gc-convoy-stranded) | Find convoys with ready work but no workers |
 | [gc convoy target](#gc-convoy-target) | Set the target branch on a convoy |
@@ -1182,6 +1184,22 @@ gc convoy reopen-source <source-bead-id> [flags]
 |------|------|---------|-------------|
 | `--rig` | string |  | Select the rig store for the source bead |
 | `--store-ref` | string |  | Select the source bead store (city:&lt;name&gt; or rig:&lt;name&gt;) |
+
+## gc convoy retry-drain-item
+
+Replace one terminally failed drain-item workflow without reopening or
+deleting its failure evidence. The replacement is instantiated from the exact
+pinned formula source and frozen runtime variables recorded on the failed root.
+The old subtree retirement, replacement creation, dependency rewiring, and
+manifest pointer swap commit atomically. --apply is required.
+
+```
+gc convoy retry-drain-item <drain-control-id> <member-id> [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--apply` | bool |  | Commit the append-forward replacement atomically |
 
 ## gc convoy status
 

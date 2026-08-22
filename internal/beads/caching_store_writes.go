@@ -549,6 +549,14 @@ func newCachingStoreTx() *cachingStoreTx {
 	}
 }
 
+func (tx *cachingStoreTx) Get(id string) (Bead, error) {
+	graphTx, ok := tx.backing.(GraphTx)
+	if !ok {
+		return Bead{}, fmt.Errorf("beads transaction does not support graph reads")
+	}
+	return graphTx.Get(id)
+}
+
 func (tx *cachingStoreTx) Create(b Bead) (Bead, error) {
 	created, err := tx.backing.Create(b)
 	if err != nil {
@@ -583,6 +591,18 @@ func (tx *cachingStoreTx) Close(id string) error {
 	}
 	tx.touch(id)
 	tx.closed[id] = struct{}{}
+	return nil
+}
+
+func (tx *cachingStoreTx) DepAdd(issueID, dependsOnID, depType string) error {
+	graphTx, ok := tx.backing.(GraphTx)
+	if !ok {
+		return fmt.Errorf("beads transaction does not support dependency writes")
+	}
+	if err := graphTx.DepAdd(issueID, dependsOnID, depType); err != nil {
+		return err
+	}
+	tx.touch(issueID)
 	return nil
 }
 

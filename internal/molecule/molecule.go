@@ -788,7 +788,36 @@ func Instantiate(ctx context.Context, store beads.Store, recipe *formula.Recipe,
 			graphApplyTracef("graph-apply unavailable recipe=%s store=%T", recipe.Name, store)
 		}
 	}
+	return instantiateSequential(store, recipe, opts)
+}
 
+// InstantiateTx creates a recipe graph through an already-open bead
+// transaction. Callers must require an atomic store before using this helper:
+// it deliberately has no compensating cleanup because returning an error lets
+// the enclosing transaction restore the graph and every related mutation as
+// one unit.
+func InstantiateTx(tx beads.GraphTx, recipe *formula.Recipe, opts Options) (*Result, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("beads transaction is nil")
+	}
+	if recipe == nil {
+		return nil, fmt.Errorf("recipe is nil")
+	}
+	if len(recipe.Steps) == 0 {
+		return nil, fmt.Errorf("recipe %q has no steps", recipe.Name)
+	}
+	return instantiateSequential(tx, recipe, opts)
+}
+
+type instantiateStore interface {
+	Get(id string) (beads.Bead, error)
+	Create(beads.Bead) (beads.Bead, error)
+	Update(id string, opts beads.UpdateOpts) error
+	SetMetadataBatch(id string, kvs map[string]string) error
+	DepAdd(issueID, dependsOnID, depType string) error
+}
+
+func instantiateSequential(store instantiateStore, recipe *formula.Recipe, opts Options) (*Result, error) {
 	// Merge variable defaults from recipe with caller-provided vars.
 	vars := applyVarDefaults(opts.Vars, recipe.Vars)
 	priorityOverride := clonePriority(opts.PriorityOverride)
@@ -1384,7 +1413,7 @@ func fenceGraphWorkflowBead(b *beads.Bead) {
 	deferBeadRouting(b)
 }
 
-func activateFencedGraphWorkflowBead(store beads.Store, id string) error {
+func activateFencedGraphWorkflowBead(store instantiateStore, id string) error {
 	b, err := store.Get(id)
 	if err != nil {
 		return err
@@ -1649,7 +1678,7 @@ func markFailedReporting(store beads.Store, ids []string) error {
 // markFailed sets beadmeta.MoleculeFailedMetadataKey on all created beads.
 // Best-effort: errors are silently ignored since we're already in an
 // error path.
-func markFailed(store beads.Store, ids []string) {
+func markFailed(store instantiateStore, ids []string) {
 	for _, id := range ids {
 		_ = store.SetMetadataBatch(id, map[string]string{
 			beadmeta.MoleculeFailedMetadataKey: "true",

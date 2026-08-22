@@ -10,7 +10,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
-	"github.com/gastownhall/gascity/internal/formulatest"
+	"github.com/gastownhall/gascity/internal/formula"
 )
 
 // atomicDrainTestStore advertises the production all-or-nothing transaction
@@ -21,26 +21,7 @@ type atomicDrainTestStore struct{ *beads.MemStore }
 
 func (*atomicDrainTestStore) AtomicTx() bool { return true }
 
-// RED-only compatibility scaffold: the repository's pre-commit typecheck
-// requires the test package to compile before the production API exists. The
-// GREEN commit removes these declarations when it adds the real operation.
-const (
-	drainReplacedByMetadataKey = "gc.drain_replaced_by"
-	drainReplacesMetadataKey   = "gc.drain_replaces"
-)
-
-type DrainItemReplacementResult struct {
-	OldRootID       string
-	NewRootID       string
-	AlreadyReplaced bool
-}
-
-func RetryFailedDrainItem(context.Context, beads.Store, string, string, ProcessOptions) (DrainItemReplacementResult, error) {
-	return DrainItemReplacementResult{}, errors.New("failed drain item replacement is not implemented")
-}
-
 func TestRetryFailedDrainItemReplacesTerminallyBlockedWorkflow(t *testing.T) {
-	formulatest.EnableV2ForTest(t)
 	dir := t.TempDir()
 	formulaPath := writeRetryableDrainItemFormula(t, dir)
 	mem, drain := seedDrainWorkflow(t)
@@ -73,14 +54,25 @@ func TestRetryFailedDrainItemReplacesTerminallyBlockedWorkflow(t *testing.T) {
 		t.Fatalf("close prepare step as failure evidence: %v", err)
 	}
 
+	prepareCalls := 0
 	result, err := RetryFailedDrainItem(context.Background(), store, drain.ID, member.ID, ProcessOptions{
 		FormulaSearchPaths: []string{dir},
+		PrepareRecipe: func(recipe *formula.Recipe, _ beads.Bead) error {
+			prepareCalls++
+			if recipe.FormulaSource != formulaPath {
+				return errors.New("replacement did not use the pinned formula source")
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("RetryFailedDrainItem: %v", err)
 	}
 	if result.OldRootID != oldRoot.ID || result.NewRootID == "" || result.NewRootID == oldRoot.ID {
 		t.Fatalf("result = %+v, want old %s and one distinct replacement", result, oldRoot.ID)
+	}
+	if prepareCalls != 1 {
+		t.Fatalf("PrepareRecipe calls = %d, want exactly one pinned preparation", prepareCalls)
 	}
 
 	drainAfter := mustGetBead(t, store, drain.ID)
@@ -112,6 +104,9 @@ func TestRetryFailedDrainItemReplacesTerminallyBlockedWorkflow(t *testing.T) {
 	}
 	if replacement.Metadata[beadmeta.FormulaSourceMetadataKey] != formulaPath {
 		t.Fatalf("replacement formula source = %q, want %q", replacement.Metadata[beadmeta.FormulaSourceMetadataKey], formulaPath)
+	}
+	if replacement.Metadata[beadmeta.RuntimeVarsMetadataKey] != oldRoot.Metadata[beadmeta.RuntimeVarsMetadataKey] {
+		t.Fatalf("replacement runtime vars = %q, want frozen %q", replacement.Metadata[beadmeta.RuntimeVarsMetadataKey], oldRoot.Metadata[beadmeta.RuntimeVarsMetadataKey])
 	}
 	if replacement.Metadata[beadmeta.DrainControlIDMetadataKey] != drain.ID ||
 		replacement.Metadata[beadmeta.DrainMemberIDMetadataKey] != member.ID ||

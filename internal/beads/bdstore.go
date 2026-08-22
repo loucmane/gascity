@@ -1606,9 +1606,10 @@ func (s *BdStore) Tx(_ string, fn func(Tx) error) error {
 }
 
 type bdStoreTx struct {
-	store *BdStore
-	items map[string]*bdStoreTxItem
-	order []string
+	store   *BdStore
+	items   map[string]*bdStoreTxItem
+	order   []string
+	depAdds []Dep
 }
 
 type bdStoreTxItem struct {
@@ -1627,6 +1628,14 @@ type bdStoreTxTouched struct {
 	description bool
 	parentID    bool
 	assignee    bool
+}
+
+func (tx *bdStoreTx) Get(id string) (Bead, error) {
+	item, err := tx.item(id)
+	if err != nil {
+		return Bead{}, err
+	}
+	return cloneBead(item.current), nil
 }
 
 func newBdStoreTx(store *BdStore) *bdStoreTx {
@@ -1692,6 +1701,11 @@ func (tx *bdStoreTx) Close(id string) error {
 	return nil
 }
 
+func (tx *bdStoreTx) DepAdd(issueID, dependsOnID, depType string) error {
+	tx.depAdds = append(tx.depAdds, Dep{IssueID: issueID, DependsOnID: dependsOnID, Type: depType})
+	return nil
+}
+
 func (tx *bdStoreTx) apply() error {
 	for _, id := range tx.order {
 		item := tx.items[id]
@@ -1729,6 +1743,11 @@ func (tx *bdStoreTx) apply() error {
 			continue
 		}
 		if err := tx.store.Update(id, opts); err != nil {
+			return err
+		}
+	}
+	for _, dep := range tx.depAdds {
+		if err := tx.store.DepAdd(dep.IssueID, dep.DependsOnID, dep.Type); err != nil {
 			return err
 		}
 	}
