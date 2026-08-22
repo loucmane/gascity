@@ -3074,9 +3074,28 @@ gc platform
 
 | Subcommand | Description |
 |------------|-------------|
+| [gc platform canary](#gc-platform-canary) | Run the bounded managed-worker golden-path and fault canary |
 | [gc platform install](#gc-platform-install) | Preflight or atomically apply a digest-pinned platform manifest |
 | [gc platform manifest](#gc-platform-manifest) | Finalize an unsigned platform manifest with its canonical digest |
 | [gc platform rollback](#gc-platform-rollback) | Preflight or restore the manifest-pinned previous platform |
+
+## gc platform canary
+
+Run the bounded managed-worker golden-path and fault canary
+
+```
+gc platform canary [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--base-commit` | string |  | full lowercase Git commit for the fresh launcher clone |
+| `--launcher-source` | string |  | absolute clean launcher source cloned by the runner |
+| `--max-wall-time` | duration | `30m0s` | hard wall-clock bound for the complete canary |
+| `--run-id` | string |  | unique canary run identifier |
+| `--runner` | string |  | absolute path to the reviewed canary scenario runner |
+| `--runner-sha256` | string |  | lowercase SHA-256 of the reviewed runner |
+| `--scratch-root` | string |  | absolute empty-parent root for canary artifacts |
 
 ## gc platform install
 

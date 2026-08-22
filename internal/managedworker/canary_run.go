@@ -80,16 +80,16 @@ var requiredCleanLauncherSteps = []string{
 // scenario. It intentionally records the failure modes that were previously
 // mistaken for progress: coordinator help, silent no_work, and late attention.
 type CanaryScenarioEvidence struct {
-	AttentionLatencyCycles int
-	CompletedSteps         []string
-	CoordinatorWatchers    int
-	FinalizeOutcome        string
-	ManualInterventions    int
-	Name                   string
-	PublisherOutcome       string
-	Resolution             string
-	SignedCandidate        bool
-	SilentNoWork           bool
+	AttentionLatencyCycles int      `json:"attention_latency_cycles"`
+	CompletedSteps         []string `json:"completed_steps,omitempty"`
+	CoordinatorWatchers    int      `json:"coordinator_watchers"`
+	FinalizeOutcome        string   `json:"finalize_outcome,omitempty"`
+	ManualInterventions    int      `json:"manual_interventions"`
+	Name                   string   `json:"name"`
+	PublisherOutcome       string   `json:"publisher_outcome,omitempty"`
+	Resolution             string   `json:"resolution"`
+	SignedCandidate        bool     `json:"signed_candidate"`
+	SilentNoWork           bool     `json:"silent_no_work"`
 }
 
 // CanaryRunRequest binds one clean/fault canary run to the exact environment
