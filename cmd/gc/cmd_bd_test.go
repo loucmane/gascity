@@ -217,12 +217,12 @@ func TestBdBeadExistsQuiescesProbeStoreBeforeReturning(t *testing.T) {
 	root := t.TempDir()
 	latePath := filepath.Join(root, "late-writer")
 	store := newLateBdProbeWriterStore(latePath)
-	originalOpen := openBdBeadProbeStore
-	openBdBeadProbeStore = func(string, string, *config.City) (beads.Store, error) {
+	originalOpen := openBdBeadProbeStoreForTest
+	openBdBeadProbeStoreForTest = func(string, string, *config.City) (beads.Store, error) {
 		return store, nil
 	}
 	t.Cleanup(func() {
-		openBdBeadProbeStore = originalOpen
+		openBdBeadProbeStoreForTest = originalOpen
 		_ = store.CloseStore()
 	})
 
@@ -240,6 +240,24 @@ func TestBdBeadExistsQuiescesProbeStoreBeforeReturning(t *testing.T) {
 		t.Fatalf("probe store writer survived until temp cleanup and created %s", latePath)
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat late writer path: %v", err)
+	}
+}
+
+func TestBdBeadExistsSurfacesProbeStoreCloseFailure(t *testing.T) {
+	store := newLateBdProbeWriterStore(filepath.Join(t.TempDir(), "late-writer"))
+	store.closeErr = errors.New("injected close failure")
+	originalOpen := openBdBeadProbeStoreForTest
+	openBdBeadProbeStoreForTest = func(string, string, *config.City) (beads.Store, error) {
+		return store, nil
+	}
+	t.Cleanup(func() { openBdBeadProbeStoreForTest = originalOpen })
+
+	exists, err := bdBeadExists("/city", nil, execStoreTarget{ScopeRoot: "/rig"}, "rig-1")
+	if exists {
+		t.Fatal("bdBeadExists = true after close failure, want false")
+	}
+	if err == nil || !strings.Contains(err.Error(), "injected close failure") {
+		t.Fatalf("bdBeadExists error = %v, want surfaced close failure", err)
 	}
 }
 

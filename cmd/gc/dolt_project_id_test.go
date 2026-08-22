@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -125,12 +127,27 @@ func startPasswordedDoltServer(t *testing.T, repoDir string, setupQueries ...str
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		if err := managedDoltQueryProbeDirect("127.0.0.1", fmt.Sprintf("%d", port), "root"); err == nil {
+			var cleanupOnce sync.Once
 			cleanup := func() {
-				if cmd.Process != nil {
-					_ = cmd.Process.Kill()
-				}
-				_, _ = cmd.Process.Wait()
+				cleanupOnce.Do(func() {
+					if cmd.Process == nil {
+						t.Error("passworded dolt cleanup: missing process handle")
+						return
+					}
+					if killErr := cmd.Process.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+						t.Errorf("passworded dolt cleanup: kill pid %d: %v", cmd.Process.Pid, killErr)
+					}
+					state, waitErr := cmd.Process.Wait()
+					var exitErr *exec.ExitError
+					if waitErr != nil && !errors.As(waitErr, &exitErr) && !errors.Is(waitErr, os.ErrProcessDone) {
+						t.Errorf("passworded dolt cleanup: wait for pid %d: %v", cmd.Process.Pid, waitErr)
+					}
+					if state == nil && !errors.Is(waitErr, os.ErrProcessDone) {
+						t.Errorf("passworded dolt cleanup: wait for pid %d returned no process state", cmd.Process.Pid)
+					}
+				})
 			}
+			t.Cleanup(cleanup)
 			return repoDir, port, cmd.Process.Pid, cleanup
 		}
 		time.Sleep(250 * time.Millisecond)

@@ -120,15 +120,24 @@ auto-export behavior, invoke bd directly.`,
 // called only to decide which store a bd invocation is scoped to, so it takes
 // the city config the caller already loaded: without it, every candidate probe
 // re-loaded the whole city config inside the store open.
-var openBdBeadProbeStore = openStoreAtForCityWithConfig
+var openBdBeadProbeStoreForTest func(string, string, *config.City) (beads.Store, error)
 
 var bdBeadExists = func(cityPath string, cfg *config.City, target execStoreTarget, beadID string) (bool, error) {
-	store, err := openBdBeadProbeStore(target.ScopeRoot, cityPath, cfg)
+	var store beads.Store
+	var err error
+	if openBdBeadProbeStoreForTest != nil {
+		store, err = openBdBeadProbeStoreForTest(target.ScopeRoot, cityPath, cfg)
+	} else {
+		store, err = openStoreAtForCityWithConfig(target.ScopeRoot, cityPath, cfg)
+	}
 	if err != nil {
 		return false, nil
 	}
-	bead, err := store.Get(beadID)
-	return err == nil && strings.TrimSpace(bead.ID) != "", nil
+	bead, getErr := store.Get(beadID)
+	if closeErr := closeBeadStoreHandle(store); closeErr != nil {
+		return false, fmt.Errorf("close bd scope probe store for %s: %w", target.ScopeRoot, closeErr)
+	}
+	return getErr == nil && strings.TrimSpace(bead.ID) != "", nil
 }
 
 func bdCommandEnv(cityPath string, cfg *config.City, target execStoreTarget) ([]string, error) {
