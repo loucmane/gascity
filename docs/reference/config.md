@@ -718,6 +718,7 @@ Rig defines an external project registered in the city.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | string | **yes** |  | Name is the unique identifier for this rig. |
+| `managed_product` | boolean |  |  | ManagedProduct requires a current, exact canary receipt before work may be cooked or routed into this rig. Control-plane rigs leave it false. |
 | `path` | string |  |  | Path is the absolute filesystem path to the rig's repository. |
 | `prefix` | string |  |  | Prefix overrides the auto-derived bead ID prefix for this rig. |
 | `default_branch` | string |  |  | DefaultBranch is the rig repository's mainline branch (e.g. "main", "master", "develop"). When set, routing formulas use this as the default merge target instead of probing origin/HEAD at sling time. Captured by `gc rig add` from the rig's git config; set manually for rigs whose mainline isn't reachable via origin/HEAD. |
@@ -743,6 +744,7 @@ RigPatch modifies an existing rig identified by Name.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | string | **yes** |  | Name is the targeting key (required). Must match an existing rig's name. |
+| `managed_product` | boolean |  |  | ManagedProduct overrides the rig's receipt-gated dispatch policy. |
 | `path` | string |  |  | Path overrides the rig's filesystem path. |
 | `prefix` | string |  |  | Prefix overrides the bead ID prefix. |
 | `default_branch` | string |  |  | DefaultBranch overrides the rig's recorded mainline branch. |

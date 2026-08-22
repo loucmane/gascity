@@ -6474,6 +6474,12 @@
             },
             "type": "object"
           },
+          "ManagedProduct": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "Name": {
             "type": "string"
           },
@@ -6504,6 +6510,7 @@
         },
         "required": [
           "Name",
+          "ManagedProduct",
           "Path",
           "Prefix",
           "DefaultBranch",

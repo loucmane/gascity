@@ -580,6 +580,9 @@ func (fl FormulaLayers) SearchPaths(rigName string) []string {
 type Rig struct {
 	// Name is the unique identifier for this rig.
 	Name string `toml:"name" jsonschema:"required"`
+	// ManagedProduct requires a current, exact canary receipt before work may
+	// be cooked or routed into this rig. Control-plane rigs leave it false.
+	ManagedProduct bool `toml:"managed_product,omitempty"`
 	// Path is the absolute filesystem path to the rig's repository.
 	Path string `toml:"path,omitempty"`
 	// Prefix overrides the auto-derived bead ID prefix for this rig.

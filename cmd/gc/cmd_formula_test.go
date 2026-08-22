@@ -18,8 +18,76 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/formulatest"
+	"github.com/gastownhall/gascity/internal/managedworker"
 	"github.com/gastownhall/gascity/internal/sourceworkflow"
 )
+
+func TestFormulaCookRefusesManagedProductWithoutCanaryBeforeStoreMutation(t *testing.T) {
+	configureIsolatedRuntimeEnv(t)
+	t.Setenv("GC_SESSION", "fake")
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
+	t.Setenv("GC_BOOTSTRAP", "skip")
+
+	cityDir := t.TempDir()
+	rigDir := filepath.Join(cityDir, "product")
+	if err := os.MkdirAll(filepath.Join(cityDir, "formulas"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(cityDir, "city.toml"), fmt.Sprintf(`[workspace]
+name = "test-city"
+
+[[rigs]]
+name = "product"
+path = %q
+managed_product = true
+`, rigDir))
+	writeFormulaTestFile(t, filepath.Join(cityDir, "formulas"), "noop", `
+formula = "noop"
+version = 1
+
+[[steps]]
+id = "work"
+title = "Work"
+`)
+
+	t.Setenv("GC_CITY_PATH", cityDir)
+	t.Chdir(rigDir)
+	previousCity := cityFlag
+	previousRig := rigFlag
+	t.Cleanup(func() {
+		cityFlag = previousCity
+		rigFlag = previousRig
+	})
+	cityFlag = cityDir
+	rigFlag = "product"
+
+	var stdout, stderr bytes.Buffer
+	cmd := newFormulaCookCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"noop", "--json"})
+	err := cmd.Execute()
+	var refusal *managedworker.DispatchRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("formula cook error = %T %[1]v, want DispatchRefusal; stdout=%s stderr=%s", err, stdout.String(), stderr.String())
+	}
+	if refusal.Field != "receipt" {
+		t.Fatalf("refusal = %+v, want missing receipt", refusal)
+	}
+	if _, statErr := os.Stat(filepath.Join(rigDir, ".beads")); !os.IsNotExist(statErr) {
+		t.Fatalf("rig store exists after refusal: stat error = %v", statErr)
+	}
+	eventData, readErr := os.ReadFile(filepath.Join(cityDir, ".gc", "events.jsonl"))
+	if readErr != nil {
+		t.Fatalf("read refusal attention event: %v", readErr)
+	}
+	if !strings.Contains(string(eventData), `"type":"managed_product.dispatch_refused"`) ||
+		!strings.Contains(string(eventData), `"subject":"product"`) {
+		t.Fatalf("events.jsonl missing managed product refusal for product rig:\n%s", eventData)
+	}
+}
 
 // TestResolveFormulaScope_RigFlagWins verifies that an explicit --rig flag
 // takes priority over the cwd, and that the rig's FormulaLayers are used.

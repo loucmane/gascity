@@ -199,6 +199,8 @@ type PoolOverride struct {
 type RigPatch struct {
 	// Name is the targeting key (required). Must match an existing rig's name.
 	Name string `toml:"name" jsonschema:"required"`
+	// ManagedProduct overrides the rig's receipt-gated dispatch policy.
+	ManagedProduct *bool `toml:"managed_product,omitempty"`
 	// Path overrides the rig's filesystem path.
 	Path *string `toml:"path,omitempty"`
 	// Prefix overrides the bead ID prefix.
