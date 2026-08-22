@@ -1363,6 +1363,9 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 	if !storeQueryPartial && reconcileOpts.workDirResolver == nil && len(assignedWorkBeads) > 0 {
 		effectiveStartOptions = append(append([]startExecutionOption(nil), startOptions...), withTaskWorkDirResolver(newAssignedTaskWorkDirResolver(cityPath, assignedWorkBeads)))
 	}
+	if !storeQueryPartial && reconcileOpts.checkPathResolver == nil && len(assignedWorkBeads) > 0 {
+		effectiveStartOptions = append(effectiveStartOptions, withTaskCheckPathResolver(newTaskCheckPathResolver(assignedWorkBeads)))
+	}
 	if startupTimeout <= 0 && cfg != nil {
 		startupTimeout = cfg.Session.StartupTimeoutDuration()
 	}

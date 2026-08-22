@@ -18,8 +18,13 @@ import (
 	"github.com/gastownhall/gascity/internal/platforminstall"
 )
 
-// ProvisioningReceiptSchemaV1 is the first managed-worker provisioning receipt schema.
-const ProvisioningReceiptSchemaV1 = "gc.provisioning-receipt.v1"
+const (
+	// ProvisioningReceiptSchemaV1 is the first managed-worker provisioning receipt schema.
+	ProvisioningReceiptSchemaV1 = "gc.provisioning-receipt.v1"
+	// ProvisioningReceiptRelativePath is the controller-owned authority consumed
+	// immediately before a managed provider starts.
+	ProvisioningReceiptRelativePath = ".gc/runtime/provisioning/receipt.json"
+)
 
 // MemberHead binds one provisioning-convoy member to its reviewed commit.
 type MemberHead struct {
@@ -64,6 +69,22 @@ type ProvisioningReceipt struct {
 	Rules              FilePin         `json:"rules"`
 	Schema             string          `json:"schema"`
 	TemplateCommit     string          `json:"template_commit"`
+}
+
+// ProvisioningReceiptPath returns the canonical receipt location for a city.
+func ProvisioningReceiptPath(cityPath string) string {
+	return filepath.Join(cityPath, filepath.FromSlash(ProvisioningReceiptRelativePath))
+}
+
+// Profile returns the exact named managed-worker profile from a verified receipt.
+func (receipt ProvisioningReceipt) Profile(name string) (WorkerProfile, bool) {
+	name = strings.TrimSpace(name)
+	for _, profile := range receipt.Profiles {
+		if profile.Name == name {
+			return profile, true
+		}
+	}
+	return WorkerProfile{}, false
 }
 
 // FinalizeProvisioningReceipt validates, canonicalizes, and self-digests a receipt.

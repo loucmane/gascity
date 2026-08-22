@@ -2,7 +2,14 @@ package managedworker
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"fmt"
+	"path/filepath"
+	"strings"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/platforminstall"
 )
 
@@ -25,11 +32,130 @@ type Probes struct {
 
 // PreflightReport records whether every required managed-worker check passed.
 type PreflightReport struct {
-	OK bool
+	Checks []string
+	OK     bool
 }
 
-// Preflight is intentionally skeletal in the RED commit. The focused tests
-// require every boundary to be verified before this may remain successful.
-func Preflight(context.Context, PreflightRequest, Probes) (PreflightReport, error) {
-	return PreflightReport{OK: true}, nil
+// Failure identifies a deterministic managed-worker launch refusal. Callers
+// use the typed error to emit an immediate attention event without mistaking it
+// for a provider crash.
+type Failure struct {
+	Profile string
+	Err     error
+}
+
+func (failure *Failure) Error() string {
+	if failure == nil {
+		return "managed-worker preflight failed"
+	}
+	return fmt.Sprintf("managed-worker profile %q: %v", failure.Profile, failure.Err)
+}
+
+func (failure *Failure) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.Err
+}
+
+// Preflight verifies every controller-owned launch boundary in deterministic
+// order. It returns at the first failure so a caller cannot start the provider
+// from a partially verified profile.
+func Preflight(ctx context.Context, request PreflightRequest, probes Probes) (PreflightReport, error) {
+	if err := validateProbes(probes); err != nil {
+		return PreflightReport{}, err
+	}
+	receipt, err := LoadProvisioningReceipt(request.Receipt)
+	if err != nil {
+		return PreflightReport{}, fmt.Errorf("provisioning receipt: %w", err)
+	}
+	report := PreflightReport{Checks: []string{"receipt"}}
+
+	profile, ok := receipt.Profile(request.ProfileName)
+	if !ok {
+		return report, fmt.Errorf("managed worker profile %q is not declared in the provisioning receipt", request.ProfileName)
+	}
+	report.Checks = append(report.Checks, "profile")
+	if request.PermissionRevision != receipt.PermissionRevision {
+		return report, fmt.Errorf("permission_revision mismatch: got %q want %q", request.PermissionRevision, receipt.PermissionRevision)
+	}
+	report.Checks = append(report.Checks, "permission_revision")
+
+	checkPath := filepath.Clean(strings.TrimSpace(request.CheckPath))
+	if !filepath.IsAbs(request.CheckPath) || checkPath != request.CheckPath {
+		return report, fmt.Errorf("%s must be a clean absolute path: %q", beadmeta.CheckPathMetadataKey, request.CheckPath)
+	}
+	if checkPath != profile.CheckPath.Path {
+		return report, fmt.Errorf("%s mismatch: got %q want %q", beadmeta.CheckPathMetadataKey, checkPath, profile.CheckPath.Path)
+	}
+	report.Checks = append(report.Checks, "check_path_stamp")
+
+	observedDigest, err := WorkerProfileDigest(request.ObservedProfile)
+	if err != nil {
+		return report, fmt.Errorf("observed worker profile: %w", err)
+	}
+	if !equalDigest(observedDigest, profile.WorkerProfileSHA256) {
+		return report, fmt.Errorf("worker_profile_sha256 mismatch: got %q want %q", observedDigest, profile.WorkerProfileSHA256)
+	}
+	report.Checks = append(report.Checks, "worker_profile")
+
+	if err := inspectFilePin(probes.ReadFile, "rules", receipt.Rules); err != nil {
+		return report, err
+	}
+	report.Checks = append(report.Checks, "rules")
+	if err := inspectFilePin(probes.ReadFile, beadmeta.CheckPathMetadataKey, profile.CheckPath); err != nil {
+		return report, err
+	}
+	report.Checks = append(report.Checks, "check_path")
+
+	if err := probes.InspectProvider(ctx, profile.Provider); err != nil {
+		return report, fmt.Errorf("provider identity %q: %w", profile.Provider.Name, err)
+	}
+	report.Checks = append(report.Checks, "provider_identity")
+	if err := probes.ProbeReadiness(ctx, profile.Provider.Name); err != nil {
+		return report, fmt.Errorf("provider readiness %q: %w", profile.Provider.Name, err)
+	}
+	report.Checks = append(report.Checks, "provider_readiness")
+	if err := probes.ProbeSigner(ctx, profile.SignerIdentity); err != nil {
+		return report, fmt.Errorf("signer readiness %q: %w", profile.SignerIdentity, err)
+	}
+	report.Checks = append(report.Checks, "signer")
+	report.OK = true
+	return report, nil
+}
+
+func validateProbes(probes Probes) error {
+	for name, present := range map[string]bool{
+		"read file":          probes.ReadFile != nil,
+		"inspect provider":   probes.InspectProvider != nil,
+		"provider readiness": probes.ProbeReadiness != nil,
+		"signer readiness":   probes.ProbeSigner != nil,
+	} {
+		if !present {
+			return fmt.Errorf("managed-worker preflight probe %q is required", name)
+		}
+	}
+	return nil
+}
+
+func inspectFilePin(readFile func(string) ([]byte, error), name string, pin FilePin) error {
+	data, err := readFile(pin.Path)
+	if err != nil {
+		return fmt.Errorf("%s %q: %w", name, pin.Path, err)
+	}
+	got := sha256.Sum256(data)
+	gotDigest := hex.EncodeToString(got[:])
+	if !equalDigest(gotDigest, pin.SHA256) {
+		return fmt.Errorf("%s sha256 mismatch: got %q want %q", name, gotDigest, pin.SHA256)
+	}
+	return nil
+}
+
+func equalDigest(left, right string) bool {
+	leftBytes, leftErr := hex.DecodeString(left)
+	rightBytes, rightErr := hex.DecodeString(right)
+	if leftErr != nil || rightErr != nil || len(leftBytes) != sha256.Size || len(rightBytes) != sha256.Size {
+		return false
+	}
+	return subtle.ConstantTimeCompare(leftBytes, rightBytes) == 1
 }

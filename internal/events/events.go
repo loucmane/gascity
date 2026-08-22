@@ -223,6 +223,12 @@ const (
 	// the next episode fires independently. (ADR-0013 A1 M3a)
 	ProviderHealthGateAlert = "provider.health_gate_alert"
 
+	// ManagedWorkerPreflightFailed is emitted synchronously when the
+	// controller refuses a managed-worker launch before provider Start. It is
+	// intentionally a custom-envelope event until the attention-funnel work
+	// adds its typed SSE projection.
+	ManagedWorkerPreflightFailed = "managed_worker.preflight_failed"
+
 	// Emergency events are dolt-independent escalation records written to
 	// .gc/emergency and mirrored into the city event log.
 	EmergencySignaled = "emergency.signaled"
@@ -283,11 +289,11 @@ var KnownEventTypes = []string{
 	PostgresCredentialResolved,
 	EmergencySignaled, EmergencyAcked,
 	BeadsConditionalWritesDegraded,
-	// ProviderHealthGateAlert is intentionally omitted from KnownEventTypes.
-	// The event is emitted by the reconciler but its typed SSE payload is not
-	// yet registered in internal/api (the payload registration lives in a
-	// follow-up that adds the full SSE projection). Until then, subscribers
-	// receive it via the custom-event envelope.
+	// ProviderHealthGateAlert and ManagedWorkerPreflightFailed are intentionally
+	// omitted from KnownEventTypes. They are emitted by the reconciler but their
+	// typed SSE payloads are not yet registered in internal/api. Until the
+	// attention-funnel follow-up lands, subscribers receive them via the
+	// custom-event envelope.
 }
 
 // Event is a single recorded occurrence in the system.
