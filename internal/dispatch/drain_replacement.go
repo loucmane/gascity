@@ -17,11 +17,6 @@ import (
 	"github.com/gastownhall/gascity/internal/molecule"
 )
 
-const (
-	drainReplacedByMetadataKey = "gc.drain_replaced_by"
-	drainReplacesMetadataKey   = "gc.drain_replaces"
-)
-
 // ErrDrainItemRetryRefused classifies a retry request that could not prove a
 // safe, single failed drain item to replace. Callers surface it as operator
 // attention; the operation never mutates on this error.
@@ -91,7 +86,7 @@ func RetryFailedDrainItem(ctx context.Context, store beads.Store, controlID, mem
 	if err != nil {
 		return result, retryDrainRefusal("loading drain item root %s: %v", row.ItemRootID, err)
 	}
-	if replaced := strings.TrimSpace(oldRoot.Metadata[drainReplacesMetadataKey]); replaced != "" {
+	if replaced := strings.TrimSpace(oldRoot.Metadata[beadmeta.DrainReplacesMetadataKey]); replaced != "" {
 		return DrainItemReplacementResult{OldRootID: replaced, NewRootID: oldRoot.ID, AlreadyReplaced: true}, nil
 	}
 	if strings.TrimSpace(oldRoot.Metadata[beadmeta.OutcomeMetadataKey]) == beadmeta.OutcomePass {
@@ -219,7 +214,7 @@ func RetryFailedDrainItem(ctx context.Context, store beads.Store, controlID, mem
 			return fmt.Errorf("instantiating replacement from %q: %w", formulaSource, err)
 		}
 		result = DrainItemReplacementResult{OldRootID: oldRoot.ID, NewRootID: created.RootID}
-		if err := tx.SetMetadataBatch(created.RootID, map[string]string{drainReplacesMetadataKey: oldRoot.ID}); err != nil {
+		if err := tx.SetMetadataBatch(created.RootID, map[string]string{beadmeta.DrainReplacesMetadataKey: oldRoot.ID}); err != nil {
 			return fmt.Errorf("linking replacement root %s: %w", created.RootID, err)
 		}
 
@@ -234,8 +229,8 @@ func RetryFailedDrainItem(ctx context.Context, store beads.Store, controlID, mem
 
 		for _, old := range oldWorkflow {
 			metadata := map[string]string{
-				drainReplacedByMetadataKey:        created.RootID,
-				beadmeta.FailureReasonMetadataKey: drainReplacementFailureReason(old),
+				beadmeta.DrainReplacedByMetadataKey: created.RootID,
+				beadmeta.FailureReasonMetadataKey:   drainReplacementFailureReason(old),
 			}
 			if old.ID == oldRoot.ID {
 				metadata[beadmeta.OutcomeMetadataKey] = beadmeta.OutcomeFail

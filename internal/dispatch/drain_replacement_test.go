@@ -93,13 +93,13 @@ func TestRetryFailedDrainItemReplacesTerminallyBlockedWorkflow(t *testing.T) {
 		if bead.Metadata[beadmeta.FailureReasonMetadataKey] == "" {
 			t.Errorf("old workflow bead %s missing failure reason", bead.ID)
 		}
-		if got := bead.Metadata[drainReplacedByMetadataKey]; got != result.NewRootID {
+		if got := bead.Metadata[beadmeta.DrainReplacedByMetadataKey]; got != result.NewRootID {
 			t.Errorf("old workflow bead %s replaced_by = %q, want %q", bead.ID, got, result.NewRootID)
 		}
 	}
 
 	replacement := mustGetBead(t, store, result.NewRootID)
-	if got := replacement.Metadata[drainReplacesMetadataKey]; got != oldRoot.ID {
+	if got := replacement.Metadata[beadmeta.DrainReplacesMetadataKey]; got != oldRoot.ID {
 		t.Fatalf("replacement gc.drain_replaces = %q, want %q", got, oldRoot.ID)
 	}
 	if replacement.Metadata[beadmeta.FormulaSourceMetadataKey] != formulaPath {

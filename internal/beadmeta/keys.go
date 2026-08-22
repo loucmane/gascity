@@ -88,6 +88,8 @@ const (
 	DrainMemberUnresolvedMetadataKey     = "gc.drain_member_unresolved"
 	DrainOnItemFailureMetadataKey        = "gc.drain_on_item_failure"
 	DrainParentConvoyIDMetadataKey       = "gc.drain_parent_convoy_id"
+	DrainReplacedByMetadataKey           = "gc.drain_replaced_by"
+	DrainReplacesMetadataKey             = "gc.drain_replaces"
 	DrainStateMetadataKey                = "gc.drain_state"
 	DrainUnitKeyMetadataKey              = "gc.drain_unit_key"
 	DurationMsMetadataKey                = "gc.duration_ms"
@@ -332,6 +334,8 @@ var KnownMetadataKeys = []string{
 	DrainMemberUnresolvedMetadataKey,
 	DrainOnItemFailureMetadataKey,
 	DrainParentConvoyIDMetadataKey,
+	DrainReplacedByMetadataKey,
+	DrainReplacesMetadataKey,
 	DrainStateMetadataKey,
 	DrainUnitKeyMetadataKey,
 	DurationMsMetadataKey,
