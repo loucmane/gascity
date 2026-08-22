@@ -120,13 +120,15 @@ auto-export behavior, invoke bd directly.`,
 // called only to decide which store a bd invocation is scoped to, so it takes
 // the city config the caller already loaded: without it, every candidate probe
 // re-loaded the whole city config inside the store open.
-var bdBeadExists = func(cityPath string, cfg *config.City, target execStoreTarget, beadID string) bool {
-	store, err := openStoreAtForCityWithConfig(target.ScopeRoot, cityPath, cfg)
+var openBdBeadProbeStore = openStoreAtForCityWithConfig
+
+var bdBeadExists = func(cityPath string, cfg *config.City, target execStoreTarget, beadID string) (bool, error) {
+	store, err := openBdBeadProbeStore(target.ScopeRoot, cityPath, cfg)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	bead, err := store.Get(beadID)
-	return err == nil && strings.TrimSpace(bead.ID) != ""
+	return err == nil && strings.TrimSpace(bead.ID) != "", nil
 }
 
 func bdCommandEnv(cityPath string, cfg *config.City, target execStoreTarget) ([]string, error) {
@@ -620,7 +622,11 @@ func resolveBdScopeTarget(cfg *config.City, cityPath, rigName string, args []str
 			if strings.HasPrefix(arg, "-") || beadPrefix(cfg, arg) != cityPrefix {
 				continue
 			}
-			if bdBeadExists(cityPath, cfg, cityTarget, arg) {
+			exists, probeErr := bdBeadExists(cityPath, cfg, cityTarget, arg)
+			if probeErr != nil {
+				return execStoreTarget{}, probeErr
+			}
+			if exists {
 				return cityTarget, nil
 			}
 		}
@@ -639,7 +645,11 @@ func resolveBdScopeTarget(cfg *config.City, cityPath, rigName string, args []str
 				continue
 			}
 			target := bdRigScopeTarget(cityPath, rig)
-			if bdBeadExists(cityPath, cfg, target, arg) {
+			exists, probeErr := bdBeadExists(cityPath, cfg, target, arg)
+			if probeErr != nil {
+				return execStoreTarget{}, probeErr
+			}
+			if exists {
 				return target, nil
 			}
 		}
