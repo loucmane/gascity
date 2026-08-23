@@ -74,6 +74,42 @@ func TestInspectIntegrityReportsAllDriftClasses(t *testing.T) {
 	}
 }
 
+func TestInspectIntegrityReportsMissingPinnedRulesFile(t *testing.T) {
+	dir := t.TempDir()
+	manifest := integrityManifest(t, dir)
+	if _, err := Install(manifest); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	rules := manifest.Integrity.Files[0]
+	if err := os.Remove(rules.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := InspectIntegrity(context.Background(), manifest)
+	if err != nil {
+		t.Fatalf("InspectIntegrity() error = %v", err)
+	}
+	found := false
+	for _, drift := range report.Drifts {
+		if drift.Field != "files[control-rules].sha256" {
+			continue
+		}
+		found = true
+		if drift.Expected != rules.SHA256 {
+			t.Errorf("drift expected = %q, want %q", drift.Expected, rules.SHA256)
+		}
+		if drift.Actual != "missing" {
+			t.Errorf("drift actual = %q, want %q", drift.Actual, "missing")
+		}
+	}
+	if !found {
+		t.Fatalf("drift fields = %v, want %q", driftFields(report), "files[control-rules].sha256")
+	}
+	if containsString(driftFields(report), "files[control-rules].mode") {
+		t.Errorf("drift fields = %v, want no mode drift for a file that does not exist", driftFields(report))
+	}
+}
+
 func TestInspectIntegrityReportsProviderDigestAndVersionDrift(t *testing.T) {
 	dir := t.TempDir()
 	manifest := integrityManifest(t, dir)
