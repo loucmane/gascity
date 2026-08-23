@@ -57,6 +57,12 @@ func DoSling(opts SlingOpts, deps SlingDeps, querier BeadQuerier) (SlingResult, 
 	if err := validateDeps(deps); err != nil {
 		return SlingResult{}, err
 	}
+	if !opts.dispatchGatePassed && deps.DispatchGate != nil {
+		if err := deps.DispatchGate(rigNameForAgent(deps.Cfg, opts.Target)); err != nil {
+			return SlingResult{Target: opts.Target.QualifiedName()}, err
+		}
+		opts.dispatchGatePassed = true
+	}
 	a := opts.Target
 	result, preErr := preflight(opts, deps, querier)
 	if preErr != nil {
@@ -1405,6 +1411,15 @@ func listContainerChildren(querier BeadChildQuerier, containerID string, include
 
 // DoSlingBatch handles convoy expansion before delegating to DoSling.
 func DoSlingBatch(opts SlingOpts, deps SlingDeps, querier BeadChildQuerier) (SlingResult, error) {
+	if err := validateDeps(deps); err != nil {
+		return SlingResult{}, err
+	}
+	if !opts.dispatchGatePassed && deps.DispatchGate != nil {
+		if err := deps.DispatchGate(rigNameForAgent(deps.Cfg, opts.Target)); err != nil {
+			return SlingResult{Target: opts.Target.QualifiedName()}, err
+		}
+		opts.dispatchGatePassed = true
+	}
 	a := opts.Target
 
 	// Formula mode, nil querier → delegate directly.

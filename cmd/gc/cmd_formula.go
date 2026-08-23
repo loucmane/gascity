@@ -633,12 +633,21 @@ conflicting live workflow from the same source is an error.`,
 			if err != nil {
 				return formulaCommandError(stderr, "gc formula cook", jsonOutput, err)
 			}
-			cfg, err := loadCityConfig(cityPath, stderr)
+			cfg, provenance, err := loadCityConfigWithProvenance(cityPath, stderr)
 			if err != nil {
 				return formulaCommandError(stderr, "gc formula cook", jsonOutput, err)
 			}
 			scope, err := resolveFormulaScope(cfg, cityPath, stderr)
 			if err != nil {
+				return formulaCommandError(stderr, "gc formula cook", jsonOutput, err)
+			}
+			gate := newManagedProductDispatchGate(
+				cityPath,
+				cfg,
+				configRevisionForLoadedCity(cityPath, cfg, provenance),
+				openCityRecorderAt(cityPath, stderr),
+			)
+			if err := gate.Verify(scope.rig); err != nil {
 				return formulaCommandError(stderr, "gc formula cook", jsonOutput, err)
 			}
 			store, err := openStoreAtForCity(scope.storeRoot, cityPath)

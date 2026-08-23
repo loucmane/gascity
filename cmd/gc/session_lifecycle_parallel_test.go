@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/agent"
+	"github.com/gastownhall/gascity/internal/api"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/clock"
 	"github.com/gastownhall/gascity/internal/config"
@@ -902,6 +903,9 @@ func TestPrepareStartCandidateReloadsOverridesBeforeWake(t *testing.T) {
 	}
 	if !strings.Contains(prepared.cfg.Command, "--ask-for-approval never") {
 		t.Fatalf("prepared.cfg.Command = %q, want reloaded permission override", prepared.cfg.Command)
+	}
+	if got := shellquote.Join(prepared.managedWorkerArgv); got != "codex --ask-for-approval never" {
+		t.Fatalf("managedWorkerArgv = %q, want stable policy argv without dynamic resume key", got)
 	}
 	want := "codex resume --ask-for-approval never abc-123"
 	if prepared.cfg.Command != want {
@@ -4195,6 +4199,75 @@ func TestCommitStartResult_RollbackPendingErrorClearsInFlightLeaseWhenCloseFails
 	}
 	if pendingCreateStartInFlightInfo(sessiontest.SeedBead(t, updated), clk, 0) {
 		t.Fatal("rollback-pending error left the pending-create bead leased")
+	}
+}
+
+func TestCommitStartResult_StartupDeathEmitsCrashAttention(t *testing.T) {
+	store := beads.NewMemStore()
+	clk := &clock.Fake{Time: time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)}
+	session, err := store.Create(beads.Bead{
+		ID:     "gc-dead-startup",
+		Title:  "dead-startup",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: creatingMeta(map[string]string{
+			"session_name":         "dead-startup",
+			"template":             "issue-triager",
+			"agent_name":           "issue-triager",
+			"generation":           "1",
+			"instance_token":       "tok-dead-startup",
+			"pending_create_claim": "true",
+			"last_woke_at":         clk.Now().Format(time.RFC3339),
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := startResult{
+		prepared: preparedStart{
+			candidate: startCandidate{
+				info: sessiontest.SeedBead(t, session),
+				tp: TemplateParams{
+					Command:      "worker",
+					SessionName:  "dead-startup",
+					TemplateName: "issue-triager",
+					InstanceName: "dead-startup",
+				},
+			},
+		},
+		err:             fmt.Errorf("resuming session: %w", runtime.ErrSessionDiedDuringStartup),
+		outcome:         "provider_error",
+		started:         clk.Now(),
+		finished:        clk.Now(),
+		rollbackPending: true,
+	}
+	rec := events.NewFake()
+
+	if commitStartResult(result, sessionFrontDoor(store), clk, rec, 0, ioDiscard{}, ioDiscard{}) {
+		t.Fatal("startup-death rollback should not count as committed")
+	}
+	if len(rec.Events) != 1 {
+		t.Fatalf("events = %v, want exactly one crash attention event", rec.Events)
+	}
+	event := rec.Events[0]
+	if event.Type != events.SessionCrashed {
+		t.Fatalf("event type = %q, want %q", event.Type, events.SessionCrashed)
+	}
+	if event.SessionID != session.ID {
+		t.Fatalf("event session_id = %q, want %q", event.SessionID, session.ID)
+	}
+	if event.Subject != "dead-startup" {
+		t.Fatalf("event subject = %q, want %q", event.Subject, "dead-startup")
+	}
+	if !strings.Contains(event.Message, "session died during startup") {
+		t.Fatalf("event message = %q, want startup-death diagnostic", event.Message)
+	}
+	var payload api.SessionLifecyclePayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("decode lifecycle payload: %v", err)
+	}
+	if payload.SessionID != session.ID || payload.Template != "issue-triager" || payload.Reason != "session died during startup" {
+		t.Fatalf("payload = %+v, want session=%q template=%q startup-death reason", payload, session.ID, "issue-triager")
 	}
 }
 

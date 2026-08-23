@@ -3059,6 +3059,21 @@
       "id": 1
     },
     {
+      "path": "gc platform canary",
+      "aliases": [],
+      "conditional_modes": [],
+      "hidden": false,
+      "effective_hidden": false,
+      "disable_flag_parsing": false,
+      "shape": "runnable",
+      "recording_policy": "recordable",
+      "mode": "standard",
+      "notice_policy": "eligible",
+      "classification": "platform-canary",
+      "owner": "immediate",
+      "id": 200
+    },
+    {
       "path": "gc platform install",
       "aliases": [],
       "conditional_modes": [],

@@ -340,6 +340,27 @@ func inspectProvider(ctx context.Context, report *IntegrityReport, pin ProviderP
 	}
 }
 
+// VerifyProviderPin independently verifies one provider entrypoint, resolved
+// executable, digest, executable bit, and version. It is the narrow public
+// boundary used by the managed-worker start preflight; callers do not need to
+// manufacture a platform manifest to inspect one provider.
+func VerifyProviderPin(ctx context.Context, pin ProviderPin) error {
+	if err := validateIntegritySpec(&IntegritySpec{Providers: []ProviderPin{pin}}); err != nil {
+		return err
+	}
+	report := IntegrityReport{}
+	inspectProvider(ctx, &report, pin)
+	if len(report.Drifts) == 0 {
+		return nil
+	}
+	sort.Slice(report.Drifts, func(i, j int) bool { return report.Drifts[i].Field < report.Drifts[j].Field })
+	parts := make([]string, 0, len(report.Drifts))
+	for _, drift := range report.Drifts {
+		parts = append(parts, fmt.Sprintf("%s: got %q want %q", drift.Field, drift.Actual, drift.Expected))
+	}
+	return fmt.Errorf("provider pin drift: %s", strings.Join(parts, "; "))
+}
+
 func runInspectionCommand(ctx context.Context, name string, args ...string) (string, error) {
 	commandCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

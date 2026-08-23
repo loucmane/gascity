@@ -66,6 +66,8 @@ type SlingOpts struct {
 	InlineText bool
 	ScopeKind  string
 	ScopeRef   string
+	// dispatchGatePassed is internal recursion state for convoy expansion.
+	dispatchGatePassed bool
 }
 
 // AgentResolver resolves an agent name to a config.Agent.
@@ -135,6 +137,9 @@ type SlingDeps struct {
 	// source store identified by StoreRef is always strict and is never skipped.
 	SourceWorkflowStoreScanWarning func(storeRef string, err error)
 	Tracer                         func(format string, args ...any)
+	// DispatchGate refuses work routing before any bead or workflow mutation.
+	// Composition roots provide it only for managed-product policy.
+	DispatchGate func(rigName string) error
 
 	// Narrow interfaces (matches established internal package patterns).
 	Resolver AgentResolver  // agent name resolution

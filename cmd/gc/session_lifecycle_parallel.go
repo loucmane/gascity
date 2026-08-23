@@ -21,6 +21,7 @@ import (
 	"github.com/gastownhall/gascity/internal/clock"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/events"
+	"github.com/gastownhall/gascity/internal/managedworker"
 	"github.com/gastownhall/gascity/internal/runtime"
 	sessionpkg "github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/shellquote"
@@ -210,13 +211,19 @@ func (c startCandidate) logicalTemplate(cfg *config.City) string {
 }
 
 type preparedStart struct {
-	candidate     startCandidate
-	cfg           runtime.Config
-	coreHash      string
-	coreBreakdown runtime.BreakdownV1
-	liveHash      string
-	provisionHash string
-	launchHash    string
+	candidate startCandidate
+	cfg       runtime.Config
+	preflight func(context.Context) error
+	// managedWorkerArgv is the policy-bearing provider argv after schema and
+	// per-dispatch options, but before per-session resume/fork identifiers are
+	// appended. Provisioning receipts are role/profile authority and therefore
+	// must not depend on a newly minted session UUID.
+	managedWorkerArgv []string
+	coreHash          string
+	coreBreakdown     runtime.BreakdownV1
+	liveHash          string
+	provisionHash     string
+	launchHash        string
 	// promptDelivered reports whether THIS incarnation actually delivers the
 	// rendered startup prompt (S19 confirmation signal 1). It is the pure
 	// promptDelivery decision AND-ed with the fresh-launch condition, i.e. the
@@ -293,16 +300,19 @@ func (p startPhaseTimings) formatLog() string {
 }
 
 type startExecutionOptions struct {
-	async                          bool
-	asyncFollowUp                  func()
-	asyncLimiter                   *asyncStartLimiter
-	asyncTracker                   *asyncStartTracker
-	asyncStopTracker               *asyncStartTracker
-	maxSessionAgeTr                maxSessionAgeTracker
-	assignedWorkDeferTr            assignedWorkDeferTracker
-	workDirResolver                taskWorkDirResolver
-	stabilityWaiter                startStabilityWaiter
-	sessionStaleKeyDetectionWaiter sessionpkg.StaleKeyDetectionWaiter
+	async                           bool
+	asyncFollowUp                   func()
+	asyncLimiter                    *asyncStartLimiter
+	asyncTracker                    *asyncStartTracker
+	asyncStopTracker                *asyncStartTracker
+	maxSessionAgeTr                 maxSessionAgeTracker
+	assignedWorkDeferTr             assignedWorkDeferTracker
+	workDirResolver                 taskWorkDirResolver
+	checkPathResolver               taskCheckPathResolver
+	managedWorkerPermissionRevision string
+	managedWorkerProbes             *managedworker.Probes
+	stabilityWaiter                 startStabilityWaiter
+	sessionStaleKeyDetectionWaiter  sessionpkg.StaleKeyDetectionWaiter
 	// deferSessionClosesOnBoot suppresses the per-session orphan/failed-create
 	// session-bead closes during the synchronous boot reconcile. Those closes
 	// gate on a per-session open-work probe that reads the wisp tier
@@ -370,6 +380,18 @@ func withAssignedWorkDeferTracker(tr assignedWorkDeferTracker) startExecutionOpt
 func withTaskWorkDirResolver(resolver taskWorkDirResolver) startExecutionOption {
 	return func(opts *startExecutionOptions) {
 		opts.workDirResolver = resolver
+	}
+}
+
+func withTaskCheckPathResolver(resolver taskCheckPathResolver) startExecutionOption {
+	return func(opts *startExecutionOptions) {
+		opts.checkPathResolver = resolver
+	}
+}
+
+func withManagedWorkerPermissionRevision(revision string) startExecutionOption {
+	return func(opts *startExecutionOptions) {
+		opts.managedWorkerPermissionRevision = strings.TrimSpace(revision)
 	}
 }
 
@@ -985,6 +1007,7 @@ func buildPreparedStartWithWorkDirResolver(
 			return nil, candidate.info, fmt.Errorf("session %q: %w", candidate.name(), err)
 		}
 	}
+	managedWorkerArgv := shellquote.Split(strings.TrimSpace(agentCfg.Command))
 
 	preOverrideWorkDir := agentCfg.WorkDir
 	if wd := resolvePreparedTaskWorkDir(candidate, cityPath, cfg, store, workDirResolver); wd != "" {
@@ -1175,15 +1198,16 @@ func buildPreparedStartWithWorkDirResolver(
 	}
 	agentCfg = runtime.SyncWorkDirEnv(agentCfg)
 	return &preparedStart{
-		candidate:       candidate,
-		cfg:             agentCfg,
-		coreHash:        coreHash,
-		coreBreakdown:   coreBreakdown,
-		liveHash:        liveHash,
-		provisionHash:   provisionHash,
-		launchHash:      launchHash,
-		promptDelivered: promptDelivered,
-		promptHash:      promptHash,
+		candidate:         candidate,
+		cfg:               agentCfg,
+		managedWorkerArgv: managedWorkerArgv,
+		coreHash:          coreHash,
+		coreBreakdown:     coreBreakdown,
+		liveHash:          liveHash,
+		provisionHash:     provisionHash,
+		launchHash:        launchHash,
+		promptDelivered:   promptDelivered,
+		promptHash:        promptHash,
 	}, candidate.info, nil
 }
 
@@ -1890,6 +1914,11 @@ func startPreparedStartCandidate(
 			}
 		}
 	}
+	if item.preflight != nil {
+		if err := item.preflight(ctx); err != nil {
+			return false, fmt.Errorf("managed-worker preflight: %w", err)
+		}
+	}
 	if store == nil || strings.TrimSpace(item.candidate.info.ID) == "" {
 		handle, err := runtimeWorkerHandleWithConfig(
 			cityPath,
@@ -2227,6 +2256,16 @@ func commitStartFailure(result startResult, sessFront *sessionpkg.Store, clk clo
 	name := result.prepared.candidate.name()
 	tp := result.prepared.candidate.tp
 	fmt.Fprintf(stderr, "session reconciler: starting %s: %s\n", name, formatLifecycleError(result.err)) //nolint:errcheck
+	var preflightFailure *managedworker.Failure
+	if errors.As(result.err, &preflightFailure) && rec != nil {
+		rec.Record(events.Event{
+			Type:      events.ManagedWorkerPreflightFailed,
+			Actor:     "controller",
+			Subject:   preflightFailure.Profile,
+			SessionID: info.ID,
+			Message:   preflightFailure.Error(),
+		})
+	}
 	if reason := runtime.ProviderTerminalErrorReason(result.err.Error()); reason != "" {
 		// This runs on the async start goroutine, and this failure arm is terminal
 		// (logs + returns), so the write-returns-Info fold is discarded — never assign
@@ -2277,6 +2316,22 @@ func commitStartFailure(result startResult, sessFront *sessionpkg.Store, clk clo
 				Subject: name,
 				Message: fmt.Sprintf("session %q cold start timed out", name),
 			})
+		}
+		if errors.Is(result.err, runtime.ErrSessionDiedDuringStartup) {
+			diagnostic := formatLifecycleError(result.err)
+			rec.Record(events.Event{
+				Type:      events.SessionCrashed,
+				Actor:     "gc",
+				Subject:   tp.DisplayName(),
+				SessionID: info.ID,
+				Message:   diagnostic,
+				Payload: api.SessionLifecyclePayloadJSON(
+					info.ID,
+					tp.TemplateName,
+					"session died during startup",
+				),
+			})
+			telemetry.RecordAgentCrash(context.Background(), tp.DisplayName(), diagnostic)
 		}
 		// A rolled-back pending create is closed and recreated fresh on the
 		// next tick, so it deliberately does not record a wake failure (see
@@ -2856,6 +2911,7 @@ func executePlannedStartsTraced(
 					logLifecycleOutcome(stderr, "start", wave, candidate.name(), candidate.logicalTemplate(cfg), "failed", time.Time{}, time.Time{}, err)
 					continue
 				}
+				configureManagedWorkerPreflight(item, cityPath, cfg, startOpts.managedWorkerPermissionRevision, startOpts.checkPathResolver, startOpts.managedWorkerProbes)
 				if startOpts.async {
 					asyncPrepared = append(asyncPrepared, asyncPreparedStart{item: *item, release: release, done: done})
 				} else {

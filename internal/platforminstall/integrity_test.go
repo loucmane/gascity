@@ -97,6 +97,24 @@ func TestInspectIntegrityReportsProviderDigestAndVersionDrift(t *testing.T) {
 	}
 }
 
+func TestVerifyProviderPinChecksTheExactExecutable(t *testing.T) {
+	dir := t.TempDir()
+	manifest := integrityManifest(t, dir)
+	if _, err := Install(manifest); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	pin := manifest.Integrity.Providers[0]
+	if err := VerifyProviderPin(context.Background(), pin); err != nil {
+		t.Fatalf("VerifyProviderPin() error = %v", err)
+	}
+	if err := os.WriteFile(pin.ResolvedPath, []byte("#!/bin/sh\nprintf 'drifted\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyProviderPin(context.Background(), pin); err == nil || !strings.Contains(err.Error(), "provider pin drift") {
+		t.Fatalf("VerifyProviderPin() drift error = %v", err)
+	}
+}
+
 func TestInspectIntegrityReportsReceiptSelfDigestDrift(t *testing.T) {
 	dir := t.TempDir()
 	manifest := integrityManifest(t, dir)

@@ -210,7 +210,7 @@
               "platform-install",
               "platform-rollback",
               "platform-manifest",
-              "convoy-retry-drain-item"
+              "platform-canary"
             ]
           },
           "event_id": {

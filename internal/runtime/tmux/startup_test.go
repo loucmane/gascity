@@ -934,6 +934,39 @@ func TestDoStartSessionReturnsNudgeDeliveryError(t *testing.T) {
 		"hasSession",
 		"isSessionRunning",
 		"sendKeys",
+		"hasSession",
+		"isSessionRunning",
+	})
+}
+
+func TestDoStartSessionNudgeFailureAfterSessionDeathReturnsTypedStartupDeath(t *testing.T) {
+	ops := &fakeStartOps{
+		hasSessionResult: true,
+		sendKeysErr:      ErrNoCurrentTarget,
+	}
+	ops.sendKeysHook = func() {
+		ops.hasSessionResult = false
+	}
+
+	err := doStartSession(
+		context.Background(),
+		ops,
+		"test",
+		runtime.Config{Command: "worker", Nudge: "start"},
+		DefaultConfig().SetupTimeout,
+	)
+	if !errors.Is(err, runtime.ErrSessionDiedDuringStartup) {
+		t.Fatalf("error = %v, want ErrSessionDiedDuringStartup", err)
+	}
+
+	assertCallSequence(t, ops, []string{
+		"createSession",
+		"setRemainOnExit",
+		"disableMouseAndActivity",
+		"hasSession",
+		"isSessionRunning",
+		"sendKeys",
+		"hasSession",
 	})
 }
 

@@ -2507,6 +2507,10 @@
           "type": "string",
           "description": "Name is the unique identifier for this rig."
         },
+        "managed_product": {
+          "type": "boolean",
+          "description": "ManagedProduct requires a current, exact canary receipt before work may\nbe cooked or routed into this rig. Control-plane rigs leave it false."
+        },
         "path": {
           "type": "string",
           "description": "Path is the absolute filesystem path to the rig's repository."
@@ -2606,6 +2610,10 @@
         "name": {
           "type": "string",
           "description": "Name is the targeting key (required). Must match an existing rig's name."
+        },
+        "managed_product": {
+          "type": "boolean",
+          "description": "ManagedProduct overrides the rig's receipt-gated dispatch policy."
         },
         "path": {
           "type": "string",

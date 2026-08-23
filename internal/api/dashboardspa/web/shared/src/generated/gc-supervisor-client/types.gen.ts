@@ -2681,6 +2681,7 @@ export type RigPatch = {
     FormulaVars: {
         [key: string]: string;
     };
+    ManagedProduct: boolean | null;
     Name: string;
     Path: string | null;
     Prefix: string | null;

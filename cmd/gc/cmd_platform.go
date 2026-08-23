@@ -27,6 +27,7 @@ func newPlatformCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(
+		newPlatformCanaryCmd(stdout, stderr),
 		newPlatformInstallCmd(stdout, stderr),
 		newPlatformManifestCmd(stdout, stderr),
 		newPlatformRollbackCmd(stdout, stderr),
