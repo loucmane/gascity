@@ -1333,6 +1333,7 @@ export const zRigCreateSucceededPayload = z.object({
 export const zRigPatch = z.object({
     DefaultBranch: z.string().nullable(),
     FormulaVars: z.record(z.string(), z.string()),
+    ManagedProduct: z.boolean().nullable(),
     Name: z.string(),
     Path: z.string().nullable(),
     Prefix: z.string().nullable(),

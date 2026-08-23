@@ -3194,6 +3194,7 @@ type RigCreateSucceededPayload struct {
 type RigPatch struct {
 	DefaultBranch    *string           `json:"DefaultBranch"`
 	FormulaVars      map[string]string `json:"FormulaVars"`
+	ManagedProduct   *bool             `json:"ManagedProduct"`
 	Name             string            `json:"Name"`
 	Path             *string           `json:"Path"`
 	Prefix           *string           `json:"Prefix"`

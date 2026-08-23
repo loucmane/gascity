@@ -229,6 +229,11 @@ const (
 	// adds its typed SSE projection.
 	ManagedWorkerPreflightFailed = "managed_worker.preflight_failed"
 
+	// ManagedProductDispatchRefused is emitted synchronously when a managed
+	// product formula cook or route is refused because its current canary
+	// receipt is missing, invalid, or stale.
+	ManagedProductDispatchRefused = "managed_product.dispatch_refused"
+
 	// Emergency events are dolt-independent escalation records written to
 	// .gc/emergency and mirrored into the city event log.
 	EmergencySignaled = "emergency.signaled"
@@ -289,7 +294,8 @@ var KnownEventTypes = []string{
 	PostgresCredentialResolved,
 	EmergencySignaled, EmergencyAcked,
 	BeadsConditionalWritesDegraded,
-	// ProviderHealthGateAlert and ManagedWorkerPreflightFailed are intentionally
+	// ProviderHealthGateAlert, ManagedWorkerPreflightFailed, and
+	// ManagedProductDispatchRefused are intentionally
 	// omitted from KnownEventTypes. They are emitted by the reconciler but their
 	// typed SSE payloads are not yet registered in internal/api. Until the
 	// attention-funnel follow-up lands, subscribers receive them via the

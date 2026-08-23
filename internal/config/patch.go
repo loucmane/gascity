@@ -199,6 +199,8 @@ type PoolOverride struct {
 type RigPatch struct {
 	// Name is the targeting key (required). Must match an existing rig's name.
 	Name string `toml:"name" jsonschema:"required"`
+	// ManagedProduct overrides the rig's receipt-gated dispatch policy.
+	ManagedProduct *bool `toml:"managed_product,omitempty"`
 	// Path overrides the rig's filesystem path.
 	Path *string `toml:"path,omitempty"`
 	// Prefix overrides the bead ID prefix.
@@ -645,6 +647,9 @@ func applyRigPatch(cfg *City, patch *RigPatch) error {
 	for i := range cfg.Rigs {
 		r := &cfg.Rigs[i]
 		if r.Name == patch.Name {
+			if patch.ManagedProduct != nil {
+				r.ManagedProduct = *patch.ManagedProduct
+			}
 			if patch.Path != nil {
 				r.Path = *patch.Path
 			}
