@@ -1578,6 +1578,18 @@ type nativeDoltTx struct {
 	tx    beadslib.Transaction
 }
 
+func (t *nativeDoltTx) Get(id string) (Bead, error) {
+	issue, err := t.tx.GetIssue(t.ctx, id)
+	if err != nil {
+		return Bead{}, nativeStoreError(id, err)
+	}
+	bead, err := beadFromNativeIssue(issue)
+	if err != nil {
+		return Bead{}, nativeStoreError(id, err)
+	}
+	return bead, nil
+}
+
 func (t *nativeDoltTx) Create(b Bead) (Bead, error) {
 	return t.store.applyCreateInTx(t.ctx, t.tx, b)
 }
@@ -1595,6 +1607,18 @@ func (t *nativeDoltTx) SetMetadataBatch(id string, kvs map[string]string) error 
 
 func (t *nativeDoltTx) Close(id string) error {
 	return t.store.applyCloseInTx(t.ctx, t.tx, id)
+}
+
+func (t *nativeDoltTx) DepAdd(issueID, dependsOnID, depType string) error {
+	dep := &beadslib.Dependency{
+		IssueID:     issueID,
+		DependsOnID: dependsOnID,
+		Type:        nativeGraphApplyDependencyType(depType),
+	}
+	if err := t.tx.AddDependency(t.ctx, dep, t.store.actor); err != nil {
+		return nativeStoreError(issueID, err)
+	}
+	return nil
 }
 
 // Delete permanently removes a bead from the upstream beads storage layer.

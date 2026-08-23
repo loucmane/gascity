@@ -359,6 +359,16 @@ type Tx interface {
 	Close(id string) error
 }
 
+// GraphTx is the additional read/dependency surface required when a caller
+// creates a graph and swaps references to it in one transaction. It is kept
+// separate from Tx so ordinary transactional writers and their test doubles do
+// not acquire speculative methods they never use.
+type GraphTx interface {
+	Tx
+	Get(id string) (Bead, error)
+	DepAdd(issueID, dependsOnID, depType string) error
+}
+
 func runSequentialTx(tx Tx, fn func(Tx) error) error {
 	if fn == nil {
 		return errors.New("beads tx: nil callback")

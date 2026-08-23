@@ -114,6 +114,26 @@ Depends on `on_item_failure`:
   with a partial-success outcome after all items finish.
 - `"skip_remaining"` — no new items start after the first failure.
 
+**Q: How do I retry one item after its workflow failed?**
+
+Do not reopen the failed prepare step, delete its workflow, or edit
+`gc.drain_manifest.v1` by hand. After correcting the source member's durable
+inputs, use the append-forward recovery command:
+
+```bash
+gc convoy retry-drain-item <drain-control-id> <member-id> --apply
+```
+
+The command accepts only an open drain with one unambiguous persisted manifest
+row whose current item workflow contains terminal failure evidence. It compiles
+the replacement from that root's absolute pinned `gc.formula_source` and frozen
+`gc.graphv2_vars.v1`, then atomically creates the replacement, preserves the
+drain/unit/source/dependency identity, closes the old subtree as linked failure
+evidence, and swaps the manifest's `item_root_id`. A repeated invocation returns
+the same replacement. Successful, non-terminal, ambiguous, concurrently changed,
+or non-transactional states are refused without mutation and emit an operator
+attention trace.
+
 **Q: Do drain items respect dependencies between convoy members?**
 
 Yes. New drains materialize members in dependency order, and a member that

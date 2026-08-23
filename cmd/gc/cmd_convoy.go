@@ -57,11 +57,12 @@ subsystem. The convoy lifecycle subcommands (create, list, status,
 target, add, close, check, stranded, land) do not operate on
 workflow roots; the dispatch subcommands (control, delete,
 delete-source, reopen-source) manage workflow trees and their
-control beads.`,
+control beads. retry-drain-item performs an atomic append-forward
+replacement of one terminally failed drain-item workflow.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc convoy: missing subcommand (create, list, status, target, add, close, check, stranded, land)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc convoy: missing subcommand (create, list, status, target, add, close, check, stranded, land, retry-drain-item)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc convoy: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}

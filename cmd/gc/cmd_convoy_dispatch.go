@@ -40,11 +40,88 @@ func sourceWorkflowCommandContext() (context.Context, context.CancelFunc) {
 func convoyDispatchSubcommands(stdout, stderr io.Writer) []*cobra.Command {
 	return []*cobra.Command{
 		newConvoyControlCmd(stdout, stderr),
+		newConvoyRetryDrainItemCmd(stdout, stderr),
 		newConvoyPokeCmd(stdout, stderr),
 		newConvoyDeleteCmd(stdout, stderr),
 		newConvoyDeleteSourceCmd(stdout, stderr),
 		newConvoyReopenSourceCmd(stdout, stderr),
 	}
+}
+
+func newConvoyRetryDrainItemCmd(stdout, stderr io.Writer) *cobra.Command {
+	var apply bool
+	cmd := &cobra.Command{
+		Use:   "retry-drain-item <drain-control-id> <member-id>",
+		Short: "Append-forward replace one terminally failed drain-item workflow",
+		Long: `Replace one terminally failed drain-item workflow without reopening or
+deleting its failure evidence. The replacement is instantiated from the exact
+pinned formula source and frozen runtime variables recorded on the failed root.
+The old subtree retirement, replacement creation, dependency rewiring, and
+manifest pointer swap commit atomically. --apply is required.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if !apply {
+				_, _ = fmt.Fprintln(stderr, "gc convoy retry-drain-item: refusing mutation without --apply")
+				return errExit
+			}
+			if err := runRetryFailedDrainItem(args[0], args[1], stdout, stderr); err != nil {
+				_, _ = fmt.Fprintf(stderr, "gc convoy retry-drain-item: %v\n", err)
+				return errExit
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&apply, "apply", false, "Commit the append-forward replacement atomically")
+	return cmd
+}
+
+func runRetryFailedDrainItem(controlID, memberID string, stdout, stderr io.Writer) error {
+	cityPath, err := resolveCity()
+	if err != nil {
+		return err
+	}
+	store, control, storePath, err := findBeadAcrossStores(cityPath, controlID, stderr)
+	if err != nil {
+		return fmt.Errorf("loading drain control %s: %w", controlID, err)
+	}
+	if strings.TrimSpace(control.Metadata[beadmeta.KindMetadataKey]) != beadmeta.KindDrain {
+		return fmt.Errorf("%s is not a drain control", controlID)
+	}
+	cfg, err := loadCityConfig(cityPath, stderr)
+	if err != nil {
+		return err
+	}
+	resolveRigPaths(cityPath, cfg.Rigs)
+	warnLegacyWorkflowTracePath(cityPath, cfg.Rigs, stderr)
+
+	cityName := loadedCityName(cfg, cityPath)
+	storeRef := workflowStoreRefForDir(storePath, cityPath, cityName, cfg)
+	opts := dispatch.ProcessOptions{
+		CityPath:           cityPath,
+		StorePath:          storePath,
+		FormulaSearchPaths: workflowFormulaSearchPaths(cfg, control),
+		Tracef: func(format string, args ...any) {
+			_, _ = fmt.Fprintf(stderr, format+"\n", args...)
+		},
+	}
+	opts.PrepareRecipe = func(recipe *formula.Recipe, source beads.Bead) error {
+		return decorateDrainItemRecipe(recipe, source, store, storeRef, cityName, cityPath, cfg)
+	}
+
+	ctx, cancel := sourceWorkflowCommandContext()
+	defer cancel()
+	result, err := dispatch.RetryFailedDrainItem(ctx, store, controlID, memberID, opts)
+	if err != nil {
+		return err
+	}
+	if result.AlreadyReplaced {
+		_, _ = fmt.Fprintf(stdout, "drain item already replaced: control=%s member=%s old_root=%s new_root=%s\n",
+			controlID, memberID, result.OldRootID, result.NewRootID)
+		return nil
+	}
+	_, _ = fmt.Fprintf(stdout, "drain item replaced: control=%s member=%s old_root=%s new_root=%s\n",
+		controlID, memberID, result.OldRootID, result.NewRootID)
+	return nil
 }
 
 // newWorkflowCmd returns a hidden alias for backwards compatibility.
