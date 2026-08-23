@@ -120,13 +120,24 @@ auto-export behavior, invoke bd directly.`,
 // called only to decide which store a bd invocation is scoped to, so it takes
 // the city config the caller already loaded: without it, every candidate probe
 // re-loaded the whole city config inside the store open.
-var bdBeadExists = func(cityPath string, cfg *config.City, target execStoreTarget, beadID string) bool {
-	store, err := openStoreAtForCityWithConfig(target.ScopeRoot, cityPath, cfg)
-	if err != nil {
-		return false
+var openBdBeadProbeStoreForTest func(string, string, *config.City) (beads.Store, error)
+
+var bdBeadExists = func(cityPath string, cfg *config.City, target execStoreTarget, beadID string) (bool, error) {
+	var store beads.Store
+	var err error
+	if openBdBeadProbeStoreForTest != nil {
+		store, err = openBdBeadProbeStoreForTest(target.ScopeRoot, cityPath, cfg)
+	} else {
+		store, err = openStoreAtForCityWithConfig(target.ScopeRoot, cityPath, cfg)
 	}
-	bead, err := store.Get(beadID)
-	return err == nil && strings.TrimSpace(bead.ID) != ""
+	if err != nil {
+		return false, nil
+	}
+	bead, getErr := store.Get(beadID)
+	if closeErr := closeBeadStoreHandle(store); closeErr != nil {
+		return false, fmt.Errorf("close bd scope probe store for %s: %w", target.ScopeRoot, closeErr)
+	}
+	return getErr == nil && strings.TrimSpace(bead.ID) != "", nil
 }
 
 func bdCommandEnv(cityPath string, cfg *config.City, target execStoreTarget) ([]string, error) {
@@ -620,7 +631,11 @@ func resolveBdScopeTarget(cfg *config.City, cityPath, rigName string, args []str
 			if strings.HasPrefix(arg, "-") || beadPrefix(cfg, arg) != cityPrefix {
 				continue
 			}
-			if bdBeadExists(cityPath, cfg, cityTarget, arg) {
+			exists, probeErr := bdBeadExists(cityPath, cfg, cityTarget, arg)
+			if probeErr != nil {
+				return execStoreTarget{}, probeErr
+			}
+			if exists {
 				return cityTarget, nil
 			}
 		}
@@ -639,7 +654,11 @@ func resolveBdScopeTarget(cfg *config.City, cityPath, rigName string, args []str
 				continue
 			}
 			target := bdRigScopeTarget(cityPath, rig)
-			if bdBeadExists(cityPath, cfg, target, arg) {
+			exists, probeErr := bdBeadExists(cityPath, cfg, target, arg)
+			if probeErr != nil {
+				return execStoreTarget{}, probeErr
+			}
+			if exists {
 				return target, nil
 			}
 		}

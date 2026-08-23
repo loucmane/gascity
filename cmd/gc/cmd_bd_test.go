@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -164,6 +165,102 @@ func TestExtractBdDirectoryFlag(t *testing.T) {
 	}
 }
 
+// lateBdProbeWriterStore models the production failure that made the
+// worktree-consistency fixture race testing.TempDir cleanup: opening the
+// short-lived native probe store leaves an owned writer alive unless the
+// caller closes the store before returning. The writer is deterministic — it
+// writes only when the test announces the cleanup boundary — so this test
+// does not depend on scheduler timing to reproduce the late write.
+type lateBdProbeWriterStore struct {
+	*beads.MemStore
+	cleanupStarted chan struct{}
+	stop           chan struct{}
+	done           chan struct{}
+	startOnce      sync.Once
+	stopOnce       sync.Once
+	latePath       string
+	closeErr       error
+}
+
+func newLateBdProbeWriterStore(latePath string) *lateBdProbeWriterStore {
+	return &lateBdProbeWriterStore{
+		MemStore:       beads.NewMemStore(),
+		cleanupStarted: make(chan struct{}),
+		stop:           make(chan struct{}),
+		done:           make(chan struct{}),
+		latePath:       latePath,
+	}
+}
+
+func (s *lateBdProbeWriterStore) Get(id string) (beads.Bead, error) {
+	s.startOnce.Do(func() {
+		go func() {
+			defer close(s.done)
+			select {
+			case <-s.stop:
+				return
+			case <-s.cleanupStarted:
+				_ = os.WriteFile(s.latePath, []byte("late\n"), 0o600)
+			}
+		}()
+	})
+	return beads.Bead{ID: id}, nil
+}
+
+func (s *lateBdProbeWriterStore) CloseStore() error {
+	s.stopOnce.Do(func() { close(s.stop) })
+	<-s.done
+	return s.closeErr
+}
+
+func TestBdBeadExistsQuiescesProbeStoreBeforeReturning(t *testing.T) {
+	root := t.TempDir()
+	latePath := filepath.Join(root, "late-writer")
+	store := newLateBdProbeWriterStore(latePath)
+	originalOpen := openBdBeadProbeStoreForTest
+	openBdBeadProbeStoreForTest = func(string, string, *config.City) (beads.Store, error) {
+		return store, nil
+	}
+	t.Cleanup(func() {
+		openBdBeadProbeStoreForTest = originalOpen
+		_ = store.CloseStore()
+	})
+
+	exists, err := bdBeadExists("/city", nil, execStoreTarget{ScopeRoot: "/rig"}, "rig-1")
+	if err != nil {
+		t.Fatalf("bdBeadExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("bdBeadExists = false, want true")
+	}
+
+	close(store.cleanupStarted)
+	<-store.done
+	if _, err := os.Stat(latePath); err == nil {
+		t.Fatalf("probe store writer survived until temp cleanup and created %s", latePath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat late writer path: %v", err)
+	}
+}
+
+func TestBdBeadExistsSurfacesProbeStoreCloseFailure(t *testing.T) {
+	store := newLateBdProbeWriterStore(filepath.Join(t.TempDir(), "late-writer"))
+	store.closeErr = errors.New("injected close failure")
+	originalOpen := openBdBeadProbeStoreForTest
+	openBdBeadProbeStoreForTest = func(string, string, *config.City) (beads.Store, error) {
+		return store, nil
+	}
+	t.Cleanup(func() { openBdBeadProbeStoreForTest = originalOpen })
+
+	exists, err := bdBeadExists("/city", nil, execStoreTarget{ScopeRoot: "/rig"}, "rig-1")
+	if exists {
+		t.Fatal("bdBeadExists = true after close failure, want false")
+	}
+	if err == nil || !strings.Contains(err.Error(), "injected close failure") {
+		t.Fatalf("bdBeadExists error = %v, want surfaced close failure", err)
+	}
+}
+
 func TestResolveBdScopeTarget(t *testing.T) {
 	// Isolate cwd from any ambient `.beads/redirect` in the working tree
 	// (e.g. when `make test` runs from a polecat/crew worktree, the worktree's
@@ -174,8 +271,8 @@ func TestResolveBdScopeTarget(t *testing.T) {
 
 	origProbe := bdBeadExists
 	defer func() { bdBeadExists = origProbe }()
-	bdBeadExists = func(_ string, _ *config.City, _ execStoreTarget, beadID string) bool {
-		return beadID == "projectwrenunity-0xk" || beadID == "projectwrenunity-abc"
+	bdBeadExists = func(_ string, _ *config.City, _ execStoreTarget, beadID string) (bool, error) {
+		return beadID == "projectwrenunity-0xk" || beadID == "projectwrenunity-abc", nil
 	}
 	cityDir := filepath.Join(t.TempDir(), "city")
 	cfgForTest := func() *config.City {
@@ -387,7 +484,7 @@ func TestResolveBdScopeTargetUsesGCRIGEnv(t *testing.T) {
 	setCwd(t, t.TempDir())
 	origProbe := bdBeadExists
 	defer func() { bdBeadExists = origProbe }()
-	bdBeadExists = func(_ string, _ *config.City, _ execStoreTarget, _ string) bool { return false }
+	bdBeadExists = func(_ string, _ *config.City, _ execStoreTarget, _ string) (bool, error) { return false, nil }
 
 	cityDir := filepath.Join(t.TempDir(), "city")
 	cfg := &config.City{
@@ -443,8 +540,8 @@ func TestResolveBdScopeTargetUsesGCRIGEnv(t *testing.T) {
 		// Restore bdBeadExists to return true for a wren bead
 		origProbe2 := bdBeadExists
 		defer func() { bdBeadExists = origProbe2 }()
-		bdBeadExists = func(_ string, _ *config.City, target execStoreTarget, beadID string) bool {
-			return beadID == "projectwrenunity-0xk" && target.RigName == "wren"
+		bdBeadExists = func(_ string, _ *config.City, target execStoreTarget, beadID string) (bool, error) {
+			return beadID == "projectwrenunity-0xk" && target.RigName == "wren", nil
 		}
 		got, err := resolveBdScopeTarget(cfg, cityDir, "", []string{"show", "projectwrenunity-0xk"}, false, io.Discard)
 		if err != nil {
@@ -649,8 +746,8 @@ func TestGcBdUsesProjectionNotAmbientEnv(t *testing.T) {
 		rigFlag = origRigFlag
 		bdBeadExists = origProbe
 	}()
-	bdBeadExists = func(_ string, _ *config.City, _ execStoreTarget, beadID string) bool {
-		return beadID == "repo-abc"
+	bdBeadExists = func(_ string, _ *config.City, _ execStoreTarget, beadID string) (bool, error) {
+		return beadID == "repo-abc", nil
 	}
 	cityFlag = ""
 	rigFlag = ""
@@ -896,7 +993,7 @@ func TestGcBdDoesNotAutoRouteHyphenatedFlagValue(t *testing.T) {
 	}()
 	cityFlag = ""
 	rigFlag = ""
-	bdBeadExists = func(string, *config.City, execStoreTarget, string) bool { return false }
+	bdBeadExists = func(string, *config.City, execStoreTarget, string) (bool, error) { return false, nil }
 
 	cityDir := t.TempDir()
 	rigDir := filepath.Join(cityDir, "repo")
@@ -1434,7 +1531,7 @@ func listToMap(env []string) map[string]string {
 func TestResolveBdScopeTargetUsesEnclosingRig(t *testing.T) {
 	origProbe := bdBeadExists
 	defer func() { bdBeadExists = origProbe }()
-	bdBeadExists = func(string, *config.City, execStoreTarget, string) bool { return false }
+	bdBeadExists = func(string, *config.City, execStoreTarget, string) (bool, error) { return false, nil }
 
 	cityDir := filepath.Join(t.TempDir(), "city")
 	rigDir := filepath.Join(cityDir, "frontend")
@@ -1465,8 +1562,8 @@ func TestResolveBdScopeTargetUsesEnclosingRig(t *testing.T) {
 func TestResolveBdScopeTargetRoutesExistingCityBeadFromRigCwd(t *testing.T) {
 	origProbe := bdBeadExists
 	defer func() { bdBeadExists = origProbe }()
-	bdBeadExists = func(_ string, _ *config.City, target execStoreTarget, beadID string) bool {
-		return target.ScopeKind == "city" && beadID == "mc-city1"
+	bdBeadExists = func(_ string, _ *config.City, target execStoreTarget, beadID string) (bool, error) {
+		return target.ScopeKind == "city" && beadID == "mc-city1", nil
 	}
 
 	cityDir := filepath.Join(t.TempDir(), "city")
@@ -1505,7 +1602,7 @@ func TestGcBdRespectsRawCityFlag(t *testing.T) {
 		rigFlag = origRigFlag
 		bdBeadExists = origProbe
 	}()
-	bdBeadExists = func(string, *config.City, execStoreTarget, string) bool { return false }
+	bdBeadExists = func(string, *config.City, execStoreTarget, string) (bool, error) { return false, nil }
 	cityFlag = ""
 	rigFlag = ""
 
@@ -1584,7 +1681,7 @@ func TestGcBdUsesEnclosingRigWhenNoFlag(t *testing.T) {
 		rigFlag = origRigFlag
 		bdBeadExists = origProbe
 	}()
-	bdBeadExists = func(string, *config.City, execStoreTarget, string) bool { return false }
+	bdBeadExists = func(string, *config.City, execStoreTarget, string) (bool, error) { return false, nil }
 	cityFlag = ""
 	rigFlag = ""
 
