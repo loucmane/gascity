@@ -927,11 +927,11 @@ func doStartStandalone(args []string, controllerMode bool, stdout, stderr io.Wri
 	}
 
 	tomlPath := filepath.Join(cityPath, "city.toml")
+	configRev := config.Revision(fsys.OSFS{}, prov, cfg, cityPath)
 	if controllerMode {
 		poolSessions := computePoolSessions(cfg, cityName, cityPath, sp)
 		poolDeathHandlers := computePoolDeathHandlers(cfg, cityName, cityPath, sp, stderr)
 		watchTargets := config.WatchTargets(prov, cfg, cityPath)
-		configRev := config.Revision(fsys.OSFS{}, prov, cfg, cityPath)
 		return runController(cityPath, tomlPath, cfg, configRev, buildAgents, buildAgentsWithSessionBeads, sp,
 			newDrainOps(sp), poolSessions, poolDeathHandlers, watchTargets, recorder, eventProv, stdout, stderr)
 	}
@@ -1032,6 +1032,9 @@ func doStartStandalone(args []string, controllerMode bool, stdout, stderr io.Wri
 	}
 	mergeNamedSessionDemand(poolDesired, dsResult.NamedSessionDemand, cfg)
 	awakeAssignedWorkBeads, awakeAssignedStoreRefs := filterAssignedWorkBeadsForSessionWake(cfg, cityPath, openInfos, dsResult.AssignedWorkBeads, dsResult.AssignedWorkStoreRefs)
+	managedWorkerPreflightWork := make([]beads.Bead, 0, len(awakeAssignedWorkBeads)+len(dsResult.ReadyUnassignedRoutedWorkBeads))
+	managedWorkerPreflightWork = append(managedWorkerPreflightWork, awakeAssignedWorkBeads...)
+	managedWorkerPreflightWork = append(managedWorkerPreflightWork, dsResult.ReadyUnassignedRoutedWorkBeads...)
 	reconcileSessionBeadsAtPathWithNamedDemand(
 		sigCtx, cityPath, sessionBeads.OpenForReconcile(), sessionBeads, ds, cfgNames, cfg, sp, sessStore,
 		nil, awakeAssignedWorkBeads, rigStores, nil, dt, nil, poolDesired,
@@ -1042,6 +1045,8 @@ func doStartStandalone(args []string, controllerMode bool, stdout, stderr io.Wri
 		nil, clock.Real{}, recorder, cfg.Session.StartupTimeoutDuration(), 0,
 		stdout, stderr,
 		withReadyAssignedFlags(readyAssignedFlagsForBeads(dsResult.ReadyAssigned, awakeAssignedWorkBeads, awakeAssignedStoreRefs)),
+		withManagedWorkerPermissionRevision(configRev),
+		withTaskCheckPathResolver(newTaskCheckPathResolver(managedWorkerPreflightWork)),
 	)
 
 	// Post-reconcile sync: update bead state to reflect post-start reality.

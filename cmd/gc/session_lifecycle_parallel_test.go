@@ -903,6 +903,9 @@ func TestPrepareStartCandidateReloadsOverridesBeforeWake(t *testing.T) {
 	if !strings.Contains(prepared.cfg.Command, "--ask-for-approval never") {
 		t.Fatalf("prepared.cfg.Command = %q, want reloaded permission override", prepared.cfg.Command)
 	}
+	if got := shellquote.Join(prepared.managedWorkerArgv); got != "codex --ask-for-approval never" {
+		t.Fatalf("managedWorkerArgv = %q, want stable policy argv without dynamic resume key", got)
+	}
 	want := "codex resume --ask-for-approval never abc-123"
 	if prepared.cfg.Command != want {
 		t.Fatalf("prepared.cfg.Command = %q, want %q", prepared.cfg.Command, want)
