@@ -90,6 +90,7 @@ func dispatchGateFixture(t *testing.T) (managedworker.ProvisioningReceipt, []byt
 	}
 	provisioning, _, err := managedworker.FinalizeProvisioningReceipt(managedworker.ProvisioningReceipt{
 		Schema:             managedworker.ProvisioningReceiptSchemaV1,
+		CanaryRunner:       managedworker.FilePin{Path: "/city/bin/managed-worker-canary", SHA256: dispatchGateDigest("canary-runner")},
 		MemberHeads:        []managedworker.MemberHead{{Name: "gct-xnf", Commit: strings.Repeat("a", 40)}},
 		TemplateCommit:     strings.Repeat("b", 40),
 		Pack:               managedworker.PackPin{Source: "https://example.invalid/pack", Commit: strings.Repeat("c", 40), SHA256: dispatchGateDigest("pack")},
@@ -109,6 +110,7 @@ func dispatchGateFixture(t *testing.T) (managedworker.ProvisioningReceipt, []byt
 	_, canaryData, err := managedworker.FinalizeCanaryReceipt(managedworker.CanaryReceipt{
 		Schema: managedworker.CanaryReceiptSchemaV1, CanaryRunID: "canary-test", IssuedAt: "2026-08-22T08:00:00Z",
 		Result: managedworker.CanaryResultPass, Environment: environment, ProvisioningReceipt: provisioning,
+		Runner:    managedworker.FilePin{Path: "/city/bin/managed-worker-canary", SHA256: dispatchGateDigest("canary-runner")},
 		Scenarios: []managedworker.CanaryScenario{{Name: "clean-launcher", Outcome: managedworker.CanaryResultPass}},
 	})
 	if err != nil {

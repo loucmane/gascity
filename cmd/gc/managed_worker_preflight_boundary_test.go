@@ -86,6 +86,7 @@ func TestConfigureManagedWorkerPreflightUsesProductionReceiptAndRoutedWork(t *te
 	}
 	receipt, encoded, err := managedworker.FinalizeProvisioningReceipt(managedworker.ProvisioningReceipt{
 		Schema:             managedworker.ProvisioningReceiptSchemaV1,
+		CanaryRunner:       managedworker.FilePin{Path: "/city/bin/managed-worker-canary", SHA256: preflightDigest("canary-runner")},
 		MemberHeads:        []managedworker.MemberHead{{Name: "gct-xnf", Commit: strings.Repeat("a", 40)}},
 		TemplateCommit:     strings.Repeat("b", 40),
 		Pack:               managedworker.PackPin{Source: "pack", Commit: strings.Repeat("c", 40), SHA256: preflightDigest("pack")},
