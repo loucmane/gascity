@@ -1128,7 +1128,7 @@ func failIfSessionDiedDuringStartupProbe(ops startOps, name string) error {
 	if alive {
 		return startupDeadSessionError(ops, name)
 	}
-	return nil
+	return startupSessionDiedError(name)
 }
 
 // doStartSession is the pure startup orchestration logic.
@@ -1317,6 +1317,13 @@ func launchOrchestration(ctx context.Context, ops startOps, name string, cfg run
 	}
 	if cfg.Nudge != "" {
 		if err := ops.sendKeys(name, cfg.Nudge); err != nil {
+			// The session can disappear after the liveness check above and before
+			// tmux receives the nudge. Preserve ordinary delivery errors for a
+			// still-live session, but translate that race into the typed startup-
+			// death error consumed by the controller's attention path.
+			if deadErr := failIfSessionDiedDuringStartupProbe(ops, name); errors.Is(deadErr, runtime.ErrSessionDiedDuringStartup) {
+				return deadErr
+			}
 			return fmt.Errorf("sending startup nudge: %w", err)
 		}
 	}

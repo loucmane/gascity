@@ -2317,6 +2317,22 @@ func commitStartFailure(result startResult, sessFront *sessionpkg.Store, clk clo
 				Message: fmt.Sprintf("session %q cold start timed out", name),
 			})
 		}
+		if errors.Is(result.err, runtime.ErrSessionDiedDuringStartup) {
+			diagnostic := formatLifecycleError(result.err)
+			rec.Record(events.Event{
+				Type:      events.SessionCrashed,
+				Actor:     "gc",
+				Subject:   tp.DisplayName(),
+				SessionID: info.ID,
+				Message:   diagnostic,
+				Payload: api.SessionLifecyclePayloadJSON(
+					info.ID,
+					tp.TemplateName,
+					"session died during startup",
+				),
+			})
+			telemetry.RecordAgentCrash(context.Background(), tp.DisplayName(), diagnostic)
+		}
 		// A rolled-back pending create is closed and recreated fresh on the
 		// next tick, so it deliberately does not record a wake failure (see
 		// TestReconcileSessionBeads_RollsBackPendingCreateOnProviderError).
