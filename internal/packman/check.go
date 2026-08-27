@@ -64,13 +64,22 @@ func (r *CheckReport) HasIssues() bool {
 // packs.lock and by already-materialized local cache entries. It does not
 // resolve versions, clone repositories, fetch, or mutate disk state.
 func CheckInstalled(cityRoot string, imports map[string]config.Import) (*CheckReport, error) {
+	return checkInstalledFromRoots(cityRoot, cityRoot, imports)
+}
+
+// checkInstalledFromRoots validates a lockfile staged under lockRoot while
+// resolving top-level local imports relative to importRoot. Normal city checks
+// use the same directory for both. Candidate platform installs intentionally
+// stage pack.toml and packs.lock outside the live city, so their lock authority
+// and import-resolution authority are distinct.
+func checkInstalledFromRoots(lockRoot, importRoot string, imports map[string]config.Import) (*CheckReport, error) {
 	report := &CheckReport{}
 
-	lockExists, err := lockfileExists(cityRoot)
+	lockExists, err := lockfileExists(lockRoot)
 	if err != nil {
 		return nil, err
 	}
-	lock, err := ReadLockfile(fsys.OSFS{}, cityRoot)
+	lock, err := ReadLockfile(fsys.OSFS{}, lockRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +87,7 @@ func CheckInstalled(cityRoot string, imports map[string]config.Import) (*CheckRe
 	if !lockExists && countRemoteImports(imports) > 0 {
 		report.addIssue(CheckIssue{
 			Code:       "missing-lockfile",
-			Path:       filepath.Join(cityRoot, LockfileName),
+			Path:       filepath.Join(lockRoot, LockfileName),
 			Message:    fmt.Sprintf("%s is missing for declared remote imports", LockfileName),
 			RepairHint: `run "gc import install"`,
 		})
@@ -87,13 +96,13 @@ func CheckInstalled(cityRoot string, imports map[string]config.Import) (*CheckRe
 
 	if countRemoteImports(imports) > 0 || len(lock.Packs) > 0 {
 		if err := withRepoCacheReadLock(func() error {
-			checkLockedImports(report, lock, imports, cityRoot)
+			checkLockedImports(report, lock, imports, importRoot)
 			return nil
 		}); err != nil {
 			return nil, err
 		}
 	} else {
-		checkLockedImports(report, lock, imports, cityRoot)
+		checkLockedImports(report, lock, imports, importRoot)
 	}
 	return report, nil
 }

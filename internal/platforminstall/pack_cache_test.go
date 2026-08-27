@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/packman"
 )
 
 func TestPlanPackReleaseEnsuresCandidateCacheBeforeLiveMutation(t *testing.T) {
@@ -118,6 +121,47 @@ fetched = "2026-08-22T00:00:00Z"
 	assertPathAbsent(t, manifest.ManagedFiles[1].BackupPath)
 	assertPathAbsent(t, manifest.ReceiptPath)
 	assertPathAbsent(t, DefaultManifestPath(manifest.CityPath))
+}
+
+func TestCandidatePackCacheIncludesCityScopedImports(t *testing.T) {
+	dir := t.TempDir()
+	manifest := testPackReleaseManifest(t, dir, []byte("schema = 1\n"))
+	cityConfig := []byte(`[defaults.rig.imports.gc]
+source = "https://example.invalid/gascity-packs.git/roles"
+version = "sha:fedcba9876543210"
+
+[[rigs]]
+name = "example"
+[rigs.imports.gc]
+source = "https://example.invalid/gascity-packs.git/roles"
+version = "sha:fedcba9876543210"
+`)
+	if err := os.WriteFile(filepath.Join(dir, "city.toml"), cityConfig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state, err := preflightManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := installLockedCandidateWithImports
+	t.Cleanup(func() { installLockedCandidateWithImports = previous })
+	var got map[string]config.Import
+	installLockedCandidateWithImports = func(_ string, credentialCityRoot string, imports map[string]config.Import) (*packman.Lockfile, error) {
+		if credentialCityRoot != dir {
+			t.Fatalf("credential city root = %q, want %q", credentialCityRoot, dir)
+		}
+		got = imports
+		return &packman.Lockfile{}, nil
+	}
+
+	if err := ensureCandidatePackCache(manifest, state); err != nil {
+		t.Fatalf("ensureCandidatePackCache() error = %v", err)
+	}
+	for _, key := range []string{"pack:gascity", "default-rig:gc", "rig:example:gc"} {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("candidate imports missing %q: %#v", key, got)
+		}
+	}
 }
 
 func testPackReleaseManifest(t *testing.T, dir string, candidateLock []byte) Manifest {
