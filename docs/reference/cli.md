@@ -3092,10 +3092,25 @@ gc platform
 
 | Subcommand | Description |
 |------------|-------------|
+| [gc platform adopt](#gc-platform-adopt) | Publish metadata for a broker-activated platform without another restart |
 | [gc platform canary](#gc-platform-canary) | Run the bounded managed-worker golden-path and fault canary |
 | [gc platform install](#gc-platform-install) | Preflight or atomically apply a digest-pinned platform manifest |
 | [gc platform manifest](#gc-platform-manifest) | Finalize an unsigned platform manifest with its canonical digest |
 | [gc platform rollback](#gc-platform-rollback) | Preflight or restore the manifest-pinned previous platform |
+
+## gc platform adopt
+
+Publish metadata for a broker-activated platform without another restart
+
+```
+gc platform adopt [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--apply` | bool |  | publish metadata for the already-running candidate without restart |
+| `--dry-run` | bool |  | validate the already-installed candidate and print the metadata-only plan |
+| `--manifest` | string |  | absolute path to the digest-pinned platform manifest |
 
 ## gc platform canary
 

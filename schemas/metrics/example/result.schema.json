@@ -211,7 +211,8 @@
               "platform-rollback",
               "platform-manifest",
               "platform-canary",
-              "convoy-retry-drain-item"
+              "convoy-retry-drain-item",
+              "platform-adopt"
             ]
           },
           "event_id": {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -122,6 +123,76 @@ func TestApplyIdenticalReplayVerifiesWithoutRestart(t *testing.T) {
 		t.Fatalf("second lifecycle calls restart=%d verify=%d, want 0/1", second.restarts, second.verifies)
 	}
 	assertSameFileIdentityAndTime(t, manifest.Core.Destination, coreBefore)
+}
+
+func TestAdoptAlreadyActivatedPlatformPublishesMetadataWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+	manifest := activationManifest(t, dir)
+	installCandidateFilesystem(t, manifest)
+	lifecycle := exactFakeLifecycle(manifest)
+
+	receipt, err := Adopt(context.Background(), manifest, lifecycle)
+	if err != nil {
+		t.Fatalf("Adopt() error = %v", err)
+	}
+	if lifecycle.restarts != 0 || lifecycle.verifies != 1 {
+		t.Fatalf("lifecycle calls restart=%d verify=%d, want 0/1", lifecycle.restarts, lifecycle.verifies)
+	}
+	if receipt.Activation == nil || *receipt.Activation != lifecycle.proof {
+		t.Fatalf("receipt activation = %+v, want %+v", receipt.Activation, lifecycle.proof)
+	}
+	if got := string(mustReadFile(t, manifest.Core.Destination)); got != "candidate" {
+		t.Fatalf("adopted core = %q, want candidate", got)
+	}
+	if _, err := LoadManifest(mustReadFile(t, DefaultManifestPath(manifest.CityPath))); err != nil {
+		t.Fatalf("load adopted manifest: %v", err)
+	}
+	persisted, err := loadReceipt(manifest.ReceiptPath)
+	if err != nil {
+		t.Fatalf("load adopted receipt: %v", err)
+	}
+	if persisted.Activation == nil || *persisted.Activation != lifecycle.proof {
+		t.Fatalf("persisted activation = %+v, want %+v", persisted.Activation, lifecycle.proof)
+	}
+}
+
+func TestAdoptRefusesRuntimeMismatchBeforePublishingMetadata(t *testing.T) {
+	dir := t.TempDir()
+	manifest := activationManifest(t, dir)
+	installCandidateFilesystem(t, manifest)
+	lifecycle := exactFakeLifecycle(manifest)
+	lifecycle.proof.Commit = "0000000000000000000000000000000000000000"
+
+	_, err := Adopt(context.Background(), manifest, lifecycle)
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("runtime commit mismatch")) {
+		t.Fatalf("Adopt() error = %v, want runtime commit mismatch", err)
+	}
+	if lifecycle.restarts != 0 || lifecycle.verifies != 1 {
+		t.Fatalf("lifecycle calls restart=%d verify=%d, want 0/1", lifecycle.restarts, lifecycle.verifies)
+	}
+	if got := string(mustReadFile(t, manifest.Core.Destination)); got != "candidate" {
+		t.Fatalf("core after refusal = %q, want candidate", got)
+	}
+	assertPathAbsent(t, manifest.ReceiptPath)
+	assertPathAbsent(t, DefaultManifestPath(manifest.CityPath))
+}
+
+func TestAdoptMetadataFailureRestoresMetadataButNeverTouchesBrokerInstalledCore(t *testing.T) {
+	dir := t.TempDir()
+	manifest := activationManifest(t, dir)
+	installCandidateFilesystem(t, manifest)
+	installer := newInstaller()
+	installer.writeReceipt = func(string, Receipt) error { return errors.New("injected receipt failure") }
+
+	_, err := installer.adopt(context.Background(), manifest, exactFakeLifecycle(manifest))
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("injected receipt failure")) {
+		t.Fatalf("adopt() error = %v, want receipt failure", err)
+	}
+	if got := string(mustReadFile(t, manifest.Core.Destination)); got != "candidate" {
+		t.Fatalf("core after metadata rollback = %q, want broker-installed candidate", got)
+	}
+	assertPathAbsent(t, manifest.ReceiptPath)
+	assertPathAbsent(t, DefaultManifestPath(manifest.CityPath))
 }
 
 func TestApplyInterruptedBeforeRestartVerifiesThenRestartsOnce(t *testing.T) {
@@ -347,6 +418,36 @@ func exactFakeLifecycle(manifest Manifest) *fakeLifecycle {
 		Commit:           manifest.Activation.ExpectedCommit,
 		Version:          manifest.Activation.ExpectedVersion,
 	}}
+}
+
+func installCandidateFilesystem(t *testing.T, manifest Manifest) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(manifest.BackupPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.BackupPath, []byte("installed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.Core.Destination, mustReadFile(t, manifest.Core.Source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range manifest.ManagedFiles {
+		if file.PreviousSHA256 != "" {
+			previous := mustReadFile(t, file.Destination)
+			if err := os.MkdirAll(filepath.Dir(file.BackupPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file.BackupPath, previous, os.FileMode(file.Mode)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(file.Destination), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file.Destination, mustReadFile(t, file.Source), os.FileMode(file.Mode)); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func assertRestoredActivationFilesystem(t *testing.T, manifest Manifest, coreBefore, rulesBefore []byte) {
