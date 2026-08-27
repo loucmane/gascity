@@ -175,9 +175,22 @@ func probeManagedWorkerToolchain(ctx context.Context, pin managedworker.Toolchai
 	defer cancel()
 	command := exec.CommandContext(probeCtx, pin.Executable.Path, pin.Executable.VersionArgs...)
 	command.Env = overlayEnvironment(os.Environ(), environment)
-	output, err := command.CombinedOutput()
+	output, err := command.Output()
 	if err != nil {
-		return fmt.Errorf("version probe: %w: %s", err, strings.TrimSpace(string(output)))
+		diagnostics := strings.TrimSpace(string(output))
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if diagnostics == "" {
+				diagnostics = stderr
+			} else if stderr != "" {
+				diagnostics += "\n" + stderr
+			}
+		}
+		if diagnostics != "" {
+			return fmt.Errorf("version probe: %w: %s", err, diagnostics)
+		}
+		return fmt.Errorf("version probe: %w", err)
 	}
 	if got := strings.TrimSpace(string(output)); got != pin.Executable.Version {
 		return fmt.Errorf("version mismatch: got %q want %q", got, pin.Executable.Version)

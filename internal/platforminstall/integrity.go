@@ -3,6 +3,7 @@ package platforminstall
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -364,14 +365,24 @@ func VerifyProviderPin(ctx context.Context, pin ProviderPin) error {
 func runInspectionCommand(ctx context.Context, name string, args ...string) (string, error) {
 	commandCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(commandCtx, name, args...).CombinedOutput()
+	output, err := exec.CommandContext(commandCtx, name, args...).Output()
 	text := strings.TrimSpace(string(output))
 	if err != nil {
 		if commandCtx.Err() != nil {
 			return "", commandCtx.Err()
 		}
-		if text != "" {
-			return "", fmt.Errorf("%w: %s", err, text)
+		diagnostics := text
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if diagnostics == "" {
+				diagnostics = stderr
+			} else if stderr != "" {
+				diagnostics += "\n" + stderr
+			}
+		}
+		if diagnostics != "" {
+			return "", fmt.Errorf("%w: %s", err, diagnostics)
 		}
 		return "", err
 	}
