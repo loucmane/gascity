@@ -26,6 +26,47 @@ func TestInspectIntegrityAcceptsExactFingerprint(t *testing.T) {
 	}
 }
 
+func TestInspectIntegrityIgnoresSuccessfulProviderVersionStderr(t *testing.T) {
+	dir := t.TempDir()
+	manifest := integrityManifest(t, dir)
+	provider := &manifest.Integrity.Providers[0]
+	providerBytes := []byte("#!/bin/sh\nprintf 'PATH alias warning\\n' >&2\nprintf 'codex-cli 0.147.0\\n'\n")
+	if err := os.WriteFile(provider.ResolvedPath, providerBytes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	provider.SHA256 = testSHA256(providerBytes)
+	manifest = finalizeManifest(t, manifest)
+	if _, err := Install(manifest); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	report, err := InspectIntegrity(context.Background(), manifest)
+	if err != nil {
+		t.Fatalf("InspectIntegrity() error = %v", err)
+	}
+	if len(report.Drifts) != 0 {
+		t.Fatalf("InspectIntegrity() drifts = %+v, want none", report.Drifts)
+	}
+}
+
+func TestRunInspectionCommandIncludesFailureDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	command := filepath.Join(dir, "provider")
+	if err := os.WriteFile(command, []byte("#!/bin/sh\nprintf 'partial stdout\\n'\nprintf 'fatal stderr\\n' >&2\nexit 7\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := runInspectionCommand(context.Background(), command, "--version")
+	if err == nil {
+		t.Fatal("runInspectionCommand() error = nil, want failure")
+	}
+	for _, want := range []string{"partial stdout", "fatal stderr"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("runInspectionCommand() error = %q, want %q", err, want)
+		}
+	}
+}
+
 func TestInspectIntegrityReportsAllDriftClasses(t *testing.T) {
 	dir := t.TempDir()
 	manifest := integrityManifest(t, dir)
