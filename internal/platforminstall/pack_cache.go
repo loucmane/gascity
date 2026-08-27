@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/gastownhall/gascity/internal/fsys"
+	"github.com/gastownhall/gascity/internal/importsvc"
 	"github.com/gastownhall/gascity/internal/packman"
 )
 
@@ -18,6 +20,8 @@ type candidatePackPair struct {
 	lock     []byte
 	lockFile ManagedFile
 }
+
+var installLockedCandidateWithImports = packman.InstallLockedCandidateWithImports
 
 func ensureCandidatePackCache(manifest Manifest, state *preflight) error {
 	pair, err := candidatePackFiles(manifest, state)
@@ -35,8 +39,30 @@ func ensureCandidatePackCache(manifest Manifest, state *preflight) error {
 	if err := os.WriteFile(filepath.Join(stage, packman.LockfileName), pair.lock, 0o644); err != nil {
 		return fmt.Errorf("stage candidate %s: %w", packman.LockfileName, err)
 	}
-	if _, err := packman.InstallLockedCandidate(stage, manifest.CityPath); err != nil {
+	if err := stageCandidateCityConfig(manifest.CityPath, stage); err != nil {
+		return err
+	}
+	imports, err := importsvc.CollectAllImports(fsys.OSFS{}, stage)
+	if err != nil {
+		return fmt.Errorf("collect candidate city imports: %w", err)
+	}
+	if _, err := installLockedCandidateWithImports(stage, manifest.CityPath, imports); err != nil {
 		return fmt.Errorf("install candidate pack cache: %w", err)
+	}
+	return nil
+}
+
+func stageCandidateCityConfig(cityRoot, stage string) error {
+	source := filepath.Join(cityRoot, "city.toml")
+	data, err := os.ReadFile(source)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read live city.toml for candidate import graph: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, "city.toml"), data, 0o644); err != nil {
+		return fmt.Errorf("stage live city.toml for candidate import graph: %w", err)
 	}
 	return nil
 }

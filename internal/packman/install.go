@@ -95,15 +95,25 @@ func InstallLocked(cityRoot string) (*Lockfile, error) {
 // read from candidateRoot, while credentialCityRoot selects the live city's
 // credential layers for any required network clone.
 func InstallLockedCandidate(candidateRoot, credentialCityRoot string) (*Lockfile, error) {
-	lock, err := installLocked(candidateRoot, credentialCityRoot)
-	if err != nil {
-		return nil, err
-	}
 	imports, err := readPackImports(candidateRoot)
 	if err != nil {
 		return nil, err
 	}
-	report, err := CheckInstalled(candidateRoot, imports)
+	return InstallLockedCandidateWithImports(candidateRoot, credentialCityRoot, imports)
+}
+
+// InstallLockedCandidateWithImports restores a staged candidate lock and
+// validates it against the caller-provided complete effective import graph.
+// The lockfile remains staged under candidateRoot, while top-level local
+// sources and network credentials resolve relative to credentialCityRoot.
+// This is required for city-wide locks whose reachable sources include
+// defaults or rig imports declared outside the candidate root pack.toml.
+func InstallLockedCandidateWithImports(candidateRoot, credentialCityRoot string, imports map[string]config.Import) (*Lockfile, error) {
+	lock, err := installLocked(candidateRoot, credentialCityRoot)
+	if err != nil {
+		return nil, err
+	}
+	report, err := checkInstalledFromRoots(candidateRoot, credentialCityRoot, imports)
 	if err != nil {
 		return nil, fmt.Errorf("checking candidate pack pair: %w", err)
 	}

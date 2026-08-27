@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/fsys"
 )
 
@@ -119,5 +120,34 @@ func TestInstallLockedCandidateRejectsStaleLockEntry(t *testing.T) {
 	_, err := InstallLockedCandidate(candidate, candidate)
 	if err == nil || !strings.Contains(err.Error(), "stale-lock-entry") {
 		t.Fatalf("InstallLockedCandidate() error = %v, want stale-lock-entry refusal", err)
+	}
+}
+
+func TestInstallLockedCandidateWithImportsAcceptsCityScopedLockEntry(t *testing.T) {
+	home := t.TempDir()
+	candidate := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GC_HOME", filepath.Join(home, ".gc"))
+	stubCachedPackGit(t)
+	source := "https://example.com/rig-roles.git"
+	commit := "abcdef0123456789"
+	if err := os.WriteFile(filepath.Join(candidate, "pack.toml"), []byte("[pack]\nname = \"city\"\nschema = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteLockfile(fsys.OSFS{}, candidate, &Lockfile{
+		Schema: LockfileSchema,
+		Packs: map[string]LockedPack{
+			source: {Version: "sha:" + commit, Commit: commit, Fetched: time.Unix(10, 0).UTC()},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stageCachedPack(t, source, commit, "[pack]\nname = \"roles\"\nschema = 2\n")
+
+	imports := map[string]config.Import{
+		"rig:example:gc": {Source: source, Version: "sha:" + commit},
+	}
+	if _, err := InstallLockedCandidateWithImports(candidate, candidate, imports); err != nil {
+		t.Fatalf("InstallLockedCandidateWithImports() error = %v", err)
 	}
 }
