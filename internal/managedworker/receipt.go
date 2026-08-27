@@ -21,6 +21,9 @@ import (
 const (
 	// ProvisioningReceiptSchemaV1 is the first managed-worker provisioning receipt schema.
 	ProvisioningReceiptSchemaV1 = "gc.provisioning-receipt.v1"
+	// ProvisioningReceiptSchemaV2 binds the managed launch environment and its
+	// executable toolchains in addition to the v1 controls.
+	ProvisioningReceiptSchemaV2 = "gc.provisioning-receipt.v2"
 	// ProvisioningReceiptRelativePath is the controller-owned authority consumed
 	// immediately before a managed provider starts.
 	ProvisioningReceiptRelativePath = ".gc/runtime/provisioning/receipt.json"
@@ -45,16 +48,34 @@ type FilePin struct {
 	SHA256 string `json:"sha256"`
 }
 
+// ExecutablePin binds both the requested and resolved executable paths, exact
+// bytes, and the version output observed during provisioning.
+type ExecutablePin struct {
+	Path         string   `json:"path"`
+	ResolvedPath string   `json:"resolved_path"`
+	SHA256       string   `json:"sha256"`
+	VersionArgs  []string `json:"version_args"`
+	Version      string   `json:"version"`
+}
+
+// ToolchainPin binds one named build toolchain used by the managed worker.
+type ToolchainPin struct {
+	Executable ExecutablePin `json:"executable"`
+	Name       string        `json:"name"`
+}
+
 // WorkerProfile is the complete launch-control fingerprint for one managed worker.
 type WorkerProfile struct {
 	ApprovalPolicy      string                      `json:"approval_policy"`
 	Argv                []string                    `json:"argv"`
 	CheckPath           FilePin                     `json:"check_path"`
+	Environment         map[string]string           `json:"environment,omitempty"`
 	Name                string                      `json:"name"`
 	NetworkPolicy       string                      `json:"network_policy"`
 	Provider            platforminstall.ProviderPin `json:"provider"`
 	SandboxMode         string                      `json:"sandbox_mode"`
 	SignerIdentity      string                      `json:"signer_identity"`
+	Toolchains          []ToolchainPin              `json:"toolchains,omitempty"`
 	WorkerProfileSHA256 string                      `json:"worker_profile_sha256,omitempty"`
 	WritableRoots       []string                    `json:"writable_roots"`
 }
@@ -149,7 +170,7 @@ func LoadProvisioningReceipt(data []byte) (ProvisioningReceipt, error) {
 // WorkerProfileDigest hashes every launch-control field in one profile.
 func WorkerProfileDigest(profile WorkerProfile) (string, error) {
 	profile.WorkerProfileSHA256 = ""
-	if err := validateWorkerProfile(profile, false); err != nil {
+	if err := validateWorkerProfile(profile, false, len(profile.Environment) > 0 || len(profile.Toolchains) > 0); err != nil {
 		return "", err
 	}
 	encoded, err := canonicalJSON(profile)
@@ -174,6 +195,16 @@ func canonicalizeReceiptSlices(receipt ProvisioningReceipt) ProvisioningReceipt 
 	receipt.Profiles = append([]WorkerProfile(nil), receipt.Profiles...)
 	for index := range receipt.Profiles {
 		receipt.Profiles[index].Argv = append([]string(nil), receipt.Profiles[index].Argv...)
+		receipt.Profiles[index].Environment = cloneStringMap(receipt.Profiles[index].Environment)
+		receipt.Profiles[index].Toolchains = append([]ToolchainPin(nil), receipt.Profiles[index].Toolchains...)
+		for toolchainIndex := range receipt.Profiles[index].Toolchains {
+			receipt.Profiles[index].Toolchains[toolchainIndex].Executable.VersionArgs = append(
+				[]string(nil), receipt.Profiles[index].Toolchains[toolchainIndex].Executable.VersionArgs...,
+			)
+		}
+		sort.Slice(receipt.Profiles[index].Toolchains, func(left, right int) bool {
+			return receipt.Profiles[index].Toolchains[left].Name < receipt.Profiles[index].Toolchains[right].Name
+		})
 		receipt.Profiles[index].WritableRoots = append([]string(nil), receipt.Profiles[index].WritableRoots...)
 		sort.Strings(receipt.Profiles[index].WritableRoots)
 	}
@@ -182,7 +213,7 @@ func canonicalizeReceiptSlices(receipt ProvisioningReceipt) ProvisioningReceipt 
 }
 
 func validateReceiptContent(receipt ProvisioningReceipt) error {
-	if receipt.Schema != ProvisioningReceiptSchemaV1 {
+	if receipt.Schema != ProvisioningReceiptSchemaV1 && receipt.Schema != ProvisioningReceiptSchemaV2 {
 		return fmt.Errorf("provisioning receipt schema %q is unsupported", receipt.Schema)
 	}
 	if len(receipt.MemberHeads) == 0 {
@@ -231,7 +262,8 @@ func validateReceiptContent(receipt ProvisioningReceipt) error {
 			return errors.New("profiles must be sorted by unique name")
 		}
 		last = profile.Name
-		if err := validateWorkerProfile(profile, true); err != nil {
+		requireRuntime := receipt.Schema == ProvisioningReceiptSchemaV2
+		if err := validateWorkerProfile(profile, true, requireRuntime); err != nil {
 			return fmt.Errorf("profiles[%d]: %w", index, err)
 		}
 		want, err := WorkerProfileDigest(profile)
@@ -245,7 +277,7 @@ func validateReceiptContent(receipt ProvisioningReceipt) error {
 	return nil
 }
 
-func validateWorkerProfile(profile WorkerProfile, requireDigest bool) error {
+func validateWorkerProfile(profile WorkerProfile, requireDigest, requireRuntime bool) error {
 	for name, value := range map[string]string{
 		"name": profile.Name, "approval_policy": profile.ApprovalPolicy,
 		"sandbox_mode": profile.SandboxMode, "network_policy": profile.NetworkPolicy,
@@ -279,10 +311,98 @@ func validateWorkerProfile(profile WorkerProfile, requireDigest bool) error {
 	if err := validateProviderPin(profile.Provider); err != nil {
 		return err
 	}
+	if requireRuntime && len(profile.Environment) == 0 {
+		return errors.New("environment must not be empty in a v2 profile")
+	}
+	if requireRuntime && len(profile.Toolchains) == 0 {
+		return errors.New("toolchains must not be empty in a v2 profile")
+	}
+	if !requireRuntime && (len(profile.Environment) > 0 || len(profile.Toolchains) > 0) {
+		return errors.New("environment and toolchains require provisioning receipt v2")
+	}
+	for key, value := range profile.Environment {
+		if !validEnvironmentName(key) {
+			return fmt.Errorf("environment key %q is invalid", key)
+		}
+		if value == "" || strings.ContainsRune(value, '\x00') {
+			return fmt.Errorf("environment[%q] must be non-empty and contain no NUL", key)
+		}
+	}
+	lastToolchain := ""
+	for index, toolchain := range profile.Toolchains {
+		if strings.TrimSpace(toolchain.Name) == "" {
+			return fmt.Errorf("toolchains[%d].name is required", index)
+		}
+		if toolchain.Name <= lastToolchain {
+			return errors.New("toolchains must be sorted by unique name")
+		}
+		lastToolchain = toolchain.Name
+		if err := validateExecutablePin(fmt.Sprintf("toolchains[%d].executable", index), toolchain.Executable); err != nil {
+			return err
+		}
+	}
 	if requireDigest {
 		return validateSHA256("worker_profile_sha256", profile.WorkerProfileSHA256)
 	}
 	return nil
+}
+
+func validateExecutablePin(name string, pin ExecutablePin) error {
+	for field, path := range map[string]string{"path": pin.Path, "resolved_path": pin.ResolvedPath} {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return fmt.Errorf("%s.%s must be a clean absolute path: %q", name, field, path)
+		}
+	}
+	if err := validateSHA256(name+".sha256", pin.SHA256); err != nil {
+		return err
+	}
+	if strings.TrimSpace(pin.Version) == "" {
+		return fmt.Errorf("%s.version is required", name)
+	}
+	for index, argument := range pin.VersionArgs {
+		if strings.TrimSpace(argument) == "" {
+			return fmt.Errorf("%s.version_args[%d] must not be empty", name, index)
+		}
+	}
+	return nil
+}
+
+func validEnvironmentName(name string) bool {
+	if name == "" || !validEnvironmentNameCharacter(name[0], false) {
+		return false
+	}
+	for index := 1; index < len(name); index++ {
+		if !validEnvironmentNameCharacter(name[index], true) {
+			return false
+		}
+	}
+	return true
+}
+
+func validEnvironmentNameCharacter(character byte, allowDigit bool) bool {
+	switch {
+	case character == '_':
+		return true
+	case character >= 'A' && character <= 'Z':
+		return true
+	case character >= 'a' && character <= 'z':
+		return true
+	case allowDigit && character >= '0' && character <= '9':
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func validateProviderPin(pin platforminstall.ProviderPin) error {

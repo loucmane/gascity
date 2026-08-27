@@ -24,10 +24,11 @@ type PreflightRequest struct {
 
 // Probes supplies the side-effecting boundaries used by Preflight.
 type Probes struct {
-	ReadFile        func(string) ([]byte, error)
-	InspectProvider func(context.Context, platforminstall.ProviderPin) error
-	ProbeReadiness  func(context.Context, string) error
-	ProbeSigner     func(context.Context, string) error
+	ReadFile         func(string) ([]byte, error)
+	InspectProvider  func(context.Context, platforminstall.ProviderPin) error
+	InspectToolchain func(context.Context, ToolchainPin, map[string]string) error
+	ProbeReadiness   func(context.Context, string) error
+	ProbeSigner      func(context.Context, string) error
 }
 
 // PreflightReport records whether every required managed-worker check passed.
@@ -62,9 +63,6 @@ func (failure *Failure) Unwrap() error {
 // order. It returns at the first failure so a caller cannot start the provider
 // from a partially verified profile.
 func Preflight(ctx context.Context, request PreflightRequest, probes Probes) (PreflightReport, error) {
-	if err := validateProbes(probes); err != nil {
-		return PreflightReport{}, err
-	}
 	receipt, err := LoadProvisioningReceipt(request.Receipt)
 	if err != nil {
 		return PreflightReport{}, fmt.Errorf("provisioning receipt: %w", err)
@@ -74,6 +72,9 @@ func Preflight(ctx context.Context, request PreflightRequest, probes Probes) (Pr
 	profile, ok := receipt.Profile(request.ProfileName)
 	if !ok {
 		return report, fmt.Errorf("managed worker profile %q is not declared in the provisioning receipt", request.ProfileName)
+	}
+	if err := validateProbes(probes, len(profile.Toolchains) > 0); err != nil {
+		return report, err
 	}
 	report.Checks = append(report.Checks, "profile")
 	if request.PermissionRevision != receipt.PermissionRevision {
@@ -112,6 +113,14 @@ func Preflight(ctx context.Context, request PreflightRequest, probes Probes) (Pr
 		return report, fmt.Errorf("provider identity %q: %w", profile.Provider.Name, err)
 	}
 	report.Checks = append(report.Checks, "provider_identity")
+	for _, toolchain := range profile.Toolchains {
+		if err := probes.InspectToolchain(ctx, toolchain, profile.Environment); err != nil {
+			return report, fmt.Errorf("toolchain identity %q: %w", toolchain.Name, err)
+		}
+	}
+	if len(profile.Toolchains) > 0 {
+		report.Checks = append(report.Checks, "toolchains")
+	}
 	if err := probes.ProbeReadiness(ctx, profile.Provider.Name); err != nil {
 		return report, fmt.Errorf("provider readiness %q: %w", profile.Provider.Name, err)
 	}
@@ -124,13 +133,17 @@ func Preflight(ctx context.Context, request PreflightRequest, probes Probes) (Pr
 	return report, nil
 }
 
-func validateProbes(probes Probes) error {
-	for name, present := range map[string]bool{
+func validateProbes(probes Probes, requireToolchains bool) error {
+	required := map[string]bool{
 		"read file":          probes.ReadFile != nil,
 		"inspect provider":   probes.InspectProvider != nil,
 		"provider readiness": probes.ProbeReadiness != nil,
 		"signer readiness":   probes.ProbeSigner != nil,
-	} {
+	}
+	if requireToolchains {
+		required["inspect toolchain"] = probes.InspectToolchain != nil
+	}
+	for name, present := range required {
 		if !present {
 			return fmt.Errorf("managed-worker preflight probe %q is required", name)
 		}

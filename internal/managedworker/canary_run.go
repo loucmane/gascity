@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	// CanaryScenarioCleanLauncher proves an unattended eight-step signed run.
+	// CanaryScenarioCleanLauncher proves an unattended nine-step signed run.
 	CanaryScenarioCleanLauncher = "clean-launcher"
 	// CanaryScenarioValidatorAbsent proves a missing validator is not silent.
 	CanaryScenarioValidatorAbsent = "validator-absent"
@@ -72,6 +72,7 @@ var requiredCleanLauncherSteps = []string{
 	"register-test-rig",
 	"dispatch-work",
 	"prepare-worktree",
+	"verify-toolchain",
 	"controller-validate-artifact",
 	"sign-candidate",
 	"finalize-workflow",
@@ -119,7 +120,7 @@ func RequiredCanaryScenarios() []string {
 	return append([]string(nil), requiredCanaryScenarios...)
 }
 
-// RequiredCleanLauncherSteps returns the eight unattended golden-path steps.
+// RequiredCleanLauncherSteps returns the nine unattended golden-path steps.
 func RequiredCleanLauncherSteps() []string {
 	return append([]string(nil), requiredCleanLauncherSteps...)
 }
@@ -292,7 +293,7 @@ func validateCanaryScenarioEvidence(wantName string, evidence CanaryScenarioEvid
 			return fmt.Errorf("resolution = %q, want %q", evidence.Resolution, CanaryResolutionCompleted)
 		}
 		if !reflect.DeepEqual(evidence.CompletedSteps, requiredCleanLauncherSteps) {
-			return fmt.Errorf("completed steps do not equal the eight golden-path steps: got %v want %v", evidence.CompletedSteps, requiredCleanLauncherSteps)
+			return fmt.Errorf("completed steps do not equal the nine golden-path steps: got %v want %v", evidence.CompletedSteps, requiredCleanLauncherSteps)
 		}
 		if !evidence.SignedCandidate {
 			return errors.New("clean launcher did not produce a signed candidate")

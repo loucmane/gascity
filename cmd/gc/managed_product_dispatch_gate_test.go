@@ -83,13 +83,18 @@ func dispatchGateFixture(t *testing.T) (managedworker.ProvisioningReceipt, []byt
 		SHA256: dispatchGateDigest("provider"), VersionArgs: []string{"--version"}, Version: "codex-cli test",
 	}
 	profile := managedworker.WorkerProfile{
-		Name: "product/gc.worker", Argv: []string{"/city/bin/codex", "exec"}, WritableRoots: []string{"/worktrees"},
+		Name: "product/gc.implementation-worker", Argv: []string{"/city/bin/codex", "exec"}, WritableRoots: []string{"/worktrees"},
 		ApprovalPolicy: "never", SandboxMode: "workspace-write", NetworkPolicy: "disabled",
 		Provider: provider, CheckPath: managedworker.FilePin{Path: "/pack/check.sh", SHA256: dispatchGateDigest("check")},
 		SignerIdentity: "TEST-SIGNER",
+		Environment:    map[string]string{"GOROOT": "/toolchains/go", "GOTOOLCHAIN": "local", "PATH": "/toolchains/go/bin:/usr/bin:/bin"},
+		Toolchains: []managedworker.ToolchainPin{{Name: "go", Executable: managedworker.ExecutablePin{
+			Path: "/toolchains/go/bin/go", ResolvedPath: "/toolchains/go/bin/go", SHA256: dispatchGateDigest("go"),
+			VersionArgs: []string{"version"}, Version: "go version go1.26.7 linux/amd64",
+		}}},
 	}
 	provisioning, _, err := managedworker.FinalizeProvisioningReceipt(managedworker.ProvisioningReceipt{
-		Schema:             managedworker.ProvisioningReceiptSchemaV1,
+		Schema:             managedworker.ProvisioningReceiptSchemaV2,
 		CanaryRunner:       managedworker.FilePin{Path: "/city/bin/managed-worker-canary", SHA256: dispatchGateDigest("canary-runner")},
 		MemberHeads:        []managedworker.MemberHead{{Name: "gct-xnf", Commit: strings.Repeat("a", 40)}},
 		TemplateCommit:     strings.Repeat("b", 40),

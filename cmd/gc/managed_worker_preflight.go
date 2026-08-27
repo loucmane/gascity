@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -21,6 +23,8 @@ import (
 )
 
 type taskCheckPathResolver func(startCandidate, *config.City) (string, error)
+
+var managedWorkerSignerFrontend = "/usr/local/libexec/gas-city/managed-git-commit"
 
 // configureManagedWorkerPreflight attaches the production gate to every start.
 // Receipt membership is the only managed/unmanaged classifier: no provider,
@@ -45,7 +49,6 @@ func configureManagedWorkerPreflight(
 		// buildPreparedStart always captures the stable pre-resume argv.
 		commandArgv = shellquote.Split(strings.TrimSpace(item.cfg.Command))
 	}
-	workDir := item.cfg.WorkDir
 	receiptPath := managedworker.ProvisioningReceiptPath(cityPath)
 	item.preflight = func(ctx context.Context) error {
 		receiptBytes, err := os.ReadFile(receiptPath)
@@ -83,7 +86,11 @@ func configureManagedWorkerPreflight(
 		observed := expected
 		observed.Argv = append([]string(nil), commandArgv...)
 		observed.CheckPath.Path = filepath.Clean(checkPath)
-		probes := defaultManagedWorkerPreflightProbes(workDir)
+		observed.Environment = make(map[string]string, len(expected.Environment))
+		for key := range expected.Environment {
+			observed.Environment[key] = item.cfg.Env[key]
+		}
+		probes := defaultManagedWorkerPreflightProbes()
 		if probeOverride != nil {
 			probes = *probeOverride
 		}
@@ -113,10 +120,11 @@ func managedWorkerProfileName(candidate startCandidate, cfg *config.City) string
 	return template
 }
 
-func defaultManagedWorkerPreflightProbes(workDir string) managedworker.Probes {
+func defaultManagedWorkerPreflightProbes() managedworker.Probes {
 	return managedworker.Probes{
-		ReadFile:        os.ReadFile,
-		InspectProvider: platforminstall.VerifyProviderPin,
+		ReadFile:         os.ReadFile,
+		InspectProvider:  platforminstall.VerifyProviderPin,
+		InspectToolchain: probeManagedWorkerToolchain,
 		ProbeReadiness: func(ctx context.Context, provider string) error {
 			if !api.SupportsProviderReadiness(provider) {
 				return fmt.Errorf("provider %q has no independent readiness probe", provider)
@@ -134,46 +142,90 @@ func defaultManagedWorkerPreflightProbes(workDir string) managedworker.Probes {
 			}
 			return nil
 		},
-		ProbeSigner: func(ctx context.Context, identity string) error {
-			return probeManagedWorkerSigner(ctx, workDir, identity)
-		},
+		ProbeSigner: probeManagedWorkerSigner,
 	}
 }
 
-func probeManagedWorkerSigner(ctx context.Context, workDir, identity string) error {
+func probeManagedWorkerToolchain(ctx context.Context, pin managedworker.ToolchainPin, environment map[string]string) error {
+	resolved, err := filepath.EvalSymlinks(pin.Executable.Path)
+	if err != nil {
+		return fmt.Errorf("resolve executable %q: %w", pin.Executable.Path, err)
+	}
+	resolved = filepath.Clean(resolved)
+	if resolved != pin.Executable.ResolvedPath {
+		return fmt.Errorf("resolved path mismatch: got %q want %q", resolved, pin.Executable.ResolvedPath)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return fmt.Errorf("inspect resolved executable %q: %w", resolved, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("resolved executable must be an executable regular file: %q", resolved)
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return fmt.Errorf("read resolved executable %q: %w", resolved, err)
+	}
+	digest := sha256.Sum256(data)
+	if got := hex.EncodeToString(digest[:]); got != pin.Executable.SHA256 {
+		return fmt.Errorf("sha256 mismatch: got %q want %q", got, pin.Executable.SHA256)
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(probeCtx, pin.Executable.Path, pin.Executable.VersionArgs...)
+	command.Env = overlayEnvironment(os.Environ(), environment)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("version probe: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	if got := strings.TrimSpace(string(output)); got != pin.Executable.Version {
+		return fmt.Errorf("version mismatch: got %q want %q", got, pin.Executable.Version)
+	}
+	return nil
+}
+
+func overlayEnvironment(base []string, overrides map[string]string) []string {
+	values := make(map[string]string, len(base)+len(overrides))
+	for _, entry := range base {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	for key, value := range overrides {
+		values[key] = value
+	}
+	result := make([]string, 0, len(values))
+	for key, value := range values {
+		result = append(result, key+"="+value)
+	}
+	return result
+}
+
+func probeManagedWorkerSigner(ctx context.Context, identity string) error {
 	identity = strings.TrimSpace(identity)
 	if identity == "" {
 		return errors.New("signer identity is empty")
 	}
-	workDir = strings.TrimSpace(workDir)
-	if !filepath.IsAbs(workDir) || filepath.Clean(workDir) != workDir {
-		return fmt.Errorf("signer work directory must be a clean absolute path: %q", workDir)
-	}
-	if info, err := os.Stat(workDir); err != nil || !info.IsDir() {
-		if err != nil {
-			return fmt.Errorf("signer work directory %q: %w", workDir, err)
-		}
-		return fmt.Errorf("signer work directory %q is not a directory", workDir)
+	if len(identity) != 40 {
+		return fmt.Errorf("signer identity must be a full 40-character fingerprint: %q", identity)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	configured, err := exec.CommandContext(probeCtx, "git", "-C", workDir, "config", "--get", "user.signingkey").CombinedOutput()
+	output, err := exec.CommandContext(
+		probeCtx,
+		managedWorkerSignerFrontend,
+		"--probe",
+		"--policy",
+		"gascity-core",
+		"--expect-fingerprint",
+		identity,
+	).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git signing key: %w", err)
+		return fmt.Errorf("managed signer readiness probe: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	if got := strings.TrimSpace(string(configured)); !strings.EqualFold(got, identity) {
-		return fmt.Errorf("git signing key mismatch: got %q want %q", got, identity)
-	}
-	secret, err := exec.CommandContext(probeCtx, "gpg", "--batch", "--with-colons", "--list-secret-keys", identity).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("secret signing key unavailable: %w", err)
-	}
-	for _, line := range strings.Split(string(secret), "\n") {
-		if strings.HasPrefix(line, "sec:") {
-			return nil
-		}
-	}
-	return errors.New("secret signing key probe returned no secret key")
+	return nil
 }
 
 // newTaskCheckPathResolver binds a candidate to the controller's single tick

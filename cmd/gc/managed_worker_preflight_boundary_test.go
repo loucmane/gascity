@@ -162,9 +162,31 @@ func TestCommitStartFailureEmitsManagedWorkerAttentionInSameCycle(t *testing.T) 
 	}
 }
 
-func TestProbeManagedWorkerSignerRejectsUnscopedWorkDir(t *testing.T) {
-	if err := probeManagedWorkerSigner(context.Background(), "", "SIGNER"); err == nil || !strings.Contains(err.Error(), "clean absolute path") {
-		t.Fatalf("probeManagedWorkerSigner error = %v", err)
+func TestProbeManagedWorkerSignerUsesNoSignManagedServiceReadiness(t *testing.T) {
+	frontend := filepath.Join(t.TempDir(), "managed-git-commit")
+	arguments := filepath.Join(t.TempDir(), "arguments")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + arguments + "\n"
+	if err := os.WriteFile(frontend, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previous := managedWorkerSignerFrontend
+	managedWorkerSignerFrontend = frontend
+	t.Cleanup(func() { managedWorkerSignerFrontend = previous })
+	fingerprint := "ACCEBAF0C48FC8D43C527BE0C44EB18DC6A6E30F"
+
+	if err := probeManagedWorkerSigner(context.Background(), fingerprint); err != nil {
+		t.Fatalf("probeManagedWorkerSigner: %v", err)
+	}
+	data, err := os.ReadFile(arguments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "--probe\n--policy\ngascity-core\n--expect-fingerprint\n" + fingerprint + "\n"
+	if string(data) != want {
+		t.Fatalf("probe arguments = %q, want %q", data, want)
+	}
+	if err := probeManagedWorkerSigner(context.Background(), "SIGNER"); err == nil || !strings.Contains(err.Error(), "full 40-character fingerprint") {
+		t.Fatalf("short identity error = %v", err)
 	}
 }
 

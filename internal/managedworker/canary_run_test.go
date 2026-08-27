@@ -142,7 +142,7 @@ func TestRunGoldenPathCanaryRejectsVacuousOrUnsafeEvidence(t *testing.T) {
 		"incomplete clean journey": {
 			scenario: CanaryScenarioCleanLauncher,
 			mutate:   func(e *CanaryScenarioEvidence) { e.CompletedSteps = e.CompletedSteps[:len(e.CompletedSteps)-1] },
-			want:     "eight golden-path steps",
+			want:     "nine golden-path steps",
 		},
 		"silent no work": {
 			scenario: CanaryScenarioUnreadableMail,

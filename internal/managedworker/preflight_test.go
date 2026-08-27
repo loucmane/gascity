@@ -59,6 +59,8 @@ func TestWorkerProfileDigestCoversEveryLaunchControl(t *testing.T) {
 		"provider identity": func(p *WorkerProfile) { p.Provider.SHA256 = digest("different-provider") },
 		"check path":        func(p *WorkerProfile) { p.CheckPath.SHA256 = digest("different-check") },
 		"signer identity":   func(p *WorkerProfile) { p.SignerIdentity = "OTHER" },
+		"environment":       func(p *WorkerProfile) { p.Environment["GOROOT"] = "/other/go" },
+		"toolchain":         func(p *WorkerProfile) { p.Toolchains[0].Executable.SHA256 = digest("different-go") },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
@@ -95,6 +97,10 @@ func TestPreflightVerifiesEveryManagedWorkerBoundary(t *testing.T) {
 			calls = append(calls, "provider:"+got.Name)
 			return nil
 		},
+		InspectToolchain: func(_ context.Context, got ToolchainPin, environment map[string]string) error {
+			calls = append(calls, "toolchain:"+got.Name+":"+environment["GOROOT"])
+			return nil
+		},
 		ProbeReadiness: func(_ context.Context, name string) error {
 			calls = append(calls, "readiness:"+name)
 			return nil
@@ -121,7 +127,8 @@ func TestPreflightVerifiesEveryManagedWorkerBoundary(t *testing.T) {
 	for _, want := range []string{
 		"file:/city/.gc/platform/assets/gas-city-native-control.rules",
 		"file:/cache/pack/assets/scripts/checks/build-artifact-valid.sh",
-		"provider:codex", "readiness:codex", "signer:2ECF4432C7E7982D",
+		"provider:codex", "toolchain:go:/home/loucmane/.local/share/go/1.26.7",
+		"readiness:codex", "signer:ACCEBAF0C48FC8D43C527BE0C44EB18DC6A6E30F",
 	} {
 		if !contains(calls, want) {
 			t.Fatalf("calls = %v, missing %q", calls, want)
@@ -147,9 +154,10 @@ func TestPreflightFailsClosedAtEachBoundary(t *testing.T) {
 				}
 				return []byte("check"), nil
 			},
-			InspectProvider: func(context.Context, platforminstall.ProviderPin) error { return nil },
-			ProbeReadiness:  func(context.Context, string) error { return nil },
-			ProbeSigner:     func(context.Context, string) error { return nil },
+			InspectProvider:  func(context.Context, platforminstall.ProviderPin) error { return nil },
+			InspectToolchain: func(context.Context, ToolchainPin, map[string]string) error { return nil },
+			ProbeReadiness:   func(context.Context, string) error { return nil },
+			ProbeSigner:      func(context.Context, string) error { return nil },
 		}
 	}
 
@@ -193,6 +201,12 @@ func TestPreflightFailsClosedAtEachBoundary(t *testing.T) {
 			},
 			want: "provider readiness",
 		},
+		"toolchain identity": {
+			mutateProbes: func(p *Probes) {
+				p.InspectToolchain = func(context.Context, ToolchainPin, map[string]string) error { return errors.New("go digest drift") }
+			},
+			want: "toolchain identity",
+		},
 		"signer": {
 			mutateProbes: func(p *Probes) {
 				p.ProbeSigner = func(context.Context, string) error { return errors.New("key unavailable") }
@@ -222,7 +236,7 @@ func TestPreflightFailsClosedAtEachBoundary(t *testing.T) {
 func finalizedReceipt(t *testing.T) (ProvisioningReceipt, []byte) {
 	t.Helper()
 	receipt := ProvisioningReceipt{
-		Schema:       ProvisioningReceiptSchemaV1,
+		Schema:       ProvisioningReceiptSchemaV2,
 		CanaryRunner: testCanaryRunnerPin(),
 		MemberHeads: []MemberHead{
 			{Name: "gct-xnf", Commit: strings.Repeat("a", 40)},
@@ -263,7 +277,22 @@ func testProfile() WorkerProfile {
 			Path:   "/cache/pack/assets/scripts/checks/build-artifact-valid.sh",
 			SHA256: digest("check"),
 		},
-		SignerIdentity: "2ECF4432C7E7982D",
+		SignerIdentity: "ACCEBAF0C48FC8D43C527BE0C44EB18DC6A6E30F",
+		Environment: map[string]string{
+			"GOROOT":      "/home/loucmane/.local/share/go/1.26.7",
+			"GOTOOLCHAIN": "local",
+			"PATH":        "/home/loucmane/.local/share/go/1.26.7/bin:/home/loucmane/gascity/bin:/usr/local/bin:/usr/bin:/bin",
+		},
+		Toolchains: []ToolchainPin{{
+			Name: "go",
+			Executable: ExecutablePin{
+				Path:         "/home/loucmane/.local/share/go/1.26.7/bin/go",
+				ResolvedPath: "/home/loucmane/.local/share/go/1.26.7/bin/go",
+				SHA256:       digest("go"),
+				VersionArgs:  []string{"version"},
+				Version:      "go version go1.26.7 linux/amd64",
+			},
+		}},
 		Argv: []string{
 			"codex", "--ask-for-approval", "never", "--sandbox", "workspace-write",
 		},
@@ -278,6 +307,11 @@ func cloneProfile(profile WorkerProfile) WorkerProfile {
 	profile.Argv = append([]string(nil), profile.Argv...)
 	profile.WritableRoots = append([]string(nil), profile.WritableRoots...)
 	profile.Provider.VersionArgs = append([]string(nil), profile.Provider.VersionArgs...)
+	profile.Environment = cloneStringMap(profile.Environment)
+	profile.Toolchains = append([]ToolchainPin(nil), profile.Toolchains...)
+	for index := range profile.Toolchains {
+		profile.Toolchains[index].Executable.VersionArgs = append([]string(nil), profile.Toolchains[index].Executable.VersionArgs...)
+	}
 	return profile
 }
 
