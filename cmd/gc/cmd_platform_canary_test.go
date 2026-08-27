@@ -70,6 +70,9 @@ func TestPlatformCanaryRunExecutesPinnedMatrixAndPublishesReceipt(t *testing.T) 
 		if call.Scenario != managedworker.RequiredCanaryScenarios()[index] || call.RunnerPath != runnerPath || call.RunID != "canary-cli-green" || call.CityPath != cityPath || call.LauncherSource != "/source/launcher" || call.BaseCommit != strings.Repeat("a", 40) || call.ScratchRoot != "/scratch/canary" {
 			t.Fatalf("scenario call[%d] = %+v", index, call)
 		}
+		if !reflect.DeepEqual(call.WorkerProfile, provisioning.Profiles[0]) {
+			t.Fatalf("scenario call[%d] worker profile = %+v, want %+v", index, call.WorkerProfile, provisioning.Profiles[0])
+		}
 	}
 	receiptBytes, err := os.ReadFile(managedworker.CanaryReceiptPath(cityPath))
 	if err != nil {

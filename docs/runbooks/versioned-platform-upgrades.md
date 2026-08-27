@@ -222,6 +222,35 @@ Capture immediately before apply:
 
 ## 6. Apply once, after explicit authorization
 
+### Broker-activated hosts
+
+On hosts with the fixed-operation privileged provisioning broker, use the
+broker for the control-plane file replacement and the single supervisor
+transition. Before sending the signed broker envelope, create the manifest's
+exact rollback backup and complete the normal dry-run evidence. After the
+broker reports PASS and the new runtime is stable, publish only the platform
+metadata with the installed candidate binary:
+
+```bash
+gc platform adopt \
+  --manifest /absolute/path/platform-manifest.json \
+  --dry-run
+
+gc platform adopt \
+  --manifest /absolute/path/platform-manifest.json \
+  --apply
+```
+
+`platform adopt` requires the complete candidate filesystem and rollback
+backups to be present, verifies the already-running commit/version/digest, and
+then atomically publishes the canonical manifest and activation receipt. It
+never writes the core executable or managed files and never restarts the
+supervisor. A metadata failure restores only the prior metadata; it does not
+silently replace broker-owned live bytes. This is the normal post-bootstrap
+upgrade lane.
+
+### Direct platform installer
+
 The authorization must name the exact manifest digest and permit the one
 supervisor transition. Then run exactly once:
 

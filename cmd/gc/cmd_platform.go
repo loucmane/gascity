@@ -27,11 +27,65 @@ func newPlatformCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(
+		newPlatformAdoptCmd(stdout, stderr),
 		newPlatformCanaryCmd(stdout, stderr),
 		newPlatformInstallCmd(stdout, stderr),
 		newPlatformManifestCmd(stdout, stderr),
 		newPlatformRollbackCmd(stdout, stderr),
 	)
+	return cmd
+}
+
+func newPlatformAdoptCmd(stdout, _ io.Writer) *cobra.Command {
+	var manifestPath string
+	var dryRun bool
+	var apply bool
+	cmd := &cobra.Command{
+		Use:   "adopt",
+		Short: "Publish metadata for a broker-activated platform without another restart",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if dryRun == apply {
+				return fmt.Errorf("exactly one of --dry-run or --apply is required")
+			}
+			manifest, err := loadPlatformInstallManifest(manifestPath)
+			if err != nil {
+				return err
+			}
+			if dryRun {
+				steps, err := platforminstall.AdoptPlan(manifest)
+				if err != nil {
+					return fmt.Errorf("plan platform adoption: %w", err)
+				}
+				fmt.Fprintf(stdout, "platform adopt plan release=%q manifest_sha256=%s\n", manifest.ReleaseID, manifest.ManifestSHA256) //nolint:errcheck // best-effort stdout
+				for _, step := range steps {
+					mode := "CHECK"
+					if step.Mutates {
+						mode = "MUTATE"
+					}
+					fields := []string{fmt.Sprintf("%02d", step.Order), mode, step.Action}
+					if step.Path != "" {
+						fields = append(fields, "path="+step.Path)
+					}
+					if step.SHA256 != "" {
+						fields = append(fields, "sha256="+step.SHA256)
+					}
+					fmt.Fprintln(stdout, strings.Join(fields, " ")) //nolint:errcheck // best-effort stdout
+				}
+				return nil
+			}
+			receipt, err := platforminstall.Adopt(cmd.Context(), manifest, platformLifecycleFactory())
+			if err != nil {
+				return fmt.Errorf("adopt broker-activated platform: %w", err)
+			}
+			fmt.Fprintf(stdout, "platform adopt result=%s release=%q manifest_sha256=%s artifact_sha256=%s receipt=%s\n", receipt.Result, receipt.ReleaseID, receipt.ManifestSHA256, receipt.ArtifactSHA256, manifest.ReceiptPath) //nolint:errcheck // best-effort stdout
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&manifestPath, "manifest", "", "absolute path to the digest-pinned platform manifest")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate the already-installed candidate and print the metadata-only plan")
+	cmd.Flags().BoolVar(&apply, "apply", false, "publish metadata for the already-running candidate without restart")
+	_ = cmd.MarkFlagRequired("manifest")
 	return cmd
 }
 

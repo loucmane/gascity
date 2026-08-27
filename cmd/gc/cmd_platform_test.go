@@ -96,6 +96,52 @@ func TestPlatformInstallApplyUsesManifestTransaction(t *testing.T) {
 	}
 }
 
+func TestPlatformAdoptPublishesBrokerActivatedMetadataWithoutRestart(t *testing.T) {
+	manifestPath, manifest := platformCommandFixture(t)
+	if err := os.MkdirAll(filepath.Dir(manifest.BackupPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.BackupPath, []byte("previous"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.Core.Destination, mustPlatformCommandRead(t, manifest.Core.Source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &platformCommandLifecycle{proof: platforminstall.RuntimeProof{
+		ExecutableSHA256: manifest.Core.SHA256,
+		Commit:           manifest.Activation.ExpectedCommit,
+		Version:          manifest.Activation.ExpectedVersion,
+	}}
+	previousFactory := platformLifecycleFactory
+	platformLifecycleFactory = func() platforminstall.Lifecycle { return lifecycle }
+	t.Cleanup(func() { platformLifecycleFactory = previousFactory })
+
+	var stdout, stderr bytes.Buffer
+	cmd := newPlatformCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"adopt", "--manifest", manifestPath, "--dry-run"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("dry-run Execute() error = %v; stderr=%s", err, stderr.String())
+	}
+	for _, want := range []string{"verify-installed-candidate", "verify-broker-activated-runtime", "publish-manifest", "write-activation-receipt"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("dry-run stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	cmd = newPlatformCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"adopt", "--manifest", manifestPath, "--apply"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("apply Execute() error = %v; stderr=%s", err, stderr.String())
+	}
+	if lifecycle.restarts != 0 || lifecycle.verifies != 1 {
+		t.Fatalf("lifecycle calls restart=%d verify=%d, want 0/1", lifecycle.restarts, lifecycle.verifies)
+	}
+	if !strings.Contains(stdout.String(), "platform adopt result=installed") {
+		t.Fatalf("stdout = %q, want adoption result", stdout.String())
+	}
+}
+
 func TestPlatformRollbackRequiresExactlyOneMode(t *testing.T) {
 	manifestPath, _ := platformCommandFixture(t)
 	for _, args := range [][]string{
@@ -255,7 +301,7 @@ func TestPlatformManifestRefusesConflictingExistingOutput(t *testing.T) {
 
 func TestRootRegistersPlatformCommand(t *testing.T) {
 	root := newRootCmdWithOptions(&bytes.Buffer{}, &bytes.Buffer{}, rootCommandOptions{})
-	for _, name := range []string{"install", "manifest", "rollback"} {
+	for _, name := range []string{"adopt", "install", "manifest", "rollback"} {
 		command, _, err := root.Find([]string{"platform", name})
 		if err != nil || command == nil || command.Name() != name {
 			t.Fatalf("root.Find(platform %s) = command=%v err=%v", name, command, err)

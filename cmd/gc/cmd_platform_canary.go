@@ -39,6 +39,7 @@ type platformCanaryScenarioCall struct {
 	RunnerSHA256   string
 	Scenario       string
 	ScratchRoot    string
+	WorkerProfile  managedworker.WorkerProfile
 }
 
 type platformCanaryRuntime struct {
@@ -102,6 +103,10 @@ func runPlatformCanary(ctx context.Context, options platformCanaryOptions, runti
 	if err := verifyPlatformCanaryRunner(runtime.FS, runner.Path, runner.SHA256); err != nil {
 		return managedworker.CanaryReceipt{}, "", err
 	}
+	workerProfile, err := selectCanaryWorkerProfile(provisioning)
+	if err != nil {
+		return managedworker.CanaryReceipt{}, "", err
+	}
 	receipt, err := managedworker.RunGoldenPathCanary(ctx, managedworker.CanaryRunRequest{
 		CityPath:            cityPath,
 		Environment:         environment,
@@ -122,6 +127,7 @@ func runPlatformCanary(ctx context.Context, options platformCanaryOptions, runti
 				RunnerSHA256:   options.runnerSHA256,
 				Scenario:       scenario,
 				ScratchRoot:    options.scratchRoot,
+				WorkerProfile:  workerProfile,
 			})
 		},
 	})
@@ -176,7 +182,13 @@ func runPlatformCanaryScenarioCommand(ctx context.Context, call platformCanarySc
 		"--scratch-root", call.ScratchRoot,
 	)
 	command.Dir = call.LauncherSource
-	command.Env = os.Environ()
+	profileJSON, err := json.Marshal(call.WorkerProfile)
+	if err != nil {
+		return managedworker.CanaryScenarioEvidence{}, fmt.Errorf("encode canary worker profile: %w", err)
+	}
+	command.Env = overlayEnvironment(os.Environ(), map[string]string{
+		"GCT_CANARY_WORKER_PROFILE_JSON": string(profileJSON),
+	})
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
@@ -188,6 +200,22 @@ func runPlatformCanaryScenarioCommand(ctx context.Context, call platformCanarySc
 		return managedworker.CanaryScenarioEvidence{}, fmt.Errorf("runner scenario %q output: %w", call.Scenario, err)
 	}
 	return evidence, nil
+}
+
+func selectCanaryWorkerProfile(receipt managedworker.ProvisioningReceipt) (managedworker.WorkerProfile, error) {
+	var matches []managedworker.WorkerProfile
+	for _, profile := range receipt.Profiles {
+		if strings.HasSuffix(profile.Name, "/gc.implementation-worker") {
+			matches = append(matches, profile)
+		}
+	}
+	if len(matches) != 1 {
+		return managedworker.WorkerProfile{}, fmt.Errorf("canary requires exactly one gc.implementation-worker profile, got %d", len(matches))
+	}
+	if len(matches[0].Environment) == 0 || len(matches[0].Toolchains) == 0 {
+		return managedworker.WorkerProfile{}, errors.New("canary requires a v2 implementation-worker profile with environment and toolchains")
+	}
+	return matches[0], nil
 }
 
 func validatePlatformCanaryRuntime(runtime platformCanaryRuntime) error {

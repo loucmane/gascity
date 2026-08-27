@@ -731,6 +731,10 @@ func (i *installer) rollbackTransactionAndRestoreMetadata(manifest Manifest, sta
 	if err := i.rollbackTransaction(manifest, state); err != nil {
 		return err
 	}
+	return i.restorePlatformMetadata(manifest, state)
+}
+
+func (i *installer) restorePlatformMetadata(manifest Manifest, state *preflight) error {
 	if state.previousMetadata != nil {
 		if err := i.writeAtomic(manifest.ReceiptPath, state.previousMetadata.receipt, 0o644); err != nil {
 			return fmt.Errorf("restore previous receipt: %w", err)

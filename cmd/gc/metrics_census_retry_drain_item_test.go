@@ -12,7 +12,8 @@ import (
 // convoy command and its workflow compatibility alias. Pin the resolved
 // allocations so the collision cannot silently return through a future
 // merge: platform canary keeps 200, both retry-drain-item census rows
-// move together to 201, and next_id advances past every allocation.
+// move together to 201, platform adopt takes the next fresh allocation,
+// and next_id advances past every allocation.
 func TestRetryDrainItemCensusAllocationSurvivesPlatformCanary(t *testing.T) {
 	data, err := os.ReadFile("productmetrics_command_census.json")
 	if err != nil {
@@ -26,6 +27,7 @@ func TestRetryDrainItemCensusAllocationSurvivesPlatformCanary(t *testing.T) {
 		t.Fatalf("validate census manifest: %v", err)
 	}
 	wantIDs := map[string]uint16{
+		"gc platform adopt":            202,
 		"gc platform canary":           200,
 		"gc convoy retry-drain-item":   201,
 		"gc workflow retry-drain-item": 201,
@@ -46,7 +48,7 @@ func TestRetryDrainItemCensusAllocationSurvivesPlatformCanary(t *testing.T) {
 			t.Errorf("census %q = id %d, want %d", path, id, want)
 		}
 	}
-	if want := uint16(202); manifest.NextID != want {
+	if want := uint16(203); manifest.NextID != want {
 		t.Errorf("census next_id = %d, want %d", manifest.NextID, want)
 	}
 }
