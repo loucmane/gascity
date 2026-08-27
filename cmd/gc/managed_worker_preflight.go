@@ -186,7 +186,7 @@ func probeManagedWorkerToolchain(ctx context.Context, pin managedworker.Toolchai
 }
 
 func overlayEnvironment(base []string, overrides map[string]string) []string {
-	values := make(map[string]string, len(base)+len(overrides))
+	values := make(map[string]string)
 	for _, entry := range base {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok {
