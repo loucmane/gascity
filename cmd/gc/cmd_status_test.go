@@ -16,7 +16,9 @@ import (
 	"github.com/gastownhall/gascity/internal/api"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/suspensionstate"
 	"github.com/gastownhall/gascity/internal/worker"
 )
 
@@ -433,6 +435,71 @@ func TestRouteRigStatus_SixRowMatrix(t *testing.T) {
 			}
 			if tc.wantStdout != "" && !strings.Contains(stdout.String(), tc.wantStdout) {
 				t.Errorf("stdout missing %q:\n%s", tc.wantStdout, stdout.String())
+			}
+		})
+	}
+}
+
+func TestRouteRigStatus_JSONFallbackUsesEffectiveSuspensionState(t *testing.T) {
+	tests := []struct {
+		name             string
+		suspendedOnStart bool
+		runtimeOverride  *bool
+		wantSuspended    bool
+	}{
+		{
+			name:            "runtime suspend overrides resumed default",
+			runtimeOverride: boolPtrTest(true),
+			wantSuspended:   true,
+		},
+		{
+			name:             "runtime resume overrides suspended default",
+			suspendedOnStart: true,
+			runtimeOverride:  boolPtrTest(false),
+			wantSuspended:    false,
+		},
+		{
+			name:             "suspended default applies without runtime override",
+			suspendedOnStart: true,
+			wantSuspended:    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cityPath := writeRigStatusTestCity(t)
+			if tc.runtimeOverride != nil {
+				st := suspensionstate.State{
+					Rigs: map[string]suspensionstate.Override{
+						"frontend": {Suspended: tc.runtimeOverride},
+					},
+				}
+				if err := saveSuspensionState(fsys.OSFS{}, cityPath, st); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			rig := config.Rig{
+				Name:             "frontend",
+				Path:             "/tmp/frontend",
+				SuspendedOnStart: tc.suspendedOnStart,
+			}
+			var stdout, stderr bytes.Buffer
+			code := routeRigStatus(
+				cityPath, "test-city", rig, nil, "", nil, nil, nil,
+				runtime.NewFake(), newFakeDrainOps(), nil, "controller-down", true,
+				&stdout, &stderr,
+			)
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0; stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+			}
+
+			var got RigStatusJSON
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatalf("decode JSON: %v; stdout=%q", err, stdout.String())
+			}
+			if got.Rig.Suspended != tc.wantSuspended {
+				t.Fatalf("rig.suspended = %v, want %v; stdout=%s", got.Rig.Suspended, tc.wantSuspended, stdout.String())
 			}
 		})
 	}
