@@ -122,6 +122,11 @@ auto-export behavior, invoke bd directly.`,
 // re-loaded the whole city config inside the store open.
 var openBdBeadProbeStoreForTest func(string, string, *config.City) (beads.Store, error)
 
+// openBdReadyStoreForTest lets the public-ready regression exercise the same
+// scope-resolved store contract as the controller without opening a live Dolt
+// connection. Production ready handling must leave this nil.
+var openBdReadyStoreForTest func(string, string, *config.City) (beads.Store, error)
+
 var bdBeadExists = func(cityPath string, cfg *config.City, target execStoreTarget, beadID string) (bool, error) {
 	var store beads.Store
 	var err error
