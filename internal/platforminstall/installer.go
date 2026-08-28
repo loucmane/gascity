@@ -117,15 +117,8 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 	} else if got != state.previousSHA256 {
 		return Receipt{}, fmt.Errorf("verify prior-binary backup: sha256 got %s want %s", got, state.previousSHA256)
 	}
-	for index := range state.managedFiles {
-		file := &state.managedFiles[index]
-		if !file.previousPresent || file.reuseBackup {
-			continue
-		}
-		if err := i.writeAtomic(file.file.BackupPath, file.previous, os.FileMode(file.file.Mode)); err != nil {
-			return Receipt{}, fmt.Errorf("write exact managed-file backup %q: %w", file.file.Name, err)
-		}
-		file.reuseBackup = true
+	if err := i.preserveManagedFileBackups(state); err != nil {
+		return Receipt{}, err
 	}
 
 	if !state.coreAlreadyInstalled {
@@ -140,21 +133,10 @@ func (i *installer) install(manifest Manifest) (Receipt, error) {
 		}
 		state.corePublished = true
 	}
-	for index := range state.managedFiles {
-		file := &state.managedFiles[index]
-		if file.alreadyInstalled {
-			continue
-		}
-		if err := i.writeAtomic(file.file.Destination, file.candidate, os.FileMode(file.file.Mode)); err != nil {
-			if got, digestErr := digestRegularFile(file.file.Destination); digestErr == nil && got == file.file.SHA256 {
-				file.published = true
-			}
-			if rollbackErr := i.rollbackTransaction(manifest, state); rollbackErr != nil {
-				return Receipt{}, fmt.Errorf("publish managed file %q: %w; rollback also failed: %w", file.file.Name, err, rollbackErr)
-			}
-			return Receipt{}, fmt.Errorf("publish managed file %q: %w", file.file.Name, err)
-		}
-		file.published = true
+	if err := i.publishManagedFiles(state, func() error {
+		return i.rollbackTransaction(manifest, state)
+	}); err != nil {
+		return Receipt{}, err
 	}
 	receipt := Receipt{
 		Schema:         receiptSchemaV1,
@@ -640,6 +622,40 @@ func verifyRegularFileDigest(path, want, name string) error {
 	return nil
 }
 
+func (i *installer) preserveManagedFileBackups(state *preflight) error {
+	for index := range state.managedFiles {
+		file := &state.managedFiles[index]
+		if !file.previousPresent || file.reuseBackup {
+			continue
+		}
+		if err := i.writeAtomic(file.file.BackupPath, file.previous, os.FileMode(file.file.Mode)); err != nil {
+			return fmt.Errorf("write exact managed-file backup %q: %w", file.file.Name, err)
+		}
+		file.reuseBackup = true
+	}
+	return nil
+}
+
+func (i *installer) publishManagedFiles(state *preflight, rollback func() error) error {
+	for index := range state.managedFiles {
+		file := &state.managedFiles[index]
+		if file.alreadyInstalled {
+			continue
+		}
+		if err := i.writeAtomic(file.file.Destination, file.candidate, os.FileMode(file.file.Mode)); err != nil {
+			if got, digestErr := digestRegularFile(file.file.Destination); digestErr == nil && got == file.file.SHA256 {
+				file.published = true
+			}
+			if rollbackErr := rollback(); rollbackErr != nil {
+				return fmt.Errorf("publish managed file %q: %w; rollback also failed: %w", file.file.Name, err, rollbackErr)
+			}
+			return fmt.Errorf("publish managed file %q: %w", file.file.Name, err)
+		}
+		file.published = true
+	}
+	return nil
+}
+
 func (i *installer) writeAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := requireAbsentOrRegular(path, "atomic destination"); err != nil {
 		return err
@@ -689,9 +705,29 @@ func syncDirectory(path string) error {
 }
 
 func (i *installer) rollbackTransaction(manifest Manifest, state *preflight) error {
+	if err := i.rollbackManagedFiles(state, true); err != nil {
+		return err
+	}
+	if !state.coreAlreadyInstalled && !state.corePublished {
+		return nil
+	}
+	if err := i.writeAtomic(manifest.Core.Destination, state.previous, os.FileMode(manifest.Core.Mode)); err != nil {
+		return err
+	}
+	got, err := digestRegularFile(manifest.Core.Destination)
+	if err != nil {
+		return err
+	}
+	if got != state.previousSHA256 {
+		return fmt.Errorf("rollback sha256 got %s want %s", got, state.previousSHA256)
+	}
+	return nil
+}
+
+func (i *installer) rollbackManagedFiles(state *preflight, includeAlreadyInstalled bool) error {
 	for index := len(state.managedFiles) - 1; index >= 0; index-- {
 		file := state.managedFiles[index]
-		if !file.alreadyInstalled && !file.published {
+		if !file.published && (!includeAlreadyInstalled || !file.alreadyInstalled) {
 			continue
 		}
 		if !file.previousPresent {
@@ -710,19 +746,6 @@ func (i *installer) rollbackTransaction(manifest Manifest, state *preflight) err
 		if got != file.file.PreviousSHA256 {
 			return fmt.Errorf("restore managed file %q sha256 got %s want %s", file.file.Name, got, file.file.PreviousSHA256)
 		}
-	}
-	if !state.coreAlreadyInstalled && !state.corePublished {
-		return nil
-	}
-	if err := i.writeAtomic(manifest.Core.Destination, state.previous, os.FileMode(manifest.Core.Mode)); err != nil {
-		return err
-	}
-	got, err := digestRegularFile(manifest.Core.Destination)
-	if err != nil {
-		return err
-	}
-	if got != state.previousSHA256 {
-		return fmt.Errorf("rollback sha256 got %s want %s", got, state.previousSHA256)
 	}
 	return nil
 }
