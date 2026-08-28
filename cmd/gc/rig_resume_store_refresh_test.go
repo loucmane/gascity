@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
@@ -126,8 +125,8 @@ func TestResumedRigStoreRebuildSeesRoutedWorkWithoutRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create routed work: %v", err)
 	}
-	if _, err := before.Get(created.ID); err == nil {
-		t.Fatal("suspended startup cache unexpectedly observed backing-store work")
+	if got := before.Stats().TotalBeads; got != 0 {
+		t.Fatalf("suspended startup cache beads = %d, want 0 before refresh", got)
 	}
 
 	resumed := false
@@ -143,11 +142,11 @@ func TestResumedRigStoreRebuildSeesRoutedWorkWithoutRestart(t *testing.T) {
 	if _, err := after.Get(created.ID); err != nil {
 		t.Fatalf("resumed rig store did not expose routed work: %v", err)
 	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for after.Stats().State != "live" && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	if got := after.Stats().TotalBeads; got != 1 {
+		t.Fatalf("resumed rig cache beads = %d, want routed work in reconciliation snapshot", got)
 	}
+
+	awaitCond(t, func() bool { return after.Stats().State == "live" }, "resumed rig cache to become live")
 	if stats := after.Stats(); stats.State != "live" {
 		t.Fatalf("resumed cache state = %q, want live reconciler-backed cache", stats.State)
 	}
