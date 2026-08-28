@@ -79,6 +79,16 @@ type TemplateParams struct {
 	FPExtra map[string]string
 	// ResolvedProvider is the resolved provider spec (for ACP routing, etc.).
 	ResolvedProvider *config.ResolvedProvider
+	// DispatchOptionOverrides carries validated opt_<key> choices from the exact
+	// routed work bead that caused this concrete pool session to be desired.
+	// It is transient launch input: it is never persisted onto the session bead
+	// or included in the durable config fingerprints.
+	DispatchOptionOverrides map[string]string
+	// DispatchOptionsResolved distinguishes an exact trigger-bead lookup that
+	// legitimately produced no options from the legacy path where no routed
+	// trigger snapshot was available and the launch must fall back to scanning
+	// assigned in-progress work.
+	DispatchOptionsResolved bool
 	// TemplateName is the config template name (pool base name or qualified name).
 	// For pool instances this is the base template (e.g., "dog"), not the instance.
 	TemplateName string

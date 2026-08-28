@@ -2347,6 +2347,9 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	managedWorkerPreflightWork := make([]beads.Bead, 0, len(awakeAssignedWorkBeads)+len(result.ReadyUnassignedRoutedWorkBeads))
 	managedWorkerPreflightWork = append(managedWorkerPreflightWork, awakeAssignedWorkBeads...)
 	managedWorkerPreflightWork = append(managedWorkerPreflightWork, result.ReadyUnassignedRoutedWorkBeads...)
+	managedWorkerPreflightStoreRefs := make([]string, 0, len(awakeAssignedStoreRefs)+len(result.ReadyUnassignedRoutedWorkStoreRefs))
+	managedWorkerPreflightStoreRefs = append(managedWorkerPreflightStoreRefs, awakeAssignedStoreRefs...)
+	managedWorkerPreflightStoreRefs = append(managedWorkerPreflightStoreRefs, result.ReadyUnassignedRoutedWorkStoreRefs...)
 	reconcileStartOptions := []startExecutionOption{
 		withAsyncStartExecution(),
 		withAsyncStartFollowUp(cr.requestAsyncStartFollowUpTick),
@@ -2358,6 +2361,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 		withReadyAssignedFlags(readyAssignedFlagsForBeads(result.ReadyAssigned, awakeAssignedWorkBeads, awakeAssignedStoreRefs)),
 		withManagedWorkerPermissionRevision(cr.configRev),
 		withTaskCheckPathResolver(newTaskCheckPathResolver(managedWorkerPreflightWork)),
+		withTaskOptionResolver(newTaskOptionResolver(managedWorkerPreflightWork, managedWorkerPreflightStoreRefs)),
 	}
 	if bootReconcile {
 		// #3288: skip the per-session orphan/failed-create session-bead closes on

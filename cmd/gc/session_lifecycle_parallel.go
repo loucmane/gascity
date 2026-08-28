@@ -308,6 +308,7 @@ type startExecutionOptions struct {
 	maxSessionAgeTr                 maxSessionAgeTracker
 	assignedWorkDeferTr             assignedWorkDeferTracker
 	workDirResolver                 taskWorkDirResolver
+	taskOptionResolver              taskOptionResolver
 	checkPathResolver               taskCheckPathResolver
 	managedWorkerPermissionRevision string
 	managedWorkerProbes             *managedworker.Probes
@@ -328,6 +329,8 @@ type startExecutionOptions struct {
 type startExecutionOption func(*startExecutionOptions)
 
 type taskWorkDirResolver func(startCandidate, *config.City) string
+
+type taskOptionResolver func(startCandidate, *config.City, *config.ResolvedProvider) (map[string]string, bool)
 
 func withAsyncStartExecution() startExecutionOption {
 	return func(opts *startExecutionOptions) {
@@ -380,6 +383,12 @@ func withAssignedWorkDeferTracker(tr assignedWorkDeferTracker) startExecutionOpt
 func withTaskWorkDirResolver(resolver taskWorkDirResolver) startExecutionOption {
 	return func(opts *startExecutionOptions) {
 		opts.workDirResolver = resolver
+	}
+}
+
+func withTaskOptionResolver(resolver taskOptionResolver) startExecutionOption {
+	return func(opts *startExecutionOptions) {
+		opts.taskOptionResolver = resolver
 	}
 }
 
@@ -993,7 +1002,15 @@ func buildPreparedStartWithWorkDirResolver(
 	// "effort". Apply them after core/live hash calculation because they are
 	// dispatch inputs from the current work bead, not durable session config.
 	// Explicit session template_overrides still win per key.
-	dispatchOptions := resolveTaskOptionOverrides(store, tp.ResolvedProvider, taskWorkDirAssignees(candidate, cfg)...)
+	var dispatchOptions map[string]string
+	if tp.DispatchOptionsResolved {
+		dispatchOptions = make(map[string]string, len(tp.DispatchOptionOverrides))
+		for key, value := range tp.DispatchOptionOverrides {
+			dispatchOptions[key] = value
+		}
+	} else {
+		dispatchOptions = resolveTaskOptionOverrides(store, tp.ResolvedProvider, taskWorkDirAssignees(candidate, cfg)...)
+	}
 	if len(dispatchOptions) > 0 {
 		launchOverrides := make(map[string]string, len(dispatchOptions))
 		for k, v := range dispatchOptions {
@@ -2897,6 +2914,9 @@ func executePlannedStartsTraced(
 							continue
 						}
 					}
+				}
+				if startOpts.taskOptionResolver != nil {
+					candidate.tp.DispatchOptionOverrides, candidate.tp.DispatchOptionsResolved = startOpts.taskOptionResolver(candidate, cfg, candidate.tp.ResolvedProvider)
 				}
 				item, err := prepareStartCandidateForCity(candidate, cityPath, cityName, cfg, sp, store, clk, stderr, startOpts.workDirResolver)
 				if err != nil {
