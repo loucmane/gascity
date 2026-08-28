@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -927,6 +928,89 @@ esac
 		if stderr.String() != "" {
 			t.Fatalf("doBd(%v) stderr = %q, want empty", args, stderr.String())
 		}
+	}
+}
+
+func TestGcBdReadyAgreesWithControllerOnFailedBlockingOutcome(t *testing.T) {
+	disableManagedDoltRecoveryForTest(t)
+
+	origCityFlag := cityFlag
+	origRigFlag := rigFlag
+	origOpen := openBdReadyStoreForTest
+	t.Cleanup(func() {
+		cityFlag = origCityFlag
+		rigFlag = origRigFlag
+		openBdReadyStoreForTest = origOpen
+	})
+	cityFlag = ""
+	rigFlag = ""
+
+	store := beads.NewMemStore()
+	blocker, err := store.Create(beads.Bead{Title: "failed prerequisite", Type: "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependent, err := store.Create(beads.Bead{Title: "must remain blocked", Type: "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eligible, err := store.Create(beads.Bead{Title: "still controller ready", Type: "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DepAdd(dependent.ID, blocker.ID, "blocks"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CloseAll([]string{blocker.ID}, map[string]string{"gc.outcome": "fail"}); err != nil {
+		t.Fatal(err)
+	}
+	controllerReady, err := store.Ready()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bead := range controllerReady {
+		if bead.ID == dependent.ID {
+			t.Fatalf("controller Ready released %s after blocker %s closed with gc.outcome=fail", dependent.ID, blocker.ID)
+		}
+	}
+	openBdReadyStoreForTest = func(string, string, *config.City) (beads.Store, error) {
+		return store, nil
+	}
+
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	setCwd(t, cityDir)
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte("[workspace]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeBuiltinImportsFixture(t, cityDir, "core", "bd")
+
+	binDir := t.TempDir()
+	script := filepath.Join(binDir, "bd")
+	readyJSON := fmt.Sprintf(`[{"id":%q,"title":%q,"status":"open","issue_type":"task"},{"id":%q,"title":%q,"status":"open","issue_type":"task"}]`, dependent.ID, dependent.Title, eligible.ID, eligible.Title)
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nset -eu\nprintf '%s\\n' '"+readyJSON+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GC_CITY_PATH", cityDir)
+
+	var stdout, stderr bytes.Buffer
+	if got := doBd([]string{"ready", "--limit", "1", "--json"}, &stdout, &stderr); got != 0 {
+		t.Fatalf("doBd(ready) = %d, want 0; stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	var publicReady []beads.Bead
+	if err := json.Unmarshal(stdout.Bytes(), &publicReady); err != nil {
+		t.Fatalf("decode gc bd ready JSON: %v; stdout=%q", err, stdout.String())
+	}
+	for _, bead := range publicReady {
+		if bead.ID == dependent.ID {
+			t.Fatalf("gc bd ready reported %s as plainly ready while controller withheld it; stdout=%s", dependent.ID, stdout.String())
+		}
+	}
+	if len(publicReady) != 1 || publicReady[0].ID != eligible.ID {
+		t.Fatalf("gc bd ready = %+v, want only controller-ready %s after failed row is filtered before --limit", publicReady, eligible.ID)
 	}
 }
 

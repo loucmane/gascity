@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -121,6 +122,11 @@ auto-export behavior, invoke bd directly.`,
 // the city config the caller already loaded: without it, every candidate probe
 // re-loaded the whole city config inside the store open.
 var openBdBeadProbeStoreForTest func(string, string, *config.City) (beads.Store, error)
+
+// openBdReadyStoreForTest lets the public-ready regression exercise the same
+// scope-resolved store contract as the controller without opening a live Dolt
+// connection. Production ready handling must leave this nil.
+var openBdReadyStoreForTest func(string, string, *config.City) (beads.Store, error)
 
 var bdBeadExists = func(cityPath string, cfg *config.City, target execStoreTarget, beadID string) (bool, error) {
 	var store beads.Store
@@ -315,11 +321,22 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gc bd: bd not found in PATH") //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	readyPlan, plannedArgs, err := planBdReadyOutcome(bdArgs)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc bd: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	bdArgs = plannedArgs
 
 	cmd := exec.Command(bdPath, bdArgs...)
 	cmd.Dir = target.ScopeRoot
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
+	var readyStdout bytes.Buffer
+	if readyPlan.enabled {
+		cmd.Stdout = &readyStdout
+	} else {
+		cmd.Stdout = stdout
+	}
 	// Tee stderr through a bounded head buffer alongside the operator's
 	// pipe so we can scan it post-exec for bd's silent-fallback-to-on-disk
 	// marker. Only stderr is teed: bd writes its auto-import banner there,
@@ -370,6 +387,9 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 	if bdOutputIndicatesSilentFallback(stderrScan.String()) {
 		fmt.Fprintln(stderr, bdSilentFallbackUserMessage) //nolint:errcheck // best-effort stderr
 		return bdSilentFallbackExitCode
+	}
+	if readyPlan.enabled {
+		return emitOutcomeAwareBdReady(readyPlan, readyStdout.Bytes(), target, cityPath, cfg, stdout, stderr)
 	}
 
 	return 0

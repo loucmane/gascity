@@ -475,6 +475,44 @@ func IsReadyBlockingDependencySatisfiedFor(dependent, blocker Bead) bool {
 	return IsReadyBlockingDependencySatisfied(blocker)
 }
 
+// ReadyBlockingDependenciesSatisfied asks the store for dependent's current
+// dependency edges and applies the same outcome-aware predicate used by the
+// controller. External bd considers every closed blocker satisfied; Gas City
+// deliberately does not release ordinary downstream work when a blocker
+// closes with gc.outcome=fail.
+func ReadyBlockingDependenciesSatisfied(store Store, dependent Bead) (bool, error) {
+	blockers, err := UnsatisfiedReadyBlockingDependencies(store, dependent)
+	if err != nil {
+		return false, err
+	}
+	return len(blockers) == 0, nil
+}
+
+// UnsatisfiedReadyBlockingDependencies returns the current blocking targets
+// that prevent dependent from being controller-ready. The returned beads are
+// authoritative store reads, so callers can explain the exact failed/open
+// blocker instead of merely hiding a conflicting external-bd projection.
+func UnsatisfiedReadyBlockingDependencies(store Store, dependent Bead) ([]Bead, error) {
+	deps, err := store.DepList(dependent.ID, "down")
+	if err != nil {
+		return nil, fmt.Errorf("listing blocking dependencies for %s: %w", dependent.ID, err)
+	}
+	var blockers []Bead
+	for _, dep := range deps {
+		if !IsReadyBlockingDependencyType(dep.Type) {
+			continue
+		}
+		blocker, err := store.Get(dep.DependsOnID)
+		if err != nil {
+			return nil, fmt.Errorf("reading blocking dependency %s for %s: %w", dep.DependsOnID, dependent.ID, err)
+		}
+		if !IsReadyBlockingDependencySatisfiedFor(dependent, blocker) {
+			blockers = append(blockers, blocker)
+		}
+	}
+	return blockers, nil
+}
+
 func isReadyTerminalizer(bead Bead) bool {
 	switch bead.Metadata[beadmeta.KindMetadataKey] {
 	case beadmeta.KindCleanup, beadmeta.KindWorkflowFinalize:
