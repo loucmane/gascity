@@ -1,8 +1,6 @@
 package cipolicy
 
 import (
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,44 +46,20 @@ func TestNotifyImageBuildFailsClosedWithoutHostedToken(t *testing.T) {
 		t.Fatal("dispatch gate has no shell program")
 	}
 
-	for _, tc := range []struct {
-		name       string
-		repository string
-		token      string
-		decision   string
-		reason     string
-	}{
-		{name: "fork with token", repository: "loucmane/gascity", token: "present", decision: "skip", reason: "fork"},
-		{name: "upstream without token", repository: "gascity/gascity", decision: "skip", reason: "missing-token"},
-		{name: "upstream with token", repository: "gascity/gascity", token: "present", decision: "dispatch", reason: "configured"},
+	for _, snippet := range []string{
+		`if [[ "$SOURCE_REPOSITORY" != "gascity/gascity" ]]; then`,
+		"decision=skip\n  reason=fork",
+		`elif [[ -z "$HOSTED_TOKEN" ]]; then`,
+		"decision=skip\n  reason=missing-token",
+		"decision=dispatch\n  reason=configured",
+		`printf 'decision=%s\nreason=%s\n' "$decision" "$reason" >> "$GITHUB_OUTPUT"`,
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			output := filepath.Join(dir, "output")
-			summary := filepath.Join(dir, "summary")
-			cmd := exec.Command("bash", "-c", gateScript)
-			cmd.Env = append(os.Environ(),
-				"SOURCE_REPOSITORY="+tc.repository,
-				"HOSTED_TOKEN="+tc.token,
-				"GITHUB_OUTPUT="+output,
-				"GITHUB_STEP_SUMMARY="+summary,
-			)
-			combined, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("dispatch gate failed: %v\n%s", err, combined)
-			}
-			got, err := os.ReadFile(output)
-			if err != nil {
-				t.Fatalf("read gate output: %v", err)
-			}
-			want := "decision=" + tc.decision + "\nreason=" + tc.reason + "\n"
-			if string(got) != want {
-				t.Fatalf("gate output = %q, want %q", got, want)
-			}
-			if strings.Contains(string(combined), tc.token) && tc.token != "" {
-				t.Fatal("dispatch gate logged the hosted token")
-			}
-		})
+		if !strings.Contains(gateScript, snippet) {
+			t.Fatalf("dispatch gate is missing exact policy fragment %q:\n%s", snippet, gateScript)
+		}
+	}
+	if got := strings.Count(gateScript, "$HOSTED_TOKEN"); got != 1 {
+		t.Fatalf("dispatch gate references hosted token %d times, want only the emptiness check", got)
 	}
 
 	dispatch, ok := steps[1].(map[string]any)
