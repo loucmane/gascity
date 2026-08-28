@@ -10,6 +10,7 @@ import (
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/runtime"
+	sessionpkg "github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/session/sessiontest"
 	"github.com/gastownhall/gascity/internal/shellquote"
 )
@@ -246,6 +247,44 @@ func TestRoutedTriggerOptionsApplyBeforeClaim(t *testing.T) {
 	}
 	if !strings.Contains(prepared.cfg.Command, "--effort high") {
 		t.Fatalf("prepared command = %q, want routed --effort option before claim", prepared.cfg.Command)
+	}
+}
+
+func TestRoutedTriggerOptionsStayStoreScoped(t *testing.T) {
+	cityWork := beads.Bead{
+		ID: "shared-id",
+		Metadata: map[string]string{
+			beadmeta.OptionMetadataPrefix + "model": "sonnet",
+		},
+	}
+	rigWork := beads.Bead{
+		ID: "shared-id",
+		Metadata: map[string]string{
+			beadmeta.OptionMetadataPrefix + "model": "opus",
+		},
+	}
+	resolver := newTaskOptionResolver(
+		[]beads.Bead{cityWork, rigWork},
+		[]string{"city:test", "rig:blog"},
+	)
+	provider := optionSchemaProvider()
+
+	cityOptions, cityResolved := resolver(startCandidate{info: sessionpkg.Info{
+		TriggerBeadID:       "shared-id",
+		TriggerBeadStoreRef: "city:test",
+	}}, nil, provider)
+	rigOptions, rigResolved := resolver(startCandidate{info: sessionpkg.Info{
+		TriggerBeadID:       "shared-id",
+		TriggerBeadStoreRef: "rig:blog",
+	}}, nil, provider)
+	if !cityResolved || !rigResolved {
+		t.Fatalf("resolved = city:%v rig:%v, want both true", cityResolved, rigResolved)
+	}
+	if got := cityOptions["model"]; got != "sonnet" {
+		t.Fatalf("city model = %q, want sonnet", got)
+	}
+	if got := rigOptions["model"]; got != "opus" {
+		t.Fatalf("rig model = %q, want opus", got)
 	}
 }
 
