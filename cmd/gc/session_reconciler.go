@@ -5565,6 +5565,41 @@ func workBeadOptionOverrides(b beads.Bead, rp *config.ResolvedProvider) (map[str
 	return overrides, sawOptions
 }
 
+// newTaskOptionResolver indexes the work snapshot by the same store-scoped
+// trigger identity persisted on pool session beads. A fresh routed session is
+// started before the worker claims its bead, so assignee-only scans cannot see
+// its opt_<key> launch choices. Resolving the exact trigger row preserves the
+// demand-to-session binding and avoids borrowing options from another queued
+// bead for the same pool.
+func newTaskOptionResolver(work []beads.Bead, storeRefs []string) taskOptionResolver {
+	index := make(map[storeScopedBeadKey]beads.Bead, len(work))
+	for i, bead := range work {
+		storeRef := ""
+		if i < len(storeRefs) {
+			storeRef = storeRefs[i]
+		}
+		index[storeScopedBeadKey{
+			StoreRef: normalizeDemandStoreRef(storeRef),
+			ID:       strings.TrimSpace(bead.ID),
+		}] = bead
+	}
+	return func(candidate startCandidate, _ *config.City, rp *config.ResolvedProvider) (map[string]string, bool) {
+		triggerID := strings.TrimSpace(candidate.info.TriggerBeadID)
+		if triggerID == "" {
+			return nil, false
+		}
+		bead, ok := index[storeScopedBeadKey{
+			StoreRef: normalizeDemandStoreRef(candidate.info.TriggerBeadStoreRef),
+			ID:       triggerID,
+		}]
+		if !ok {
+			return nil, false
+		}
+		overrides, _ := workBeadOptionOverrides(bead, rp)
+		return overrides, true
+	}
+}
+
 type assignedTaskWorkDir struct {
 	path      string
 	createdAt time.Time
