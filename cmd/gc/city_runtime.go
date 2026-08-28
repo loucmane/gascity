@@ -2221,6 +2221,10 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 	})
 	if len(released) > 0 {
 		for _, r := range released {
+			if r.ContinuationGroupCleared {
+				fmt.Fprintf(cr.stderr, "cleared orphaned continuation group: %s\n", r.ID) //nolint:errcheck
+				continue
+			}
 			fmt.Fprintf(cr.stderr, "released orphaned pool work: %s\n", r.ID) //nolint:errcheck
 		}
 		// Turn the otherwise-silent reopen into an observable signal. The reopen

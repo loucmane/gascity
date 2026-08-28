@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,8 +58,26 @@ func sessionBeadAssigneeIdentitiesInfo(i session.Info) []string {
 }
 
 type releasedPoolAssignment struct {
-	ID    string
-	Index int
+	ID                       string
+	Index                    int
+	ContinuationGroupCleared bool
+}
+
+type continuationGroupKey struct {
+	StoreRef string
+	RootID   string
+	Group    string
+}
+
+type orphanedContinuationGroupCandidate struct {
+	store beads.Store
+	bead  beads.Bead
+}
+
+type orphanedContinuationGroupPlan struct {
+	key        continuationGroupKey
+	store      beads.Store
+	candidates []orphanedContinuationGroupCandidate
 }
 
 // PoolSessionName derives the tmux session name for a pool worker session.
@@ -108,7 +127,262 @@ func releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
 	if result.snapshotQueryPartial() {
 		return nil
 	}
-	return releaseOrphanedPoolAssignments(store, cfg, cityPath, openSessionInfos, result.AssignedWorkBeads, result.AssignedWorkStores, result.AssignedWorkStoreRefs, rigStores)
+
+	// Discover every continuation-group member before the first mutation. Open,
+	// unassigned siblings never enter AssignedWorkBeads, so the assigned-work
+	// snapshot alone cannot prove whether their group still has a live owner.
+	// Any store read failure aborts the whole pass before even the existing
+	// assigned-work release runs; a partial cross-store frame must never be
+	// interpreted as proof that a group is orphaned.
+	groupCandidates, complete := planOrphanedContinuationGroupClears(
+		store, cfg, cityPath, openSessionInfos, result,
+	)
+	if !complete {
+		return nil
+	}
+
+	released := releaseOrphanedPoolAssignments(
+		store,
+		cfg,
+		cityPath,
+		openSessionInfos,
+		result.AssignedWorkBeads,
+		result.AssignedWorkStores,
+		result.AssignedWorkStoreRefs,
+		rigStores,
+	)
+	for _, group := range groupCandidates {
+		if live, complete := continuationGroupHasLiveSession(group, cfg, cityPath, openSessionInfos); !complete || live {
+			continue
+		}
+		for _, candidate := range group.candidates {
+			if !clearOrphanedContinuationGroupCandidate(candidate) {
+				// A lost fence may be a concurrent claim. Stop this group
+				// immediately instead of clearing later siblings around a new
+				// owner; a later complete tick can safely converge it.
+				break
+			}
+			released = append(released, releasedPoolAssignment{
+				ID:                       candidate.bead.ID,
+				Index:                    -1,
+				ContinuationGroupCleared: true,
+			})
+		}
+	}
+	return released
+}
+
+// planOrphanedContinuationGroupClears takes one complete, live cross-store
+// snapshot of continuation-group work and returns only open/unassigned members
+// whose {store, root, group} has no assignment owned by an open session. The
+// route is deliberately not part of the group key: a continuation group may
+// span worker/reviewer roles, and one live session on either role keeps every
+// sibling's group routing vector intact.
+func planOrphanedContinuationGroupClears(
+	store beads.Store,
+	cfg *config.City,
+	cityPath string,
+	openSessionInfos []session.Info,
+	result DesiredStateResult,
+) ([]orphanedContinuationGroupPlan, bool) {
+	if store == nil || cfg == nil {
+		return nil, true
+	}
+
+	groups := make(map[continuationGroupKey][]orphanedContinuationGroupCandidate)
+	seen := make(map[storeScopedBeadKey]struct{})
+	appendSnapshot := func(items []beads.Bead, stores []beads.Store, refs []string, label string, allowMissingRefs bool) bool {
+		if len(items) == 0 {
+			return true
+		}
+		refsAligned := len(items) == len(refs)
+		if len(items) != len(stores) || (!refsAligned && (!allowMissingRefs || len(refs) != 0)) {
+			log.Printf("releaseOrphanedPoolAssignments: refusing malformed %s continuation-group snapshot: beads=%d stores=%d refs=%d", label, len(items), len(stores), len(refs))
+			return false
+		}
+		for i, member := range items {
+			ownerStore := stores[i]
+			if ownerStore == nil {
+				log.Printf("releaseOrphanedPoolAssignments: refusing %s continuation-group snapshot with nil owner store for %s", label, member.ID)
+				return false
+			}
+			rootID := strings.TrimSpace(member.Metadata[beadmeta.RootBeadIDMetadataKey])
+			group := strings.TrimSpace(member.Metadata[beadmeta.ContinuationGroupMetadataKey])
+			if rootID == "" || group == "" {
+				continue
+			}
+			template := routedToOrLegacyWorkflowTarget(member)
+			agentCfg := findAgentByTemplate(cfg, template)
+			if agentCfg == nil || !agentCfg.SupportsGenericEphemeralSessions() {
+				continue
+			}
+			storeRef := ""
+			if refsAligned {
+				storeRef = continuationGroupStoreRef(refs[i])
+			} else if ownerStore != store {
+				// Legacy unit/non-store-aware callers omit assigned refs. Recover
+				// the ref only when the same owner also appears in the aligned
+				// open-unassigned frame; otherwise keep the historical city-ref
+				// fallback. Production DesiredStateResult always carries refs.
+				for j, openStore := range result.OpenUnassignedRoutedWorkStores {
+					if j < len(result.OpenUnassignedRoutedWorkStoreRefs) && openStore == ownerStore {
+						storeRef = continuationGroupStoreRef(result.OpenUnassignedRoutedWorkStoreRefs[j])
+						break
+					}
+				}
+			}
+			memberKey := storeScopedBeadKey{StoreRef: storeRef, ID: member.ID}
+			if _, duplicate := seen[memberKey]; duplicate {
+				continue
+			}
+			seen[memberKey] = struct{}{}
+			key := continuationGroupKey{StoreRef: storeRef, RootID: rootID, Group: group}
+			groups[key] = append(groups[key], orphanedContinuationGroupCandidate{store: ownerStore, bead: member})
+		}
+		return true
+	}
+	if !appendSnapshot(result.AssignedWorkBeads, result.AssignedWorkStores, result.AssignedWorkStoreRefs, "assigned", true) {
+		return nil, false
+	}
+	if !appendSnapshot(result.OpenUnassignedRoutedWorkBeads, result.OpenUnassignedRoutedWorkStores, result.OpenUnassignedRoutedWorkStoreRefs, "open-unassigned", false) {
+		return nil, false
+	}
+
+	openIdentifiers := makeOpenSessionStoreRefIndex(cityPath, cfg, openSessionInfos, true)
+	legacyOpenIdentifiers := make(map[string]struct{}, len(openSessionInfos)*5)
+	for _, info := range openSessionInfos {
+		if info.Closed {
+			continue
+		}
+		for _, identity := range sessionBeadAssigneeIdentitiesInfo(info) {
+			legacyOpenIdentifiers[identity] = struct{}{}
+		}
+	}
+
+	var plans []orphanedContinuationGroupPlan
+	for key, members := range groups {
+		live := false
+		for _, member := range members {
+			assignee := strings.TrimSpace(member.bead.Assignee)
+			if assignee == "" {
+				continue
+			}
+			if openSessionOwnsWork(legacyOpenIdentifiers, openIdentifiers, assignee, key.StoreRef, true) {
+				live = true
+				break
+			}
+		}
+		if live {
+			continue
+		}
+		plan := orphanedContinuationGroupPlan{key: key, store: members[0].store}
+		for _, member := range members {
+			if member.bead.Status == "open" && strings.TrimSpace(member.bead.Assignee) == "" {
+				plan.candidates = append(plan.candidates, member)
+			}
+		}
+		if len(plan.candidates) == 0 {
+			continue
+		}
+		sort.Slice(plan.candidates, func(i, j int) bool {
+			left, right := plan.candidates[i].bead, plan.candidates[j].bead
+			if !left.CreatedAt.Equal(right.CreatedAt) {
+				return left.CreatedAt.Before(right.CreatedAt)
+			}
+			return left.ID < right.ID
+		})
+		plans = append(plans, plan)
+	}
+	sort.Slice(plans, func(i, j int) bool {
+		left, right := plans[i].key, plans[j].key
+		if left.StoreRef != right.StoreRef {
+			return left.StoreRef < right.StoreRef
+		}
+		if left.RootID != right.RootID {
+			return left.RootID < right.RootID
+		}
+		return left.Group < right.Group
+	})
+	return plans, true
+}
+
+func continuationGroupStoreRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "city:") {
+		return ""
+	}
+	return strings.TrimPrefix(ref, "rig:")
+}
+
+// continuationGroupHasLiveSession revalidates one candidate group through
+// narrow live metadata queries immediately before clearing it. The demand
+// frame avoids duplicate whole-store scans on every tick; this targeted read is
+// paid only when an apparently orphaned group actually needs repair, and catches
+// a new member/claim that arrived after that frame.
+func continuationGroupHasLiveSession(
+	plan orphanedContinuationGroupPlan,
+	cfg *config.City,
+	cityPath string,
+	openSessionInfos []session.Info,
+) (live, complete bool) {
+	openIdentifiers := makeOpenSessionStoreRefIndex(cityPath, cfg, openSessionInfos, true)
+	legacyOpenIdentifiers := make(map[string]struct{}, len(openSessionInfos)*5)
+	for _, info := range openSessionInfos {
+		if info.Closed {
+			continue
+		}
+		for _, identity := range sessionBeadAssigneeIdentitiesInfo(info) {
+			legacyOpenIdentifiers[identity] = struct{}{}
+		}
+	}
+	for _, status := range []string{"open", "in_progress"} {
+		members, err := beads.HandlesFor(plan.store).Live.List(beads.ListQuery{
+			Status: status,
+			Metadata: map[string]string{
+				beadmeta.RootBeadIDMetadataKey:        plan.key.RootID,
+				beadmeta.ContinuationGroupMetadataKey: plan.key.Group,
+			},
+			Live:     true,
+			TierMode: beads.TierBoth,
+		})
+		if err != nil {
+			log.Printf("releaseOrphanedPoolAssignments: continuation-group revalidation failed for root=%s group=%s: %v", plan.key.RootID, plan.key.Group, err)
+			return false, false
+		}
+		for _, member := range members {
+			assignee := strings.TrimSpace(member.Assignee)
+			if assignee != "" && openSessionOwnsWork(legacyOpenIdentifiers, openIdentifiers, assignee, plan.key.StoreRef, true) {
+				return true, true
+			}
+		}
+	}
+	return false, true
+}
+
+// clearOrphanedContinuationGroupCandidate performs exactly one empty-value
+// metadata mutation, fenced by the live snapshot revision. If a claim or any
+// other write lands after discovery, the fence loses and the whole bead is left
+// untouched for a later tick; the reconciler never downgrades to an
+// unconditional clear because that could split a group while it is being
+// claimed.
+func clearOrphanedContinuationGroupCandidate(candidate orphanedContinuationGroupCandidate) bool {
+	writer, ok := beads.ConditionalWriterFor(candidate.store)
+	if !ok {
+		log.Printf("releaseOrphanedPoolAssignments: refusing unfenced continuation-group clear for %s", candidate.bead.ID)
+		return false
+	}
+	err := writer.UpdateIfMatch(candidate.bead.ID, candidate.bead.Revision, beads.UpdateOpts{
+		Metadata: map[string]string{beadmeta.ContinuationGroupMetadataKey: ""},
+	})
+	if err == nil {
+		return true
+	}
+	if beads.IsPreconditionFailed(err) {
+		log.Printf("releaseOrphanedPoolAssignments: skipping continuation-group clear for %s: bead changed since snapshot", candidate.bead.ID)
+		return false
+	}
+	log.Printf("releaseOrphanedPoolAssignments: continuation-group clear failed for %s: %v", candidate.bead.ID, err)
+	return false
 }
 
 // releaseOrphanedPoolAssignments reopens active pool-routed work whose

@@ -72,6 +72,16 @@ type DesiredStateResult struct {
 	// Consumers that decide whether a specific agent should run must use
 	// this scope before treating a bead as reachable work for that agent.
 	AssignedWorkStoreRefs []string
+	// OpenUnassignedRoutedWorkBeads is the complete open/unassigned/routed
+	// snapshot gathered during the same demand frame. The orphaned
+	// continuation-group reconciler consumes it instead of issuing duplicate
+	// full-store scans on every patrol tick.
+	OpenUnassignedRoutedWorkBeads []beads.Bead
+	// OpenUnassignedRoutedWorkStores and StoreRefs are index-aligned with
+	// OpenUnassignedRoutedWorkBeads. Refs use the canonical city:<name> / rig:<name>
+	// representation produced by collectOpenUnassignedRoutedWork.
+	OpenUnassignedRoutedWorkStores    []beads.Store
+	OpenUnassignedRoutedWorkStoreRefs []string
 	// ReadyUnassignedRoutedWorkBeads contains the ready, routed, unassigned
 	// work selected as concrete default pool demand for this tick. It remains
 	// separate from AssignedWorkBeads so assignment/wake semantics stay
@@ -683,6 +693,7 @@ func buildDesiredStateWithSessionBeads(
 	var unassignedRoutedBeads []beads.Bead
 	var unassignedRoutedStores []beads.Store
 	var unassignedRoutedStoreRefs []string
+	var unassignedRoutedPartial bool
 	var readyUnassignedRoutedWorkBeads []beads.Bead
 	var readyUnassignedRoutedWorkStoreRefs []string
 	var readyAssigned map[storeScopedBeadKey]bool
@@ -740,7 +751,8 @@ func buildDesiredStateWithSessionBeads(
 		// string, so the route must be canonicalized before demand is counted or
 		// the cold pool never wakes for it.
 		subPhaseStart = time.Now()
-		unassignedRoutedBeads, unassignedRoutedStores, unassignedRoutedStoreRefs = collectOpenUnassignedRoutedWork(cfg, store, rigStores, suspendedRigPaths, stderr)
+		unassignedRoutedBeads, unassignedRoutedStores, unassignedRoutedStoreRefs, unassignedRoutedPartial = collectOpenUnassignedRoutedWork(cfg, store, rigStores, suspendedRigPaths, stderr)
+		storePartial = storePartial || unassignedRoutedPartial
 		canonicalizeLegacyBoundUnassignedRoutedWork(cfg, unassignedRoutedBeads, unassignedRoutedStores, stderr)
 		repairControlDispatcherRoutesForStoreScope(cityPath, cfg, unassignedRoutedBeads, unassignedRoutedStores, unassignedRoutedStoreRefs, stderr)
 		// canonicalizeLegacyBound* above rewrote gc.routed_to on open ready
@@ -753,7 +765,8 @@ func buildDesiredStateWithSessionBeads(
 		demandReadyCache := newReadyDemandCache()
 		controlDispatcherOpenDemand := openControlDispatcherDemand(cfg, unassignedRoutedBeads)
 		recordDemandSubPhase(trace, "demand_snapshot.collect_unassigned_routed", subPhaseStart, map[string]any{
-			"beads": len(unassignedRoutedBeads),
+			"beads":   len(unassignedRoutedBeads),
+			"partial": unassignedRoutedPartial,
 		})
 		subPhaseStart = time.Now()
 		scaleCheckCounts, poolScaleCheckPartialTemplates = evaluatePendingPoolsMap(cfg, pendingPools, stderr, trace)
@@ -1026,6 +1039,9 @@ func buildDesiredStateWithSessionBeads(
 		AssignedWorkBeads:                  assignedWorkBeads,
 		AssignedWorkStores:                 assignedWorkStores,
 		AssignedWorkStoreRefs:              assignedWorkStoreRefs,
+		OpenUnassignedRoutedWorkBeads:      unassignedRoutedBeads,
+		OpenUnassignedRoutedWorkStores:     unassignedRoutedStores,
+		OpenUnassignedRoutedWorkStoreRefs:  unassignedRoutedStoreRefs,
 		ReadyUnassignedRoutedWorkBeads:     readyUnassignedRoutedWorkBeads,
 		ReadyUnassignedRoutedWorkStoreRefs: readyUnassignedRoutedWorkStoreRefs,
 		ReadyAssigned:                      readyAssigned,
@@ -4390,9 +4406,9 @@ func canonicalizeLegacyBoundUnassignedRoutedWork(cfg *config.City, workBeads []b
 // by the assignee-keyed collectAssignedWorkBeadsWithStores passes, so the
 // migration re-home needs its own scan. Active-only List queries are served from
 // the CachingStore in steady state, so this adds no backing-store round trip.
-func collectOpenUnassignedRoutedWork(cfg *config.City, store beads.Store, rigStores map[string]beads.Store, suspendedRigPaths map[string]bool, stderr io.Writer) ([]beads.Bead, []beads.Store, []string) {
+func collectOpenUnassignedRoutedWork(cfg *config.City, store beads.Store, rigStores map[string]beads.Store, suspendedRigPaths map[string]bool, stderr io.Writer) ([]beads.Bead, []beads.Store, []string, bool) {
 	if cfg == nil {
-		return nil, nil, nil
+		return nil, nil, nil, false
 	}
 	// Work arm (unassigned-routed re-home scan): iterate the work-class
 	// candidate fan-out, labeling the city store "city" for the diagnostic
@@ -4402,6 +4418,7 @@ func collectOpenUnassignedRoutedWork(cfg *config.City, store beads.Store, rigSto
 	var workBeads []beads.Bead
 	var workStores []beads.Store
 	var workStoreRefs []string
+	partial := false
 	seen := make(map[storeScopedBeadKey]struct{})
 	for sourceIndex, source := range stores {
 		if source.store == nil {
@@ -4416,9 +4433,12 @@ func collectOpenUnassignedRoutedWork(cfg *config.City, store beads.Store, rigSto
 			storeRef = "city:" + cityName
 		}
 		open, err := listBothTiersForControllerDemand(source.store, beads.ListQuery{Status: "open"})
-		if err != nil && !beads.IsPartialResult(err) {
+		if err != nil {
+			partial = true
 			fmt.Fprintf(stderr, "collectOpenUnassignedRoutedWork: %s: List(open): %v\n", storeRef, err) //nolint:errcheck
-			continue
+			if !beads.IsPartialResult(err) {
+				continue
+			}
 		}
 		for _, b := range open {
 			if b.Type == sessionBeadType || strings.TrimSpace(b.Assignee) != "" {
@@ -4440,7 +4460,7 @@ func collectOpenUnassignedRoutedWork(cfg *config.City, store beads.Store, rigSto
 			workStoreRefs = append(workStoreRefs, storeRef)
 		}
 	}
-	return workBeads, workStores, workStoreRefs
+	return workBeads, workStores, workStoreRefs, partial
 }
 
 // selectReadyUnassignedRoutedWork intersects the broad open-routed snapshot

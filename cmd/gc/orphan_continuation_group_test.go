@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
@@ -12,15 +11,15 @@ import (
 
 func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_ClearsOpenUnassignedContinuationGroup(t *testing.T) {
 	store := beads.NewMemStore()
-	first := createOpenContinuationGroupWork(t, store, "ga-first", "worker", "ga-root")
-	second := createOpenContinuationGroupWork(t, store, "ga-second", "reviewer", "ga-root")
+	first := createOpenContinuationGroupWork(t, store, "ga-first", "worker")
+	second := createOpenContinuationGroupWork(t, store, "ga-second", "reviewer")
 
 	reconciled := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
 		store,
 		continuationGroupTestConfig(),
 		"",
 		nil,
-		DesiredStateResult{},
+		continuationGroupSnapshotResult(store, first, second),
 		nil,
 	)
 	if len(reconciled) != 2 {
@@ -56,10 +55,118 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_ClearsOpenUnassigne
 	}
 }
 
+func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_FreshRoutedWorkerClaimsClearedWorkExactlyOnce(t *testing.T) {
+	store := beads.NewMemStore()
+	work := createOpenContinuationGroupWork(t, store, "ga-work", "worker")
+
+	reconciled := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
+		store,
+		continuationGroupTestConfig(),
+		"",
+		nil,
+		continuationGroupSnapshotResult(store, work),
+		nil,
+	)
+	if len(reconciled) != 1 || reconciled[0].ID != work.ID {
+		t.Fatalf("reconciled = %v, want [%s]", reconciled, work.ID)
+	}
+
+	ready, err := store.Ready()
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	if len(ready) != 1 || ready[0].ID != work.ID || ready[0].Metadata[beadmeta.RoutedToMetadataKey] != "worker" {
+		t.Fatalf("ready routed work = %#v, want exactly %s routed to worker", ready, work.ID)
+	}
+
+	writer, ok := beads.ConditionalWriterFor(store)
+	if !ok {
+		t.Fatal("MemStore missing conditional writer")
+	}
+	inProgress, assignee := "in_progress", "worker-fresh"
+	claim := beads.UpdateOpts{Status: &inProgress, Assignee: &assignee}
+	if err := writer.UpdateIfMatch(work.ID, ready[0].Revision, claim); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if err := writer.UpdateIfMatch(work.ID, ready[0].Revision, claim); !beads.IsPreconditionFailed(err) {
+		t.Fatalf("second claim with the same fence = %v, want precondition failure", err)
+	}
+	claimed, err := store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("Get claimed work: %v", err)
+	}
+	if claimed.Status != "in_progress" || claimed.Assignee != assignee {
+		t.Fatalf("claimed work status/assignee = %q/%q, want in_progress/%q", claimed.Status, claimed.Assignee, assignee)
+	}
+}
+
+func TestClearOrphanedContinuationGroupCandidate_StaleRevisionDoesNotSplitGroup(t *testing.T) {
+	store := beads.NewMemStore()
+	work := createOpenContinuationGroupWork(t, store, "ga-work", "worker")
+	plans, complete := planOrphanedContinuationGroupClears(
+		store,
+		continuationGroupTestConfig(),
+		"",
+		nil,
+		continuationGroupSnapshotResult(store, work),
+	)
+	if !complete || len(plans) != 1 || len(plans[0].candidates) != 1 {
+		t.Fatalf("plan = %v complete=%v, want one complete candidate", plans, complete)
+	}
+	changedTitle := "claimed concurrently"
+	if err := store.Update(work.ID, beads.UpdateOpts{Title: &changedTitle}); err != nil {
+		t.Fatalf("concurrent update: %v", err)
+	}
+	if clearOrphanedContinuationGroupCandidate(plans[0].candidates[0]) {
+		t.Fatal("stale candidate cleared after its revision changed")
+	}
+	got, err := store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("Get work: %v", err)
+	}
+	if got.Metadata[beadmeta.ContinuationGroupMetadataKey] != "review" {
+		t.Fatalf("continuation group = %q, want preserved after stale fence", got.Metadata[beadmeta.ContinuationGroupMetadataKey])
+	}
+}
+
+func TestContinuationGroupHasLiveSession_CatchesOwnerCreatedAfterDemandSnapshot(t *testing.T) {
+	store := beads.NewMemStore()
+	waiting := createOpenContinuationGroupWork(t, store, "ga-waiting", "reviewer")
+	plans, complete := planOrphanedContinuationGroupClears(
+		store,
+		continuationGroupTestConfig(),
+		"",
+		nil,
+		continuationGroupSnapshotResult(store, waiting),
+	)
+	if !complete || len(plans) != 1 {
+		t.Fatalf("plan = %v complete=%v, want one orphan candidate group", plans, complete)
+	}
+
+	live := createOpenContinuationGroupWork(t, store, "ga-live", "worker")
+	if err := store.Update(live.ID, beads.UpdateOpts{
+		Status:   stringPtr("in_progress"),
+		Assignee: stringPtr("worker-live"),
+	}); err != nil {
+		t.Fatalf("assign late live group member: %v", err)
+	}
+	liveSession := []session.Info{{
+		ID:                  "session-live",
+		Template:            "worker",
+		SessionNameMetadata: "worker-live",
+	}}
+	groupLive, revalidationComplete := continuationGroupHasLiveSession(
+		plans[0], continuationGroupTestConfig(), "", liveSession,
+	)
+	if !revalidationComplete || !groupLive {
+		t.Fatalf("live=%v complete=%v, want late owner detected by targeted live revalidation", groupLive, revalidationComplete)
+	}
+}
+
 func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_PreservesGroupWithLiveSession(t *testing.T) {
 	store := beads.NewMemStore()
-	waiting := createOpenContinuationGroupWork(t, store, "ga-waiting", "reviewer", "ga-root")
-	live := createOpenContinuationGroupWork(t, store, "ga-live", "worker", "ga-root")
+	waiting := createOpenContinuationGroupWork(t, store, "ga-waiting", "reviewer")
+	live := createOpenContinuationGroupWork(t, store, "ga-live", "worker")
 	if err := store.Update(live.ID, beads.UpdateOpts{
 		Status:   stringPtr("in_progress"),
 		Assignee: stringPtr("worker-live"),
@@ -77,9 +184,12 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_PreservesGroupWithL
 		"",
 		[]session.Info{{ID: "session-live", Template: "worker", SessionNameMetadata: "worker-live"}},
 		DesiredStateResult{
-			AssignedWorkBeads:     []beads.Bead{live},
-			AssignedWorkStores:    []beads.Store{store},
-			AssignedWorkStoreRefs: []string{""},
+			AssignedWorkBeads:                 []beads.Bead{live},
+			AssignedWorkStores:                []beads.Store{store},
+			AssignedWorkStoreRefs:             []string{""},
+			OpenUnassignedRoutedWorkBeads:     []beads.Bead{waiting},
+			OpenUnassignedRoutedWorkStores:    []beads.Store{store},
+			OpenUnassignedRoutedWorkStoreRefs: []string{"city:test"},
 		},
 		nil,
 	)
@@ -97,7 +207,7 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_PreservesGroupWithL
 
 func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_PartialSnapshotPreservesUnassignedGroup(t *testing.T) {
 	store := beads.NewMemStore()
-	waiting := createOpenContinuationGroupWork(t, store, "ga-waiting", "worker", "ga-root")
+	waiting := createOpenContinuationGroupWork(t, store, "ga-waiting", "worker")
 
 	reconciled := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
 		store,
@@ -119,36 +229,34 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_PartialSnapshotPres
 	}
 }
 
-func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_StoreReadFailurePreservesEveryGroup(t *testing.T) {
-	cityStore := beads.NewMemStore()
-	waiting := createOpenContinuationGroupWork(t, cityStore, "ga-city", "worker", "ga-root")
-	rigBacking := beads.NewMemStore()
-	createOpenContinuationGroupWork(t, rigBacking, "repo-rig", "repo/worker", "repo-root")
-	rigStore := continuationGroupListErrorStore{Store: rigBacking}
-	cfg := continuationGroupTestConfig()
-	cfg.Rigs = []config.Rig{{Name: "repo", Path: "/repo"}}
+func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_MisalignedStoreSnapshotPreservesEveryGroup(t *testing.T) {
+	store := beads.NewMemStore()
+	waiting := createOpenContinuationGroupWork(t, store, "ga-city", "worker")
 
 	reconciled := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
-		cityStore,
-		cfg,
+		store,
+		continuationGroupTestConfig(),
 		"",
 		nil,
-		DesiredStateResult{},
-		map[string]beads.Store{"repo": rigStore},
+		DesiredStateResult{
+			OpenUnassignedRoutedWorkBeads:     []beads.Bead{waiting},
+			OpenUnassignedRoutedWorkStoreRefs: []string{"city:test"},
+		},
+		nil,
 	)
 	if len(reconciled) != 0 {
-		t.Fatalf("reconciled = %v, want none when any candidate store read fails", reconciled)
+		t.Fatalf("reconciled = %v, want none from an index-misaligned store snapshot", reconciled)
 	}
-	got, err := cityStore.Get(waiting.ID)
+	got, err := store.Get(waiting.ID)
 	if err != nil {
 		t.Fatalf("Get city member: %v", err)
 	}
 	if got.Metadata[beadmeta.ContinuationGroupMetadataKey] != "review" {
-		t.Fatalf("city continuation group = %q, want preserved after rig-store read failure", got.Metadata[beadmeta.ContinuationGroupMetadataKey])
+		t.Fatalf("city continuation group = %q, want preserved after malformed snapshot", got.Metadata[beadmeta.ContinuationGroupMetadataKey])
 	}
 }
 
-func createOpenContinuationGroupWork(t *testing.T, store beads.Store, id, route, root string) beads.Bead {
+func createOpenContinuationGroupWork(t *testing.T, store beads.Store, id, route string) beads.Bead {
 	t.Helper()
 	created, err := store.Create(beads.Bead{
 		ID:     id,
@@ -156,7 +264,7 @@ func createOpenContinuationGroupWork(t *testing.T, store beads.Store, id, route,
 		Labels: []string{"priority:p1"},
 		Metadata: map[string]string{
 			beadmeta.RoutedToMetadataKey:          route,
-			beadmeta.RootBeadIDMetadataKey:        root,
+			beadmeta.RootBeadIDMetadataKey:        "ga-root",
 			beadmeta.ContinuationGroupMetadataKey: "review",
 			"gc.session_affinity":                 "require",
 			"custom":                              "preserve-me",
@@ -177,10 +285,16 @@ func continuationGroupTestConfig() *config.City {
 	}}
 }
 
-type continuationGroupListErrorStore struct {
-	beads.Store
-}
-
-func (continuationGroupListErrorStore) List(beads.ListQuery) ([]beads.Bead, error) {
-	return nil, errors.New("injected continuation-group list failure")
+func continuationGroupSnapshotResult(store beads.Store, work ...beads.Bead) DesiredStateResult {
+	stores := make([]beads.Store, len(work))
+	refs := make([]string, len(work))
+	for i := range work {
+		stores[i] = store
+		refs[i] = "city:test"
+	}
+	return DesiredStateResult{
+		OpenUnassignedRoutedWorkBeads:     work,
+		OpenUnassignedRoutedWorkStores:    stores,
+		OpenUnassignedRoutedWorkStoreRefs: refs,
+	}
 }
