@@ -4,9 +4,9 @@
 # gascity provides the gc binary embedded in runtime images.
 # When source code changes, images need rebuilding.
 #
-# Required secret: GASCITY_HOSTED_TOKEN — a token with contents:write on
-# gascity/gasworks-control-plane (needed for repository_dispatch). A
-# fine-grained PAT scoped to that repo, or a classic PAT with repo scope.
+# Upstream dispatch requires GASCITY_HOSTED_TOKEN — a token with contents:write
+# on gascity/gasworks-control-plane. Forks and upstream checkouts without the
+# optional integration token report an explicit no-op instead of failing main.
 
 name: Notify Image Rebuilds
 
@@ -29,7 +29,32 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
+      - name: Classify runtime image notification
+        id: dispatch_gate
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          HOSTED_TOKEN: ${{ secrets.GASCITY_HOSTED_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$SOURCE_REPOSITORY" != "gascity/gascity" ]]; then
+            decision=skip
+            reason=fork
+          elif [[ -z "$HOSTED_TOKEN" ]]; then
+            decision=skip
+            reason=missing-token
+          else
+            decision=dispatch
+            reason=configured
+          fi
+
+          printf 'decision=%s\nreason=%s\n' "$decision" "$reason" >> "$GITHUB_OUTPUT"
+          printf 'runtime-image-notify: %s (%s)\n' "$decision" "$reason"
+          printf '### Runtime image notification\n\n- Decision: `%s`\n- Reason: `%s`\n' \
+            "$decision" "$reason" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Trigger runtime image rebuild
+        if: steps.dispatch_gate.outputs.decision == 'dispatch'
         env:
           GH_TOKEN: ${{ secrets.GASCITY_HOSTED_TOKEN }}
         run: |
