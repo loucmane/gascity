@@ -156,6 +156,84 @@ func TestAdoptAlreadyActivatedPlatformPublishesMetadataWithoutRestart(t *testing
 	}
 }
 
+func TestAdoptBrokerActivatedCorePublishesManagedFilesWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+	manifest := activationManifest(t, dir)
+	installBrokerActivatedCore(t, manifest)
+	coreBefore := mustStat(t, manifest.Core.Destination)
+	lifecycle := exactFakeLifecycle(manifest)
+
+	steps, err := AdoptPlan(manifest)
+	if err != nil {
+		t.Fatalf("AdoptPlan() error = %v", err)
+	}
+	wantActions := map[string]bool{
+		"write-managed-backup:control-rules": true,
+		"publish-managed-file:control-rules": true,
+		"publish-managed-file:validator":     true,
+	}
+	for _, step := range steps {
+		if mutates, ok := wantActions[step.Action]; ok {
+			if step.Mutates != mutates {
+				t.Errorf("AdoptPlan() step %q mutates=%t, want %t", step.Action, step.Mutates, mutates)
+			}
+			delete(wantActions, step.Action)
+		}
+	}
+	if len(wantActions) != 0 {
+		t.Fatalf("AdoptPlan() missing managed-file actions: %v", wantActions)
+	}
+
+	receipt, err := Adopt(context.Background(), manifest, lifecycle)
+	if err != nil {
+		t.Fatalf("Adopt() error = %v", err)
+	}
+	if lifecycle.restarts != 0 || lifecycle.verifies != 1 {
+		t.Fatalf("lifecycle calls restart=%d verify=%d, want 0/1", lifecycle.restarts, lifecycle.verifies)
+	}
+	if receipt.Activation == nil || *receipt.Activation != lifecycle.proof {
+		t.Fatalf("receipt activation = %+v, want %+v", receipt.Activation, lifecycle.proof)
+	}
+	if got := string(mustReadFile(t, manifest.ManagedFiles[0].Destination)); got != "rules-v2" {
+		t.Fatalf("managed rules = %q, want rules-v2", got)
+	}
+	if got := string(mustReadFile(t, manifest.ManagedFiles[0].BackupPath)); got != "rules-v1" {
+		t.Fatalf("managed rules backup = %q, want rules-v1", got)
+	}
+	if got := string(mustReadFile(t, manifest.ManagedFiles[1].Destination)); got != "validator-v1" {
+		t.Fatalf("managed validator = %q, want validator-v1", got)
+	}
+	assertSameFileIdentityAndTime(t, manifest.Core.Destination, coreBefore)
+}
+
+func TestAdoptManagedFileFailureRollsBackManagedFilesButPreservesBrokerCore(t *testing.T) {
+	dir := t.TempDir()
+	manifest := activationManifest(t, dir)
+	installBrokerActivatedCore(t, manifest)
+	coreBefore := mustStat(t, manifest.Core.Destination)
+	rulesBefore := mustReadFile(t, manifest.ManagedFiles[0].Destination)
+	inst := newInstaller()
+	realRename := inst.rename
+	inst.rename = func(source, destination string) error {
+		if destination == manifest.ManagedFiles[1].Destination {
+			return errors.New("injected adoption managed-file failure")
+		}
+		return realRename(source, destination)
+	}
+
+	_, err := inst.adopt(context.Background(), manifest, exactFakeLifecycle(manifest))
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("injected adoption managed-file failure")) {
+		t.Fatalf("adopt() error = %v, want managed-file failure", err)
+	}
+	assertSameFileIdentityAndTime(t, manifest.Core.Destination, coreBefore)
+	if got := mustReadFile(t, manifest.ManagedFiles[0].Destination); !bytes.Equal(got, rulesBefore) {
+		t.Fatalf("managed rules after rollback = %q, want %q", got, rulesBefore)
+	}
+	assertPathAbsent(t, manifest.ManagedFiles[1].Destination)
+	assertPathAbsent(t, manifest.ReceiptPath)
+	assertPathAbsent(t, DefaultManifestPath(manifest.CityPath))
+}
+
 func TestAdoptRefusesRuntimeMismatchBeforePublishingMetadata(t *testing.T) {
 	dir := t.TempDir()
 	manifest := activationManifest(t, dir)
@@ -180,7 +258,9 @@ func TestAdoptRefusesRuntimeMismatchBeforePublishingMetadata(t *testing.T) {
 func TestAdoptMetadataFailureRestoresMetadataButNeverTouchesBrokerInstalledCore(t *testing.T) {
 	dir := t.TempDir()
 	manifest := activationManifest(t, dir)
-	installCandidateFilesystem(t, manifest)
+	installBrokerActivatedCore(t, manifest)
+	coreBefore := mustStat(t, manifest.Core.Destination)
+	rulesBefore := mustReadFile(t, manifest.ManagedFiles[0].Destination)
 	installer := newInstaller()
 	installer.writeReceipt = func(string, Receipt) error { return errors.New("injected receipt failure") }
 
@@ -188,9 +268,11 @@ func TestAdoptMetadataFailureRestoresMetadataButNeverTouchesBrokerInstalledCore(
 	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("injected receipt failure")) {
 		t.Fatalf("adopt() error = %v, want receipt failure", err)
 	}
-	if got := string(mustReadFile(t, manifest.Core.Destination)); got != "candidate" {
-		t.Fatalf("core after metadata rollback = %q, want broker-installed candidate", got)
+	assertSameFileIdentityAndTime(t, manifest.Core.Destination, coreBefore)
+	if got := mustReadFile(t, manifest.ManagedFiles[0].Destination); !bytes.Equal(got, rulesBefore) {
+		t.Fatalf("managed rules after metadata rollback = %q, want %q", got, rulesBefore)
 	}
+	assertPathAbsent(t, manifest.ManagedFiles[1].Destination)
 	assertPathAbsent(t, manifest.ReceiptPath)
 	assertPathAbsent(t, DefaultManifestPath(manifest.CityPath))
 }
@@ -447,6 +529,19 @@ func installCandidateFilesystem(t *testing.T, manifest Manifest) {
 		if err := os.WriteFile(file.Destination, mustReadFile(t, file.Source), os.FileMode(file.Mode)); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func installBrokerActivatedCore(t *testing.T, manifest Manifest) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(manifest.BackupPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.BackupPath, []byte("installed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.Core.Destination, mustReadFile(t, manifest.Core.Source), 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
 

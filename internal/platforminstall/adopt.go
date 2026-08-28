@@ -14,8 +14,8 @@ func AdoptPlan(manifest Manifest) ([]PlanStep, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !state.coreAlreadyInstalled || !allManagedFilesInstalled(state.managedFiles) {
-		return nil, fmt.Errorf("platform adoption requires the complete candidate filesystem state")
+	if !state.coreAlreadyInstalled {
+		return nil, fmt.Errorf("platform adoption requires the broker-installed candidate core")
 	}
 	if report := inspectPinnedIntegrity(context.Background(), manifest); len(report.Drifts) != 0 {
 		return nil, fmt.Errorf("preflight platform integrity drift: %+v", report.Drifts)
@@ -25,11 +25,42 @@ func AdoptPlan(manifest Manifest) ([]PlanStep, error) {
 		{Action: "verify-installed-candidate", Path: manifest.Core.Destination, SHA256: manifest.Core.SHA256},
 		{Action: "verify-broker-activated-runtime", Path: manifest.Core.Destination, SHA256: manifest.Core.SHA256},
 	}
+	pair, err := candidatePackFiles(manifest, state)
+	if err != nil {
+		return nil, err
+	}
+	if pair != nil {
+		steps = append(steps, PlanStep{
+			Action:  "ensure-pack-cache",
+			Path:    pair.lockFile.Source,
+			SHA256:  pair.lockFile.SHA256,
+			Mutates: state.noopReceipt == nil,
+		})
+	}
 	if state.previousMetadata != nil {
 		steps = append(steps,
 			PlanStep{Action: "write-previous-manifest-backup", Path: manifest.PreviousMetadata.ManifestBackupPath, SHA256: manifest.PreviousMetadata.ManifestSHA256, Mutates: !state.previousMetadata.reuseManifestBackup},
 			PlanStep{Action: "write-previous-receipt-backup", Path: manifest.PreviousMetadata.ReceiptBackupPath, SHA256: manifest.PreviousMetadata.ReceiptSHA256, Mutates: !state.previousMetadata.reuseReceiptBackup},
 		)
+	}
+	for _, file := range state.managedFiles {
+		if !file.previousPresent {
+			continue
+		}
+		steps = append(steps, PlanStep{
+			Action:  "write-managed-backup:" + file.file.Name,
+			Path:    file.file.BackupPath,
+			SHA256:  file.file.PreviousSHA256,
+			Mutates: !file.reuseBackup,
+		})
+	}
+	for _, file := range state.managedFiles {
+		steps = append(steps, PlanStep{
+			Action:  "publish-managed-file:" + file.file.Name,
+			Path:    file.file.Destination,
+			SHA256:  file.file.SHA256,
+			Mutates: !file.alreadyInstalled,
+		})
 	}
 	steps = append(steps,
 		PlanStep{Action: "publish-manifest", Path: DefaultManifestPath(manifest.CityPath), SHA256: manifest.ManifestSHA256, Mutates: !state.reuseManifest},
@@ -44,7 +75,8 @@ func AdoptPlan(manifest Manifest) ([]PlanStep, error) {
 
 // Adopt records an exact platform that was already installed and activated by
 // the fixed-operation privileged broker. It never writes the core artifact or
-// managed files and never restarts the supervisor.
+// restarts the supervisor. Managed-file and metadata deltas are published as
+// one rollback-safe transaction after the running core is verified.
 func Adopt(ctx context.Context, manifest Manifest, lifecycle Lifecycle) (Receipt, error) {
 	return newInstaller().adopt(ctx, manifest, lifecycle)
 }
@@ -60,8 +92,8 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 	if err != nil {
 		return Receipt{}, err
 	}
-	if !state.coreAlreadyInstalled || !allManagedFilesInstalled(state.managedFiles) {
-		return Receipt{}, fmt.Errorf("platform adoption requires the complete candidate filesystem state")
+	if !state.coreAlreadyInstalled {
+		return Receipt{}, fmt.Errorf("platform adoption requires the broker-installed candidate core")
 	}
 	if report := inspectPinnedIntegrity(ctx, manifest); len(report.Drifts) != 0 {
 		return Receipt{}, fmt.Errorf("preflight platform integrity drift: %+v", report.Drifts)
@@ -81,6 +113,9 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 		}
 		return result, nil
 	}
+	if err := i.ensurePackCache(manifest, state); err != nil {
+		return Receipt{}, fmt.Errorf("preflight candidate pack cache: %w", err)
+	}
 
 	directories := []string{
 		filepath.Dir(manifest.ReceiptPath),
@@ -92,12 +127,26 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 			filepath.Dir(manifest.PreviousMetadata.ReceiptBackupPath),
 		)
 	}
+	for _, file := range state.managedFiles {
+		directories = append(directories, filepath.Dir(file.file.Destination))
+		if file.previousPresent {
+			directories = append(directories, filepath.Dir(file.file.BackupPath))
+		}
+	}
 	for _, directory := range directories {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return Receipt{}, fmt.Errorf("create adoption metadata directory %q: %w", directory, err)
 		}
 	}
 	if err := i.preservePreviousMetadata(manifest, state); err != nil {
+		return Receipt{}, err
+	}
+	if err := i.preserveManagedFileBackups(state); err != nil {
+		return Receipt{}, err
+	}
+	if err := i.publishManagedFiles(state, func() error {
+		return i.rollbackManagedFiles(state, false)
+	}); err != nil {
 		return Receipt{}, err
 	}
 
@@ -117,11 +166,13 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 
 	metadataMutated := false
 	restore := func(cause error) error {
-		if !metadataMutated {
-			return cause
+		if err := i.rollbackManagedFiles(state, false); err != nil {
+			return fmt.Errorf("%w; managed-file rollback also failed: %w", cause, err)
 		}
-		if restoreErr := i.restorePlatformMetadata(manifest, state); restoreErr != nil {
-			return fmt.Errorf("%w; metadata rollback also failed: %w", cause, restoreErr)
+		if metadataMutated {
+			if restoreErr := i.restorePlatformMetadata(manifest, state); restoreErr != nil {
+				return fmt.Errorf("%w; metadata rollback also failed: %w", cause, restoreErr)
+			}
 		}
 		return cause
 	}
