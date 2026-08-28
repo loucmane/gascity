@@ -221,10 +221,15 @@ func runWithRootCommandOptionsAndLifecycle(args []string, stdout, stderr io.Writ
 			return code
 		}
 	}
+	runEFailed := false
+	observeRunEFailures(root, &runEFailed)
 	executedCommand, executeErr := root.ExecuteC()
 	lifecycle.attemptFinalOutcome(resolveProductMetricsFinalOutcome(executedCommand, classification))
 	if executeErr != nil {
 		code := commandExitCode(executeErr)
+		if runEFailed && !bufferJSONExecution && !reportJSONFailure && shouldSurfaceUnhandledCommandError(executeErr) {
+			fmt.Fprintf(stderr, "gc: %s\n", commandFailureMessage(executeErr)) //nolint:errcheck // best-effort stderr
+		}
 		if bufferJSONExecution {
 			if len(bytes.TrimSpace(jsonStdout.Bytes())) > 0 {
 				if _, copyErr := io.Copy(stdout, &jsonStdout); copyErr != nil {
@@ -244,6 +249,42 @@ func runWithRootCommandOptionsAndLifecycle(args []string, stdout, stderr io.Writ
 		}
 	}
 	return 0
+}
+
+// observeRunEFailures records whether a command handler, rather than Cobra's
+// parser or argument validation, returned an error. Existing CLI contracts
+// intentionally own parser diagnostics separately; the missing-diagnostic bug
+// concerns ordinary RunE failures hidden by SilenceErrors.
+func observeRunEFailures(command *cobra.Command, failed *bool) {
+	if command == nil || failed == nil {
+		return
+	}
+	if original := command.RunE; original != nil {
+		command.RunE = func(cmd *cobra.Command, args []string) error {
+			err := original(cmd, args)
+			if err != nil {
+				*failed = true
+			}
+			return err
+		}
+	}
+	for _, child := range command.Commands() {
+		observeRunEFailures(child, failed)
+	}
+}
+
+// shouldSurfaceUnhandledCommandError distinguishes ordinary RunE failures
+// from the two explicit-exit sentinels. Sentinel errors are returned only
+// after the command has already emitted its own bounded diagnostic; printing
+// them again here would duplicate output or leak an unhelpful "exit N" line.
+// Every other error must be surfaced because the root command deliberately
+// uses SilenceErrors to keep Cobra from formatting it for us.
+func shouldSurfaceUnhandledCommandError(err error) bool {
+	if err == nil || errors.Is(err, errExit) {
+		return false
+	}
+	var exitErr interface{ ExitCode() int }
+	return !errors.As(err, &exitErr)
 }
 
 func commandFailureMessage(err error) string {
