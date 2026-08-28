@@ -29,6 +29,23 @@ var (
 	rigListSessionProvider    = newSessionProvider
 )
 
+// refreshRunningControllerAfterRigSuspensionChange closes the gap between
+// the direct runtime-state fallback and an already-running controller. The
+// runtime suspension file deliberately lives below .gc/runtime and is ignored
+// by the config watcher, so persisting a suspend/resume override alone cannot
+// rebuild the controller's per-rig store caches. An immediate controller
+// reload request observes the new effective suspension state and rebuilds the
+// affected store without replacing the supervisor process. Offline mutations
+// remain valid and are picked up at the next start.
+func refreshRunningControllerAfterRigSuspensionChange(cityPath string, stderr io.Writer) {
+	if apiRouteControllerAliveHook(cityPath) == 0 {
+		return
+	}
+	if err := rigReloadControllerConfig(cityPath); err != nil {
+		fmt.Fprintf(stderr, "warning: rig suspension state was saved, but refreshing the running controller failed: %v\n", err) //nolint:errcheck // best-effort stderr
+	}
+}
+
 func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rig",
@@ -978,6 +995,9 @@ func doRigSuspend(fs fsys.FS, cityPath, rigName string, stdout, stderr io.Writer
 	}
 
 	if !suspendRigInState(&st, rigName) {
+		// An earlier notification may have failed after the state write. Retry
+		// the idempotent refresh so rerunning the command heals that split view.
+		refreshRunningControllerAfterRigSuspensionChange(cityPath, stderr)
 		fmt.Fprintf(stdout, "Rig '%s' is already suspended\n", rigName) //nolint:errcheck // best-effort stdout
 		return 0
 	}
@@ -987,6 +1007,7 @@ func doRigSuspend(fs fsys.FS, cityPath, rigName string, stdout, stderr io.Writer
 		return 1
 	}
 
+	refreshRunningControllerAfterRigSuspensionChange(cityPath, stderr)
 	fmt.Fprintf(stdout, "Suspended rig '%s'\n", rigName) //nolint:errcheck // best-effort stdout
 	return 0
 }
@@ -1096,6 +1117,9 @@ func doRigResume(fs fsys.FS, cityPath, rigName string, stdout, stderr io.Writer)
 	}
 
 	if !resumeRigInState(&st, rigName) {
+		// An earlier notification may have failed after the state write. Retry
+		// the idempotent refresh so rerunning the command heals that split view.
+		refreshRunningControllerAfterRigSuspensionChange(cityPath, stderr)
 		fmt.Fprintf(stdout, "Rig '%s' is not suspended\n", rigName) //nolint:errcheck // best-effort stdout
 		return 0
 	}
@@ -1105,6 +1129,7 @@ func doRigResume(fs fsys.FS, cityPath, rigName string, stdout, stderr io.Writer)
 		return 1
 	}
 
+	refreshRunningControllerAfterRigSuspensionChange(cityPath, stderr)
 	fmt.Fprintf(stdout, "Resumed rig '%s'\n", rigName) //nolint:errcheck // best-effort stdout
 	return 0
 }
