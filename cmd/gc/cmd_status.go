@@ -335,6 +335,8 @@ func renderRigStatusJSON(
 	statusSnapshot *sessionBeadSnapshot,
 	stdout, stderr io.Writer,
 ) int {
+	suspState, _ := loadSuspensionState(fsys.OSFS{}, cityPath)
+	rigSuspended := suspensionstate.EffectiveRigSuspended(suspState, rig.Name, rig.EffectiveSuspendedOnStart())
 	result := RigStatusJSON{
 		SchemaVersion: "1",
 		CityPath:      cityPath,
@@ -344,7 +346,7 @@ func renderRigStatusJSON(
 			Path:          rig.Path,
 			Prefix:        rig.EffectivePrefix(),
 			DefaultBranch: rig.EffectiveDefaultBranch(),
-			Suspended:     rig.Suspended,
+			Suspended:     rigSuspended,
 			Beads:         rigBeadsStatus(fsys.OSFS{}, rig.Path),
 		},
 	}
