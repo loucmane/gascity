@@ -78,6 +78,47 @@ func TestRunReportsMutuallyExclusiveFlagViolations(t *testing.T) {
 	}
 }
 
+func TestRunSurfacesUnhandledPlatformAdoptError(t *testing.T) {
+	configureIsolatedRuntimeEnv(t)
+	missing := filepath.Join(t.TempDir(), "missing-manifest.json")
+	var stdout, stderr bytes.Buffer
+
+	code := run([]string{"platform", "adopt", "--apply", "--manifest", missing}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run(platform adopt) = %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.HasPrefix(got, "gc: ") || !strings.Contains(got, "platform install manifest") || !strings.Contains(got, missing) {
+		t.Fatalf("stderr = %q, want bounded manifest-read diagnostic", got)
+	}
+}
+
+func TestShouldSurfaceUnhandledCommandError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "handled sentinel", err: errExit, want: false},
+		{name: "wrapped handled sentinel", err: fmt.Errorf("context: %w", errExit), want: false},
+		{name: "handled explicit code", err: exitForCode(2), want: false},
+		{name: "wrapped handled explicit code", err: fmt.Errorf("context: %w", exitForCode(2)), want: false},
+		{name: "ordinary error", err: errors.New("diagnostic"), want: true},
+		{name: "wrapped ordinary error", err: fmt.Errorf("context: %w", errors.New("diagnostic")), want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := shouldSurfaceUnhandledCommandError(test.err); got != test.want {
+				t.Fatalf("shouldSurfaceUnhandledCommandError(%v) = %v, want %v", test.err, got, test.want)
+			}
+		})
+	}
+}
+
 func TestRunDoesNotLeakPersistentCityOrRigFlags(t *testing.T) {
 	prevCityFlag, prevRigFlag := cityFlag, rigFlag
 	t.Cleanup(func() {
