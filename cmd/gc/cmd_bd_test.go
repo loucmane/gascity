@@ -954,6 +954,10 @@ func TestGcBdReadyAgreesWithControllerOnFailedBlockingOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	eligible, err := store.Create(beads.Bead{Title: "still controller ready", Type: "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := store.DepAdd(dependent.ID, blocker.ID, "blocks"); err != nil {
 		t.Fatal(err)
 	}
@@ -985,7 +989,7 @@ func TestGcBdReadyAgreesWithControllerOnFailedBlockingOutcome(t *testing.T) {
 
 	binDir := t.TempDir()
 	script := filepath.Join(binDir, "bd")
-	readyJSON := fmt.Sprintf(`[{"id":%q,"title":%q,"status":"open","issue_type":"task"}]`, dependent.ID, dependent.Title)
+	readyJSON := fmt.Sprintf(`[{"id":%q,"title":%q,"status":"open","issue_type":"task"},{"id":%q,"title":%q,"status":"open","issue_type":"task"}]`, dependent.ID, dependent.Title, eligible.ID, eligible.Title)
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nset -eu\nprintf '%s\\n' '"+readyJSON+"'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -993,7 +997,7 @@ func TestGcBdReadyAgreesWithControllerOnFailedBlockingOutcome(t *testing.T) {
 	t.Setenv("GC_CITY_PATH", cityDir)
 
 	var stdout, stderr bytes.Buffer
-	if got := doBd([]string{"ready", "--json"}, &stdout, &stderr); got != 0 {
+	if got := doBd([]string{"ready", "--limit", "1", "--json"}, &stdout, &stderr); got != 0 {
 		t.Fatalf("doBd(ready) = %d, want 0; stdout=%q stderr=%q", got, stdout.String(), stderr.String())
 	}
 	var publicReady []beads.Bead
@@ -1004,6 +1008,9 @@ func TestGcBdReadyAgreesWithControllerOnFailedBlockingOutcome(t *testing.T) {
 		if bead.ID == dependent.ID {
 			t.Fatalf("gc bd ready reported %s as plainly ready while controller withheld it; stdout=%s", dependent.ID, stdout.String())
 		}
+	}
+	if len(publicReady) != 1 || publicReady[0].ID != eligible.ID {
+		t.Fatalf("gc bd ready = %+v, want only controller-ready %s after failed row is filtered before --limit", publicReady, eligible.ID)
 	}
 }
 
