@@ -33,21 +33,50 @@ separate operator decision tied to one exact manifest digest.
 - backups and failure evidence are retained. The installer never cleans
   worktrees or rewrites unrelated configuration.
 
-## 1. Establish the authorities
+## Authority matrix
 
 Before building anything, record these values in the change review:
 
 | Authority | Required evidence |
 |---|---|
-| Candidate source | Clean signed Git commit; full 40-character lowercase commit ID |
-| Previous runtime | Running executable path, SHA-256, embedded commit, and exact `--version` output |
-| Pack and template | Exact source, commit, and content digest used by the city |
+| Candidate source | Clean source checkout, signed Git commit, full 40-character lowercase commit ID, tree ID, and reproducible artifact SHA-256 |
+| Installed runtime | Installed executable SHA-256 plus `/proc/<supervisor-pid>/exe`, embedded commit, exact `--version`, supervisor unit, PID, start monotonic time, and restart count |
+| Configuration authority | Exact `city.toml`, generated fragment, resolved configuration, permission profile, and control-rules digests read from the supervisor's real `GC_HOME` |
+| Pack/lock/cache authority | Pack source commit, lock entry, generated cache digest, template digest, and a proof that the running configuration resolves to those same bytes |
 | Managed files | Candidate path/SHA/mode and either an absent destination or exact previous SHA plus backup path |
 | Providers | Stable entrypoint, resolved executable, SHA-256, version arguments, and exact version output |
-| Permissions/config | Exact rules digest and the reviewed config or permission-profile revision |
+| Manifest and receipt | Canonical `gc.platform-install-manifest.v1` file, internal manifest digest, complete-file SHA-256, prior manifest/receipt pins, and the activation receipt self-digest |
+| Runtime state | Every non-HQ rig suspended, zero sessions and worker residue, expected service epochs, and two stable reconciliation observations |
 
 Stop if the live baseline differs from the reviewed record. Do not "update the
 numbers" during the cutover; rebuild and re-review the manifest instead.
+
+The authorities are deliberately independent. Git proves what was reviewed;
+the artifact digest proves what was built; the installed path proves what was
+published; `/proc/<supervisor-pid>/exe` proves what is executing; the resolved
+configuration proves what the process will consume; and the receipt proves
+what the installer accepted. Never substitute one surface for another.
+
+## Authorization matrix
+
+Preparation does not imply permission to mutate live state. Record an explicit
+gate for each row that applies:
+
+| Action | May be batched with | Requires a fresh explicit authorization |
+|---|---|---|
+| Read-only inventory, build, tests, manifest finalization, dry-run | Other non-mutating preparation using the same reviewed pins | No, when already inside an approved preparation scope |
+| Source push, PR, hosted CI | Each other when exact head/tree/base and merge conditions are named | Merge, if the prior authorization did not explicitly include it |
+| Broker apply or direct platform install | The one reviewed service transition and its postflight | Yes; name manifest file SHA-256, artifact SHA-256, prior SHA, affected files, and rollback |
+| Replay of an already installed manifest | Read-only postflight | Yes; it is a separate live command and must prove `result=noop` |
+| Rollback | Its one reviewed supervisor transition | Yes; rollback is not implied by install authorization |
+| Rig resume or managed-worker proof | One isolated route, worker, and bounded observation window | Yes; an upgrade never authorizes product work |
+| Deployment or publication | Nothing else | Always a separate product decision |
+
+A corrected retry remains inside the same authorization only when the previous
+attempt is proven pre-mutation or fully rolled back, the failure is understood,
+and the corrected operation has the same bounded effects. Never retry an
+ambiguous partial mutation, a credential prompt, or an unexplained invariant
+failure.
 
 ## 2. Build the candidate reproducibly
 
@@ -285,6 +314,74 @@ identical apply must report `result=noop` and must not replace files or restart
 an already verified runtime. Preserve the manifest, receipt, all backups, the
 pre/post process evidence, and command transcripts.
 
+## Cutover checklist
+
+Use this checklist for either the broker lane or the direct installer lane.
+The implementation commands above remain authoritative; this list makes the
+ordering and stop boundaries explicit.
+
+### Preflight and consolidation
+
+1. Consolidate the release onto one clean, signed source head. Record its
+   commit, tree, artifact digest, version, and reproducible-build proof.
+2. Read every authority in the authority matrix from its canonical source.
+   Include both the installed file and `/proc/<supervisor-pid>/exe`.
+3. Finalize the canonical manifest. Record both its internal
+   `manifest_sha256` and the SHA-256 of the complete file.
+4. Run the strict install or adopt dry-run. A rollback dry-run is also required
+   before apply, because an unexecutable rollback is not a safe cutover.
+5. Run configuration/import validation, provisioning doctor, provider
+   entrypoint/version checks, validator `check_path` checks, and the managed
+   rules/grants verifier from the same `GC_HOME` and PATH used by the running
+   supervisor.
+6. Prove all non-HQ rigs suspended, no sessions, no workers, no city-scoped
+   tmux server, no unrelated service transition, and a stable supervisor
+   service epoch.
+7. Capture byte-exact backups before the first live write. Re-hash the backups
+   and require their modes and owners to match the manifest.
+8. Compare the proposed live mutation with the authorization. Stop if a path,
+   digest, operation, restart, or service falls outside it.
+
+### Cutover
+
+1. Apply through the fixed-operation broker when that operation exists;
+   otherwise use the reviewed direct installer. Do not hand-copy managed
+   artifacts.
+2. Permit only the manifest's bounded file replacements and one supervisor
+   stop/start. A second transition is a stop condition.
+3. Require the new installed digest, `/proc/<supervisor-pid>/exe` digest,
+   embedded commit, version, PID/start epoch, and restart count to match the
+   reviewed target.
+4. Publish the canonical manifest and receipt only after the live runtime is
+   proven. In the broker lane, use `gc platform adopt`; never pretend a
+   metadata-only adoption performed the broker's privileged mutation.
+5. Leave all product rigs suspended. Platform success is not worker-launch
+   authorization.
+
+## Postflight and two-tick reconciliation
+
+The cutover is complete only after all of the following pass:
+
+- installed files, modes, ownership, manifest, receipt, configuration
+  authority, pack/lock/cache authority, templates, providers, permission
+  rules, and backup digests exactly match the approved record;
+- the supervisor and any signing or provisioning services report the expected
+  stable service epoch, zero unexpected restarts, and the reviewed executable;
+- `gc doctor` reports no failed checks and the managed-platform integrity check
+  is clean;
+- every non-HQ rig remains suspended with zero sessions, worker processes, and
+  city-scoped tmux residue;
+- two stable reconciliation observations, separated by a real interval, show
+  the same configuration, runtime, rig, service, and process state;
+- the separately authorized identical replay returns `result=noop`, with no
+  inode, size, modification-time, PID, start-time, or restart-count change;
+- the rollback dry-run still resolves the exact retained prior artifacts and
+  lists only the expected reverse operations.
+
+Store the postflight transcript next to the manifest, receipt, backups, and
+preflight evidence. A PASS without durable evidence is not a completed managed
+upgrade.
+
 ## 7. Roll back through the manifest
 
 Rollback is a separate live transition. First inspect its exact reverse plan:
@@ -313,6 +410,143 @@ gc platform rollback \
 If the rollback restart fails, the prior bytes remain installed and the
 command does **not** retry the restart. Preserve the error and recover the
 service manager explicitly; do not republish the candidate or delete backups.
+
+## Recovery decision tree
+
+Start with the first question whose answer is known. Do not infer host truth
+from a sandbox that cannot observe another UID or mount namespace.
+
+1. **Did the attempt cross its first mutation boundary?**
+   - **No:** preserve the refusal evidence, correct the understood preflight or
+     evidence defect, regenerate exact digests, and rerun the full preflight.
+   - **Unknown:** stop. Treat it as an ambiguous partial mutation until the
+     installed bytes, backups, service journal, PIDs, and receipt prove
+     otherwise.
+   - **Yes:** continue below.
+2. **Did the built-in rollback report PASS?**
+   - **Yes:** verify the prior installed SHA, modes, manifest/receipt,
+     configuration authority, and inactive-or-restored service state before
+     preparing a corrected attempt.
+   - **No:** leave the affected service inactive. Do not improvise a second
+     write. Use the retained backups and manifest to prepare a separately
+     reviewed recovery operation.
+3. **Are the bytes correct but the runtime wrong?**
+   - Compare the installed file with `/proc/<supervisor-pid>/exe`, then inspect
+     the systemd service epoch, cgroup, `NRestarts`, and journal. A stale or
+     unexpected epoch requires a bounded service recovery, not another file
+     install.
+4. **Is verification failing after a successful transition?**
+   - Bind the verifier to the receipt's recorded worktree, commit, policy, and
+     key home. A wrong worktree is evidence-input drift, not a signature
+     failure.
+   - If a file appears root-owned as an overflow UID or another process seems
+     absent, repeat the observation from the authoritative host namespace.
+     Namespace-limited ownership or cross-UID `/proc` output is not host truth.
+5. **Is the failure one of the witnessed classes below?** Use the prescribed
+   response and stop if its precondition cannot be proven.
+
+| Failure class | Meaning | Safe response |
+|---|---|---|
+| Candidate or baseline digest drift | Reviewed and live bytes differ | Rebuild or re-review; never edit pins during apply |
+| `permission denied` while traversing a worktree | DAC/ACL or namespace boundary, not necessarily bad file bytes | Check every path component as the service identity from host context; grant only reviewed execute/read access, or fix the observer |
+| UID/owner mismatch seen only in a worker | User-namespace ID mapping | Move the ownership assertion to host context; keep worker checks to namespace-visible facts |
+| Signer or verifier cannot reach the repository | Read-only namespace mounts do not grant DAC traversal | Verify execute-only traversal ACLs and the signer's private-index path; do not chmod a home directory broadly |
+| Receipt-to-request mismatch | Wrong worktree, branch, bead, session, policy, commit, or tree | Use the receipt-bound values; do not rewrite the receipt or relax validation |
+| Provider binary missing or moved | Stable entrypoint no longer resolves to the reviewed executable | Keep the rig suspended; restore the pinned provider or re-review the provider authority |
+| Stale or alias session | Controller/session records disagree with OS or claim identity | Reconcile native claim, session record, and host process truth; never close or replace an unproven session |
+| Validator or `check_path` missing | Managed validation authority is incomplete | Refuse dispatch and restore the manifest-bound validator; never skip the check |
+| Reply unreadable or malformed | Worker cannot prove the controller result | Preserve the raw reply and fail closed; do not infer success from side effects |
+| Approval wait or credential/pinentry prompt | Required human authority is absent | Stop without mutation and return the exact prompt boundary to the operator |
+| Transport error or `no_work` | Control plane did not establish a claimable unit | Verify queue/demand/provider health and retry only after proving no durable mutation; never fabricate a claim |
+| Rules or grants missing | Worker execution authority is absent | Reprovision the reviewed exact rules through its owner and rerun provisioning doctor; never widen ad hoc |
+| Canary failed or receipt drifted | Managed signing/worker acceptance is not proven | Suspend, preserve branch/worktree/receipt/transcript, disposition residue separately, and require a fresh bounded canary |
+| Broker schema or peer refusal | Request was rejected before a privileged operation | Preserve the refusal; correct the signed envelope or client identity before one new request |
+| Broker/service dies during replacement | Partial privileged transition | Use the broker's exact rollback result; otherwise leave it inactive and escalate to a reviewed self-upgrade/recovery plan |
+| Supervisor service epoch changed unexpectedly | Restart or replacement occurred outside the reviewed transition | Stop and re-pin only after cause and journal are understood |
+| `result=noop` replay changes files or service epoch | Idempotency contract violated | Stop, preserve inode/time/PID evidence, and open a source defect; do not run a third apply |
+| City-scoped tmux or worker residue remains | Quiescence is not proven | Drain naturally; if only a verified childless, sessionless tmux server remains, dispose of it with one reviewed graceful `tmux -L city kill-server` |
+| Config or pack/lock/cache mismatch after apply | Runtime authorities diverged even if the binary is correct | Keep rigs suspended and restore/reconcile through the owning generator or manifest; never hand-edit generated fragments |
+
+## Routine operations
+
+Managed operation after the cutover should be boring:
+
+- **Before routine work:** run readiness, confirm the supervisor's installed
+  and `/proc` digests agree, check service epochs, and verify the intended rig
+  is the only rig eligible to resume.
+- **Start one rig:** route one bounded bead, resume only its rig, require exactly
+  the expected worker/session and claim parity, then observe the bounded run.
+- **Stop one rig:** suspend, drain naturally, prove zero sessions, workers, and
+  city-scoped tmux residue, and record the terminal bead state.
+- **Inspect signing/provisioning:** use service, cgroup, journal, receipt, and
+  broker evidence from host context. An empty cross-UID process list from a
+  worker or reviewer sandbox proves nothing.
+- **Refresh canary evidence:** use one fresh bead and isolated worktree, invoke
+  the managed helper exactly once, verify signature and v2 receipt parity, then
+  suspend and retain the evidence. Never edit an old receipt to make it current.
+- **Open the managed-product dispatch gate:** only after provisioning doctor,
+  rules/grants, provider, runtime, and canary-receipt checks all pass. Route one
+  bead to one rig and require claim parity; platform health alone does not
+  authorize dispatch.
+- **Prepare the next release:** begin from the currently installed manifest and
+  receipt, preserve the exact previous artifacts, create a new release ID and
+  backup paths, and rerun the full authority matrix. Never mutate an old
+  canonical manifest in place.
+- **Reboot recovery:** let enabled sockets and managed units establish fresh
+  epochs, then run readiness and re-pin PIDs/start times. Historical PID pins
+  never survive a reboot.
+
+## Evidence checklist
+
+Keep a durable, immutable copy of:
+
+- authorization text, signed source head/tree, hosted-CI result, merge commit,
+  candidate artifact, and reproducible-build transcript;
+- unsigned and canonical manifests, complete-file and internal manifest
+  digests, dry-run, rollback dry-run, and exact ordered mutation plan;
+- pre/post hashes, modes, owners, ACLs when applicable, retained backups, and
+  atomic rollback result;
+- supervisor and related service unit properties, `/proc` executable digest,
+  cgroup membership, journal window, PID/start monotonic time, and restart
+  counts;
+- canonical configuration and resolved configuration, managed fragment,
+  pack/lock/cache, template, provider, validator, and rules digests;
+- activation receipt, its self-digest, broker operation receipt if used,
+  doctor report, replay `result=noop`, and rollback verification;
+- rig/session/process/tmux censuses before and after, plus two stable
+  reconciliation observations;
+- every refusal and failed-attempt record. Do not overwrite or clean evidence
+  just because a later attempt passes.
+
+## Worked 1.4.1-local evidence
+
+This appendix records the completed 2026-08-21 `1.4.1-loucmane.2-managed-platform`
+cutover as historical evidence, **not** as a statement of the current runtime.
+It demonstrates the bind expected from future local releases.
+
+| Evidence | Recorded value |
+|---|---|
+| Source/live commit | `754d1fe8cc49f5e99cb7c081abe58eda5fc6ea82` |
+| Candidate artifact SHA-256 | `9234c71546ca9d55458d42675dda87ed92f2dcc43dedc335bf2a455e047e1380` |
+| Previous runtime SHA-256 | `54160a7737dc319557ca62b05d589eb75340bcbaf47391cecf944bfe1b936024` |
+| Internal manifest digest | `13caaa393899f5a5d7eec44e165fac5836c0b5c17482190b4b2a165e1d565a89` |
+| Canonical manifest file SHA-256 | `5f41cc8c60e03fc55f2c654a1920df04e3ae69236230e51d86a4acc344caa0c6` |
+| Control-rules SHA-256 | `77af2666ef5fb80714c1d6500bcfee056055e9b54787ea4800cad97a13852ff6` |
+| Validator SHA-256 | `7fa914ef070a96d1d5b6aa1b444bc5487b214a20d784511e76c21a3ed1c7c320` |
+| Receipt self-digest | `fc3f7910253ad3c1d44f9142eebd0b6f29167e60efd7dff651b23c09859fadf9` |
+
+The authorized cutover made one supervisor transition from PID `2304848` to
+PID `3375641`. The installed binary and `/proc/3375641/exe` both matched the
+candidate artifact. The retained backup at
+`.gc/platform/backups/gc-54160a7737dc319557ca62b05d589eb75340bcbaf47391cecf944bfe1b936024`
+matched the prior runtime. `gc doctor`
+reported 104 passed, 11 warnings, and 0 failed checks; the managed-platform
+integrity check was clean. Two separated observations remained stable while
+HPFetcher stayed suspended. The rollback dry-run listed seven expected reverse
+steps without applying them. A separately authorized identical apply returned
+`result=noop` and left the supervisor PID and executable inode, size, and
+modification time unchanged. The governing bead was closed PASS only after
+those facts and the receipt were recorded.
 
 ## Hard stops
 

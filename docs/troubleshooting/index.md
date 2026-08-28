@@ -17,3 +17,4 @@ alive.
 ## Operate
 
 - [Operate Managed-City Dolt Endpoints](/runbooks/managed-city-endpoints) — mental model, forbidden edits, sanctioned escape hatches, and recovery recipe for the city-level Dolt endpoint architecture.
+- [Upgrade and Roll Back a Managed Platform](/runbooks/versioned-platform-upgrades) — authority and authorization matrices, cutover/postflight checklists, recovery decisions, routine operations, and a worked managed-release evidence record.
