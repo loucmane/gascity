@@ -11825,13 +11825,16 @@ func TestCollectOpenUnassignedRoutedWorkKeepsSameIDAcrossStoreScopes(t *testing.
 		Rigs:      []config.Rig{{Name: "city", Path: t.TempDir()}},
 	}
 
-	work, _, refs := collectOpenUnassignedRoutedWork(
+	work, _, refs, partial := collectOpenUnassignedRoutedWork(
 		cfg,
 		cityStore,
 		map[string]beads.Store{"city": rigStore},
 		nil,
 		io.Discard,
 	)
+	if partial {
+		t.Fatal("complete cross-store collection reported partial")
+	}
 	if len(work) != 2 {
 		t.Fatalf("collected work count = %d, want both same-ID rows from independent stores", len(work))
 	}
@@ -11887,13 +11890,16 @@ func TestCollectOpenUnassignedRoutedWorkReportsCanonicalStoreRefs(t *testing.T) 
 		Rigs:      []config.Rig{{Name: "fixture", Path: t.TempDir()}},
 	}
 	var stderr bytes.Buffer
-	collectOpenUnassignedRoutedWork(
+	_, _, _, partial := collectOpenUnassignedRoutedWork(
 		cfg,
 		listFailStore{},
 		map[string]beads.Store{"fixture": listFailStore{}},
 		nil,
 		&stderr,
 	)
+	if !partial {
+		t.Fatal("failed cross-store collection did not report a partial snapshot")
+	}
 	for _, want := range []string{"city:test-city: List(open)", "rig:fixture: List(open)"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want canonical store diagnostic %q", stderr.String(), want)

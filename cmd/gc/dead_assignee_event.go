@@ -27,6 +27,9 @@ func emitDeadAssigneeReopenedEvents(rec events.Recorder, assignedWorkBeads []bea
 		return
 	}
 	for _, r := range released {
+		if r.ContinuationGroupCleared {
+			continue
+		}
 		deadAssignee := ""
 		routedTo := ""
 		if r.Index >= 0 && r.Index < len(assignedWorkBeads) && assignedWorkBeads[r.Index].ID == r.ID {
