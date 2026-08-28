@@ -15,6 +15,7 @@ func TestManagedUpgradeRunbookCoversOperationsAndRecoveryContract(t *testing.T) 
 		t.Fatalf("reading %s: %v", filepath.ToSlash(rel), err)
 	}
 	text := string(data)
+	normalizedText := strings.Join(strings.Fields(strings.ToLower(text)), " ")
 
 	for _, section := range []string{
 		"## Authority matrix",
@@ -40,6 +41,9 @@ func TestManagedUpgradeRunbookCoversOperationsAndRecoveryContract(t *testing.T) 
 		"receipt",
 		"rollback dry-run",
 		"result=noop",
+		"pending managed-file delta",
+		"adoption never writes the core executable",
+		"zero additional service transitions",
 		"two stable reconciliation observations",
 		"permission denied",
 		"namespace",
@@ -55,7 +59,7 @@ func TestManagedUpgradeRunbookCoversOperationsAndRecoveryContract(t *testing.T) 
 		"canary failed or receipt drifted",
 		"managed-product dispatch gate",
 	} {
-		if !strings.Contains(strings.ToLower(text), strings.ToLower(fact)) {
+		if !strings.Contains(normalizedText, strings.Join(strings.Fields(strings.ToLower(fact)), " ")) {
 			t.Errorf("%s must document %q", filepath.ToSlash(rel), fact)
 		}
 	}

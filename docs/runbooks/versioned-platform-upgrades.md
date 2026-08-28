@@ -19,7 +19,12 @@ separate operator decision tied to one exact manifest digest.
 
 - every source, destination baseline, backup, digest, mode, repository,
   provider, and runtime identity is checked before the first mutation;
-- the core and managed files publish in one staged, fsynced transaction;
+- the direct installer publishes the core and managed files in one staged,
+  fsynced transaction;
+- on broker-activated hosts, the broker owns the core replacement and single
+  supervisor transition; after that runtime is proven, `platform adopt`
+  publishes any pending managed-file delta plus canonical metadata as a
+  separate rollback-safe transaction with zero additional service transitions;
 - a failed publication restores the exact prior bytes in reverse order;
 - activation makes at most one supervisor restart attempt and verifies the
   running executable SHA-256, commit, and version;
@@ -270,13 +275,15 @@ gc platform adopt \
   --apply
 ```
 
-`platform adopt` requires the complete candidate filesystem and rollback
-backups to be present, verifies the already-running commit/version/digest, and
-then atomically publishes the canonical manifest and activation receipt. It
-never writes the core executable or managed files and never restarts the
-supervisor. A metadata failure restores only the prior metadata; it does not
-silently replace broker-owned live bytes. This is the normal post-bootstrap
-upgrade lane.
+`platform adopt` requires the broker-installed candidate core and every
+manifest-pinned managed-file source and rollback baseline to be present. It
+first verifies the already-running commit, version, and digest, then publishes
+only pending managed-file backups/files together with the canonical manifest
+and activation receipt. The managed-file and metadata publication is one
+rollback-safe transaction: a failure restores those files and metadata
+exactly, while preserving the broker-installed core. Adoption never writes the
+core executable and never restarts the supervisor. This is the normal
+post-bootstrap upgrade lane.
 
 ### Direct platform installer
 
@@ -352,9 +359,10 @@ ordering and stop boundaries explicit.
 3. Require the new installed digest, `/proc/<supervisor-pid>/exe` digest,
    embedded commit, version, PID/start epoch, and restart count to match the
    reviewed target.
-4. Publish the canonical manifest and receipt only after the live runtime is
-   proven. In the broker lane, use `gc platform adopt`; never pretend a
-   metadata-only adoption performed the broker's privileged mutation.
+4. Publish pending managed-file deltas, the canonical manifest, and the receipt
+   only after the live runtime is proven. In the broker lane, use
+   `gc platform adopt`; never attribute the broker's privileged core mutation
+   or supervisor transition to the later unprivileged adoption transaction.
 5. Leave all product rigs suspended. Platform success is not worker-launch
    authorization.
 
