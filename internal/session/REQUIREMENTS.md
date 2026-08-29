@@ -147,6 +147,7 @@ unless the row names how they map to the canonical projection.
 | SESSION-WORK-002 | Confirmed-dead pool workers release work | A pool worker confirmed dead by runtime/provider checks can be closed even when assigned work exists; closing releases the orphaned work. Suspended, orphaned, or reconfigured guards still apply. | commit `47b580e9f`; `cmd/gc/session_beads_test.go` |
 | SESSION-WORK-003 | Orphan pool step beads | Open pool step beads assigned to dead session identities are collected and released after session drain without relying on stale snapshots. | commit `8068393d8`; `cmd/gc/pool_session_name_test.go` (`TestCollectAndReleaseOrphanPoolStepBead_Issue2793`) |
 | SESSION-WORK-004 | No-wake drains cancel on assigned work | Pending no-wake or orphan drains are canceled when assigned work reappears, and recovered drain-ack metadata is not allowed to suppress that wake demand. | commit `d565a34e2`; `cmd/gc/session_reconciler_test.go`; `cmd/gc/session_wake_test.go` |
+| SESSION-WORK-005 | Named mailbox survives session close | Mail and other messaging-class rows use `assignee` as a stable address, not a work claim. Closing or retiring a session must not clear, reopen, or reassign unread mail addressed to its configured named mailbox; ordinary assigned work is still released. | `cmd/gc/session_beads_test.go` (`TestUnclaimWorkAssignedToRetiredSessionPreservesUnreadMail`, `TestCloseBeadPreservesUnreadMailAssignedBySessionName`); `cmd/gc/work_assignment.go` |
 
 ### Runtime, Submit, And Observation
 
