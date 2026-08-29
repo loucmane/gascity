@@ -4767,6 +4767,53 @@ func TestCloseBeadReleasesWorkAssignedBySessionName(t *testing.T) {
 	}
 }
 
+func TestCloseBeadPreservesUnreadMailAssignedBySessionName(t *testing.T) {
+	store := beads.NewMemStore()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+
+	sessionBead, err := store.Create(beads.Bead{
+		Title:  "watch-officer",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"session_name":              "watch-officer",
+			"configured_named_identity": "watch-officer",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session bead: %v", err)
+	}
+
+	message, err := store.Create(beads.Bead{
+		Title:     "named-session event",
+		Type:      "message",
+		Assignee:  "watch-officer",
+		Metadata:  map[string]string{"mail.read": "false"},
+		Ephemeral: true,
+	})
+	if err != nil {
+		t.Fatalf("create message bead: %v", err)
+	}
+
+	if !closeBead(store, sessionBead.ID, "orphaned", now, ioDiscard{}) {
+		t.Fatal("closeBead returned false, want true")
+	}
+
+	got, err := store.Get(message.ID)
+	if err != nil {
+		t.Fatalf("get message bead: %v", err)
+	}
+	if got.Assignee != "watch-officer" {
+		t.Fatalf("message assignee = %q, want preserved named mailbox", got.Assignee)
+	}
+	if got.Status != "open" {
+		t.Fatalf("message status = %q, want open", got.Status)
+	}
+	if got.Metadata["mail.read"] != "false" {
+		t.Fatalf("mail.read = %q, want false", got.Metadata["mail.read"])
+	}
+}
+
 func TestCloseBeadClearsSessionAffinityOnRelease(t *testing.T) {
 	store := beads.NewMemStore()
 	now := time.Date(2026, 4, 18, 12, 0, 0, 0, time.UTC)
@@ -7780,6 +7827,52 @@ func TestUnclaimResetsInProgressStatus(t *testing.T) {
 	}
 	if gotOpen.Status != "open" {
 		t.Errorf("open status = %q, want %q (already open, must stay open)", gotOpen.Status, "open")
+	}
+}
+
+func TestUnclaimWorkAssignedToRetiredSessionPreservesUnreadMail(t *testing.T) {
+	store := beads.NewMemStore()
+
+	sessionBead, err := store.Create(beads.Bead{
+		Title:  "watch-officer",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"session_name":              "watch-officer",
+			"configured_named_identity": "watch-officer",
+			"state":                     "active",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session bead: %v", err)
+	}
+
+	message, err := store.Create(beads.Bead{
+		Title:     "named-session event",
+		Type:      "message",
+		Assignee:  "watch-officer",
+		Metadata:  map[string]string{"mail.read": "false"},
+		Ephemeral: true,
+	})
+	if err != nil {
+		t.Fatalf("create message bead: %v", err)
+	}
+
+	var stderr bytes.Buffer
+	unclaimWorkAssignedToRetiredSessionBead(store, nil, sessionBead, "", &stderr)
+
+	got, err := store.Get(message.ID)
+	if err != nil {
+		t.Fatalf("get message bead: %v", err)
+	}
+	if got.Assignee != "watch-officer" {
+		t.Fatalf("message assignee = %q, want preserved named mailbox", got.Assignee)
+	}
+	if got.Status != "open" {
+		t.Fatalf("message status = %q, want open", got.Status)
+	}
+	if got.Metadata["mail.read"] != "false" {
+		t.Fatalf("mail.read = %q, want false", got.Metadata["mail.read"])
 	}
 }
 

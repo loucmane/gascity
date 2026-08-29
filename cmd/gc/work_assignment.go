@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 
+	"github.com/gastownhall/gascity/internal/coordclass"
 	sessionpkg "github.com/gastownhall/gascity/internal/session"
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
@@ -59,7 +60,7 @@ func (w workAssignment) OpenAssignedTo(assignee, status string, tierMode beads.T
 	if err != nil {
 		return nil, err
 	}
-	return items, nil
+	return filterWorkAssignmentItems(items), nil
 }
 
 // CachedOpenAssignedWisps returns cached open-assigned wisp-tier WORK beads when
@@ -79,7 +80,11 @@ func (w workAssignment) CachedOpenAssignedWisps(assignee, status string) ([]bead
 	if !ok {
 		return nil, false
 	}
-	return cache.CachedList(query)
+	items, ok := cache.CachedList(query)
+	if !ok {
+		return items, false
+	}
+	return filterWorkAssignmentItems(items), true
 }
 
 // ReadyAssignedTo returns the ready (unblocked, actionable) WORK beads assigned
@@ -91,18 +96,22 @@ func (w workAssignment) ReadyAssignedTo(assignee string, tierMode beads.TierMode
 	if store == nil {
 		return nil, nil
 	}
-	return beads.ReadyLive(store, beads.ReadyQuery{Assignee: assignee, TierMode: tierMode})
+	items, err := beads.ReadyLive(store, beads.ReadyQuery{Assignee: assignee, TierMode: tierMode})
+	if err != nil {
+		return nil, err
+	}
+	return filterWorkAssignmentItems(items), nil
 }
 
-// HasNonSessionWork reports whether any bead in items is non-session WORK
-// (skipping session beads and repairable session beads). Shared filter for the
-// boolean readiness/open probes.
+// HasNonSessionWork reports whether any bead in items belongs to the session
+// assignment surface. Besides session beads themselves, messaging rows are
+// excluded: bead-backed mail uses Assignee as its mailbox address, not as work
+// ownership, and must survive the addressed session's runtime lifecycle.
 func (w workAssignment) HasNonSessionWork(items []beads.Bead) bool {
 	for _, item := range items {
-		if sessionpkg.IsSessionBeadOrRepairable(item) {
-			continue
+		if isWorkAssignmentItem(item) {
+			return true
 		}
-		return true
 	}
 	return false
 }
@@ -118,7 +127,32 @@ func (w workAssignment) OpenAssignedToBasic(assignee, status string) ([]beads.Be
 	if store == nil {
 		return nil, nil
 	}
-	return store.List(beads.ListQuery{Assignee: assignee, Status: status})
+	items, err := store.List(beads.ListQuery{Assignee: assignee, Status: status})
+	if err != nil {
+		return nil, err
+	}
+	return filterWorkAssignmentItems(items), nil
+}
+
+// isWorkAssignmentItem is the domain boundary between assignment ownership and
+// mailbox addressing. Messaging-class beads (mail and extmsg state) can carry a
+// session identity in Assignee, but that value is an address rather than a work
+// claim. Session close/retirement must therefore never release or reassign it.
+func isWorkAssignmentItem(item beads.Bead) bool {
+	return !sessionpkg.IsSessionBeadOrRepairable(item) && coordclass.Classify(item) != coordclass.ClassMessaging
+}
+
+func filterWorkAssignmentItems(items []beads.Bead) []beads.Bead {
+	if len(items) == 0 {
+		return items
+	}
+	filtered := make([]beads.Bead, 0, len(items))
+	for _, item := range items {
+		if isWorkAssignmentItem(item) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 // ReleaseWorkBead detaches one WORK bead from its (closed/retired) session: it
