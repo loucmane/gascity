@@ -5,10 +5,105 @@ package tmux
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"testing"
+	"time"
 
 	gcruntime "github.com/gastownhall/gascity/internal/runtime"
 )
+
+func TestProviderCloseSession_RealServerLifecycle(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	newProvider := func(t *testing.T, suffix string) *Provider {
+		t.Helper()
+		cfg := DefaultConfig()
+		// Keep the full Unix-domain socket path comfortably below sockaddr_un's
+		// platform limit; testSocketName already carries a long nanosecond suffix.
+		cfg.SocketName = fmt.Sprintf("gctc-%s-%d-%d", suffix, os.Getpid(), time.Now().UnixNano())
+		socketPath := namedSocketPath(cfg.SocketName)
+		if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("remove prior socket %q: %v", socketPath, err)
+		}
+		p := NewProviderWithConfig(cfg)
+		t.Cleanup(func() {
+			_ = p.TeardownServer()
+			_ = os.Remove(socketPath)
+		})
+		return p
+	}
+
+	t.Run("last-session-retires-server", func(t *testing.T) {
+		p := newProvider(t, "last")
+		if err := p.tm.NewSessionWithCommand("reviewer", t.TempDir(), "sleep 300"); err != nil {
+			t.Fatalf("NewSessionWithCommand: %v", err)
+		}
+		if err := p.tm.ConfigureServer(); err != nil {
+			t.Fatalf("ConfigureServer: %v", err)
+		}
+
+		if err := p.CloseSession("reviewer"); err != nil {
+			t.Fatalf("CloseSession: %v", err)
+		}
+		if _, err := p.tm.run("display-message", "-p", "#{pid}"); !errors.Is(err, ErrNoServer) {
+			t.Fatalf("server observation after last close = %v, want ErrNoServer", err)
+		}
+	})
+
+	t.Run("remaining-session-preserves-server", func(t *testing.T) {
+		p := newProvider(t, "sibling")
+		for _, name := range []string{"reviewer", "sibling"} {
+			if err := p.tm.NewSessionWithCommand(name, t.TempDir(), "sleep 300"); err != nil {
+				t.Fatalf("NewSessionWithCommand(%s): %v", name, err)
+			}
+		}
+		if err := p.tm.ConfigureServer(); err != nil {
+			t.Fatalf("ConfigureServer: %v", err)
+		}
+		serverPID, err := p.tm.run("display-message", "-p", "#{pid}")
+		if err != nil {
+			t.Fatalf("server pid before close: %v", err)
+		}
+
+		if err := p.CloseSession("reviewer"); err != nil {
+			t.Fatalf("CloseSession: %v", err)
+		}
+		hasSibling, err := p.tm.HasSession("sibling")
+		if err != nil || !hasSibling {
+			t.Fatalf("sibling exists = %t, err = %v", hasSibling, err)
+		}
+		afterPID, err := p.tm.run("display-message", "-p", "#{pid}")
+		if err != nil || afterPID != serverPID {
+			t.Fatalf("server pid after close = %q, err = %v; want %q", afterPID, err, serverPID)
+		}
+		if got := mustExitEmpty(t, p.tm); got != "off" {
+			t.Fatalf("exit-empty after sibling-preserving close = %q, want off", got)
+		}
+	})
+
+	t.Run("already-absent-session-retires-empty-server", func(t *testing.T) {
+		p := newProvider(t, "absent")
+		if err := p.tm.NewSessionWithCommand("seed", t.TempDir(), "sleep 300"); err != nil {
+			t.Fatalf("NewSessionWithCommand: %v", err)
+		}
+		if err := p.tm.ConfigureServer(); err != nil {
+			t.Fatalf("ConfigureServer: %v", err)
+		}
+		if err := p.tm.KillSession("seed"); err != nil {
+			t.Fatalf("KillSession(seed): %v", err)
+		}
+
+		if err := p.CloseSession("already-gone"); err != nil {
+			t.Fatalf("CloseSession(already-gone): %v", err)
+		}
+		if _, err := p.tm.run("display-message", "-p", "#{pid}"); !errors.Is(err, ErrNoServer) {
+			t.Fatalf("server observation after absent close = %v, want ErrNoServer", err)
+		}
+	})
+}
 
 // The ga-jnavd production shape, against a real tmux server: a city server
 // configured with `exit-empty off` outlives its last session, and `list-panes

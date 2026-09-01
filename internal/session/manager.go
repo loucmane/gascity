@@ -1353,7 +1353,7 @@ func (m *Manager) CloseDetailed(id string) (CloseResult, error) {
 		// A genuine terminate failure must propagate and leave the bead open
 		// rather than report a "closed but still running" session — swallowing
 		// it here previously masked exactly that wedge.
-		if err := m.sp.Stop(sessName); err != nil {
+		if err := runtime.CloseSession(m.sp, sessName); err != nil {
 			return fmt.Errorf("stopping runtime for session %s: %w", id, err)
 		}
 		nudgeIDs, capped, err := NewStore(beads.SessionStore{Store: m.store}).CancelWaits(id, time.Now().UTC())

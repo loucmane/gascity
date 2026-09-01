@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gastownhall/gascity/internal/execgrace"
@@ -28,6 +29,7 @@ type Provider struct {
 	cfg      Config
 	cache    *StateCache
 	mu       sync.Mutex
+	closeMu  sync.Mutex
 	workDirs map[string]string // session name → workDir (for CopyTo)
 }
 
@@ -42,6 +44,7 @@ var (
 	_ runtime.InterruptedTurnResetProvider  = (*Provider)(nil)
 	_ runtime.ProcessTableScanner           = (*Provider)(nil)
 	_ runtime.ServerLifecycleProvider       = (*Provider)(nil)
+	_ runtime.CloseSessionProvider          = (*Provider)(nil)
 )
 
 // NewProvider returns a [Provider] backed by a real tmux installation
@@ -263,6 +266,65 @@ func (p *Provider) Stop(name string) error {
 		p.cache.EvictSession(name)
 	}
 	return err
+}
+
+// CloseSession permanently closes a tmux-backed session. Unlike Stop, which is
+// also used by suspension and therefore deliberately leaves the shared city
+// server alive, CloseSession briefly enables tmux's native exit-empty policy.
+// tmux then makes the emptiness decision atomically with session removal: the
+// server exits only when no sibling or concurrently-created session exists.
+// If a session remains, exit-empty is restored to gc's normal off state.
+func (p *Provider) CloseSession(name string) error {
+	return p.withCloseSessionLock(func() error {
+		if err := p.tm.SetExitEmpty(true); err != nil {
+			return fmt.Errorf("arming empty tmux server retirement: %w", err)
+		}
+		stopErr := p.Stop(name)
+		restoreErr := p.tm.SetExitEmpty(false)
+		if stopErr != nil || restoreErr != nil {
+			return errors.Join(
+				wrapCloseSessionError("stopping session", stopErr),
+				wrapCloseSessionError("restoring exit-empty off", restoreErr),
+			)
+		}
+		return nil
+	})
+}
+
+const closeSessionLockFile = "tmux-close-session.lock"
+
+// withCloseSessionLock serializes the global exit-empty transition. The
+// in-process mutex covers ad-hoc providers and tests; production providers also
+// take a city-runtime flock so concurrent gc processes cannot interleave two
+// close sequences and restore exit-empty off between their session removals.
+func (p *Provider) withCloseSessionLock(fn func() error) error {
+	p.closeMu.Lock()
+	defer p.closeMu.Unlock()
+
+	if strings.TrimSpace(p.cfg.RuntimeDir) == "" {
+		return fn()
+	}
+	if err := os.MkdirAll(p.cfg.RuntimeDir, 0o755); err != nil {
+		return fmt.Errorf("creating tmux close lock directory: %w", err)
+	}
+	lockPath := filepath.Join(p.cfg.RuntimeDir, closeSessionLockFile)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("opening tmux close lock: %w", err)
+	}
+	defer lockFile.Close() //nolint:errcheck // best-effort descriptor cleanup
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("locking tmux close sequence: %w", err)
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) //nolint:errcheck // best-effort unlock
+	return fn()
+}
+
+func wrapCloseSessionError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 // Interrupt sends Ctrl-C to the named tmux session.

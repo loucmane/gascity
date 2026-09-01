@@ -33,6 +33,7 @@ var (
 	_ runtime.TransportCapabilityProvider   = (*Provider)(nil)
 	_ runtime.RelaunchProvider              = (*Provider)(nil)
 	_ runtime.LivenessObserver              = (*Provider)(nil)
+	_ runtime.CloseSessionProvider          = (*Provider)(nil)
 )
 
 // New creates a composite provider. defaultSP handles sessions not
@@ -104,6 +105,20 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 // only on success. If the routed backend fails, tries the other backend
 // to handle stale/missing route entries (e.g., after controller restart).
 func (p *Provider) Stop(name string) error {
+	return p.stop(name, func(provider runtime.Provider) error {
+		return provider.Stop(name)
+	})
+}
+
+// CloseSession preserves the routed backend's permanent-close semantics while
+// retaining Stop's stale-route fallback and route cleanup behavior.
+func (p *Provider) CloseSession(name string) error {
+	return p.stop(name, func(provider runtime.Provider) error {
+		return runtime.CloseSession(provider, name)
+	})
+}
+
+func (p *Provider) stop(name string, stop func(runtime.Provider) error) error {
 	primary := p.route(name)
 	primaryLabel := "default"
 	otherLabel := "acp"
@@ -111,7 +126,7 @@ func (p *Provider) Stop(name string) error {
 	p.mu.RLock()
 	primaryExplicitRoute := p.routes[name]
 	p.mu.RUnlock()
-	err := primary.Stop(name)
+	err := stop(primary)
 	if err == nil && primaryRunning {
 		p.Unroute(name)
 		return nil
@@ -138,7 +153,7 @@ func (p *Provider) Stop(name string) error {
 		}
 		err = fmt.Errorf("%w: %q", runtime.ErrSessionNotFound, name)
 	}
-	otherErr := other.Stop(name)
+	otherErr := stop(other)
 	if otherErr == nil {
 		if !otherRunning {
 			otherErr = fmt.Errorf("%w: %q", runtime.ErrSessionNotFound, name)
