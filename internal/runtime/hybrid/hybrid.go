@@ -25,6 +25,7 @@ var (
 	_ runtime.InterruptedTurnResetProvider  = (*Provider)(nil)
 	_ runtime.RelaunchProvider              = (*Provider)(nil)
 	_ runtime.LivenessObserver              = (*Provider)(nil)
+	_ runtime.CloseSessionProvider          = (*Provider)(nil)
 )
 
 // New creates a hybrid provider. isRemote returns true for sessions
@@ -48,6 +49,12 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 // Stop delegates to the routed backend.
 func (p *Provider) Stop(name string) error {
 	return p.route(name).Stop(name)
+}
+
+// CloseSession forwards permanent-close semantics through the selected
+// backend without changing ordinary Stop behavior.
+func (p *Provider) CloseSession(name string) error {
+	return runtime.CloseSession(p.route(name), name)
 }
 
 // Interrupt delegates to the routed backend.

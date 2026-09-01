@@ -346,6 +346,26 @@ type RelaunchProvider interface {
 	Relaunch(ctx context.Context, name string, cfg Config) error
 }
 
+// CloseSessionProvider is an optional extension for providers that need
+// permanent-close semantics beyond an ordinary runtime stop.
+//
+// Stop remains the shared primitive for suspension and transient lifecycle
+// changes. CloseSession is used only when the owning session record is being
+// closed permanently, so server-backed providers may safely retire an empty
+// shared server without changing suspend behavior.
+type CloseSessionProvider interface {
+	CloseSession(name string) error
+}
+
+// CloseSession permanently closes a provider session. Providers without a
+// close-specific implementation retain the ordinary idempotent Stop behavior.
+func CloseSession(provider Provider, name string) error {
+	if closer, ok := provider.(CloseSessionProvider); ok {
+		return closer.CloseSession(name)
+	}
+	return provider.Stop(name)
+}
+
 // LiveRuntime identifies a single agent runtime process discovered via
 // process-table scan, independent of provider-visible artifacts.
 type LiveRuntime struct {

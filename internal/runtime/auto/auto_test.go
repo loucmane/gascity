@@ -46,6 +46,32 @@ type falseNegativeStopProvider struct {
 	stopErr error
 }
 
+type closeAwareProvider struct {
+	*runtime.Fake
+	closed []string
+}
+
+func (p *closeAwareProvider) CloseSession(name string) error {
+	p.closed = append(p.closed, name)
+	return p.Stop(name)
+}
+
+func TestProvider_ForwardsCloseSessionToRoutedBackend(t *testing.T) {
+	def := &closeAwareProvider{Fake: runtime.NewFake()}
+	acp := runtime.NewFake()
+	p := New(def, acp)
+	if err := def.Start(context.Background(), "reviewer", runtime.Config{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := p.CloseSession("reviewer"); err != nil {
+		t.Fatalf("CloseSession: %v", err)
+	}
+	if len(def.closed) != 1 || def.closed[0] != "reviewer" {
+		t.Fatalf("default close calls = %v, want [reviewer]", def.closed)
+	}
+}
+
 func (p *falseNegativeStopProvider) Stop(string) error { return p.stopErr }
 
 func (p *falseNegativeStopProvider) IsRunning(string) bool { return false }

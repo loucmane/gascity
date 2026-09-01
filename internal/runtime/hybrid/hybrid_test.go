@@ -12,6 +12,32 @@ import (
 
 func isRemote(name string) bool { return strings.Contains(name, "remote-agent") }
 
+type closeAwareProvider struct {
+	*runtime.Fake
+	closed []string
+}
+
+func (p *closeAwareProvider) CloseSession(name string) error {
+	p.closed = append(p.closed, name)
+	return p.Stop(name)
+}
+
+func TestProvider_ForwardsCloseSessionToRoutedBackend(t *testing.T) {
+	local := &closeAwareProvider{Fake: runtime.NewFake()}
+	remote := runtime.NewFake()
+	h := New(local, remote, isRemote)
+	if err := local.Start(context.Background(), "local-agent", runtime.Config{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := h.CloseSession("local-agent"); err != nil {
+		t.Fatalf("CloseSession: %v", err)
+	}
+	if len(local.closed) != 1 || local.closed[0] != "local-agent" {
+		t.Fatalf("local close calls = %v, want [local-agent]", local.closed)
+	}
+}
+
 // Relaunch must reach the routed backend (local vs remote), or the reconciler's
 // RelaunchProvider type-assert would be masked by the hybrid router and fall
 // back to Stop+Start.

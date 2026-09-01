@@ -127,6 +127,16 @@ type nonRunningStopRecorder struct {
 	stopErr   error
 }
 
+type closeSessionRecorder struct {
+	*runtime.Fake
+	closed []string
+}
+
+func (p *closeSessionRecorder) CloseSession(name string) error {
+	p.closed = append(p.closed, name)
+	return p.Stop(name)
+}
+
 func (p *nonRunningStopRecorder) IsRunning(string) bool {
 	return false
 }
@@ -5300,6 +5310,24 @@ func TestCloseDetailed_StopSuccessClosesBead(t *testing.T) {
 	}
 	if b.Status != "closed" {
 		t.Errorf("bead Status = %q, want closed", b.Status)
+	}
+}
+
+func TestCloseDetailed_UsesCloseSpecificProviderSemantics(t *testing.T) {
+	store := beads.NewMemStore()
+	sp := &closeSessionRecorder{Fake: runtime.NewFake()}
+	mgr := NewManagerWithOptions(store, sp)
+
+	info, err := mgr.CreateSession(context.Background(), CreateOptions{Template: "helper", Title: "chat", Command: "claude", WorkDir: "/tmp", Provider: "claude", Env: nil, Resume: ProviderResume{}, Hints: runtime.Config{}, ExtraMeta: map[string]string{"session_origin": "manual"}})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if _, err := mgr.CloseDetailed(info.ID); err != nil {
+		t.Fatalf("CloseDetailed: %v", err)
+	}
+	if len(sp.closed) != 1 || sp.closed[0] != info.SessionName {
+		t.Fatalf("close-specific calls = %v, want [%s]", sp.closed, info.SessionName)
 	}
 }
 
