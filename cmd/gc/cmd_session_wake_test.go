@@ -15,6 +15,80 @@ import (
 	"github.com/gastownhall/gascity/internal/testutil"
 )
 
+type sessionWakeClientFunc func(string) (string, error)
+
+func (f sessionWakeClientFunc) WakeSession(id string) (string, error) {
+	return f(id)
+}
+
+func TestCmdSessionWake_RoutesThroughAuthoritativeRuntime(t *testing.T) {
+	cityDir := t.TempDir()
+	t.Setenv("GC_CITY", cityDir)
+	writeNamedSessionCityTOML(t, cityDir)
+
+	var gotTarget string
+
+	original := sessionWakeAPIClient
+	sessionWakeAPIClient = func(string) (sessionWakeClient, bool) {
+		return sessionWakeClientFunc(func(id string) (string, error) {
+			gotTarget = id
+			return "ci-runtime-wake", nil
+		}), true
+	}
+	t.Cleanup(func() { sessionWakeAPIClient = original })
+
+	var stdout, stderr bytes.Buffer
+	if code := cmdSessionWake([]string{"attention-fable"}, &stdout, &stderr, true); code != 0 {
+		t.Fatalf("cmdSessionWake() = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if gotTarget != "attention-fable" {
+		t.Fatalf("runtime wake target = %q", gotTarget)
+	}
+	if got := stdout.String(); !strings.Contains(got, `"session_id":"ci-runtime-wake"`) {
+		t.Fatalf("stdout = %q, want resolved runtime session id", got)
+	}
+}
+
+func TestCmdSessionWake_RuntimeFailureDoesNotRetryLocalMutation(t *testing.T) {
+	cityDir := t.TempDir()
+	t.Setenv("GC_CITY", cityDir)
+	writeNamedSessionCityTOML(t, cityDir)
+
+	original := sessionWakeAPIClient
+	sessionWakeAPIClient = func(string) (sessionWakeClient, bool) {
+		return sessionWakeClientFunc(func(string) (string, error) {
+			return "", errors.New("boom")
+		}), true
+	}
+	t.Cleanup(func() { sessionWakeAPIClient = original })
+
+	var stdout, stderr bytes.Buffer
+	if code := cmdSessionWake([]string{"attention-fable"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("cmdSessionWake() = %d, want 1", code)
+	}
+	if got := stderr.String(); !strings.Contains(got, "authoritative runtime") {
+		t.Fatalf("stderr = %q, want authoritative runtime failure", got)
+	}
+}
+
+func TestCmdSessionWake_ManagedRuntimeUnavailableFailsBeforeLocalMutation(t *testing.T) {
+	cityDir := t.TempDir()
+	t.Setenv("GC_CITY", cityDir)
+	writeNamedSessionCityTOML(t, cityDir)
+
+	original := sessionWakeAPIClient
+	sessionWakeAPIClient = func(string) (sessionWakeClient, bool) { return nil, true }
+	t.Cleanup(func() { sessionWakeAPIClient = original })
+
+	var stdout, stderr bytes.Buffer
+	if code := cmdSessionWake([]string{"attention-fable"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("cmdSessionWake() = %d, want 1", code)
+	}
+	if got := stderr.String(); !strings.Contains(got, "state was not changed") {
+		t.Fatalf("stderr = %q, want pre-mutation refusal", got)
+	}
+}
+
 func TestSessionWake_StateTransitionsAndMetadata(t *testing.T) {
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 

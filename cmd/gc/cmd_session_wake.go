@@ -52,18 +52,54 @@ type sessionWakeDeps struct {
 	pokeController            func(string) error
 }
 
+type sessionWakeClient interface {
+	WakeSession(string) (string, error)
+}
+
+// sessionWakeAPIClient resolves the authoritative in-process city mutation
+// surface. It is a seam so command tests can prove that a live managed city is
+// never mutated through a stale standalone backing-store view.
+var sessionWakeAPIClient = func(cityPath string) (sessionWakeClient, bool) {
+	// The race exists only for supervisor-managed cities, where the CLI's
+	// backing-store write is outside the supervisor's CachingStore. Standalone
+	// controllers retain the existing local-write + poke behavior.
+	client := supervisorCityAPIClient(cityPath)
+	_, registered, err := registeredCityEntry(cityPath)
+	managed := err == nil && registered && supervisorAlive() != 0
+	if client == nil {
+		return nil, managed
+	}
+	return client, managed
+}
+
 // cmdSessionWake is the CLI entry point for "gc session wake".
 func cmdSessionWake(args []string, stdout, stderr io.Writer, jsonOutput ...bool) int {
 	asJSON := sessionJSONRequested(jsonOutput)
-	store, code := openCityStore(stderr, "gc session wake")
-	if store == nil {
-		return code
-	}
-
 	cityPath, cityErr := resolveCity()
 	var cfg *config.City
 	if cityErr == nil {
 		cfg, _ = loadCityConfig(cityPath, stderr)
+		client, managed := sessionWakeAPIClient(cityPath)
+		if client != nil {
+			id, err := client.WakeSession(args[0])
+			if err != nil {
+				// Mutation responses are not safe to retry locally: the runtime may
+				// have committed the wake before the transport failed. Fail closed
+				// and let the operator inspect the authoritative session state.
+				fmt.Fprintf(stderr, "gc session wake: authoritative runtime: %v\n", err) //nolint:errcheck
+				return 1
+			}
+			return renderSessionWakeResult(id, stdout, stderr, asJSON, 0)
+		}
+		if managed {
+			fmt.Fprintln(stderr, "gc session wake: authoritative runtime unavailable; session state was not changed") //nolint:errcheck
+			return 1
+		}
+	}
+
+	store, code := openCityStore(stderr, "gc session wake")
+	if store == nil {
+		return code
 	}
 	return doSessionWake(args[0], stdout, stderr, asJSON, sessionWakeDeps{
 		store:                     store,
@@ -75,6 +111,23 @@ func cmdSessionWake(args []string, stdout, stderr io.Writer, jsonOutput ...bool)
 		cityUsesManagedReconciler: cityUsesManagedReconciler,
 		pokeController:            pokeController,
 	})
+}
+
+func renderSessionWakeResult(id string, stdout, stderr io.Writer, asJSON bool, waitNudgesWithdrawn int) int {
+	if asJSON {
+		if err := writeSessionActionJSON(stdout, sessionActionResult{
+			Action:              "wake",
+			SessionID:           id,
+			State:               "wake_requested",
+			WaitNudgesWithdrawn: waitNudgesWithdrawn,
+		}); err != nil {
+			fmt.Fprintf(stderr, "gc session wake: %v\n", err) //nolint:errcheck
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "Session %s: wake requested.\n", id) //nolint:errcheck
+	return 0
 }
 
 func doSessionWake(target string, stdout, stderr io.Writer, asJSON bool, deps sessionWakeDeps) int {
@@ -128,20 +181,7 @@ func doSessionWake(target string, stdout, stderr io.Writer, asJSON bool, deps se
 		}
 	}
 
-	if asJSON {
-		if err := writeSessionActionJSON(stdout, sessionActionResult{
-			Action:              "wake",
-			SessionID:           id,
-			State:               "wake_requested",
-			WaitNudgesWithdrawn: len(nudgeIDs),
-		}); err != nil {
-			fmt.Fprintf(stderr, "gc session wake: %v\n", err) //nolint:errcheck
-			return 1
-		}
-		return 0
-	}
-	fmt.Fprintf(stdout, "Session %s: wake requested.\n", id) //nolint:errcheck
-	return 0
+	return renderSessionWakeResult(id, stdout, stderr, asJSON, len(nudgeIDs))
 }
 
 func sessionWakeHasRunnableTemplateInfo(info session.Info, cfg *config.City) bool {
