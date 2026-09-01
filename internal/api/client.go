@@ -1427,6 +1427,26 @@ func (c *Client) KillSession(id string) error {
 	return checkMutation(resp, err)
 }
 
+// WakeSession wakes a session through the authoritative city runtime and
+// returns the resolved session bead ID. Routing wake through the runtime keeps
+// its write-through cache and provider start boundary in one process; a CLI
+// caller must not mutate the backing store and then race the cache watchdog.
+func (c *Client) WakeSession(id string) (string, error) {
+	if err := c.requireCityScope(); err != nil {
+		return "", err
+	}
+	resp, err := c.cw.PostV0CityByCityNameSessionByIdWakeWithResponse(
+		context.Background(), c.cityName, id, nil,
+	)
+	if err := checkMutation(resp, err); err != nil {
+		return "", err
+	}
+	if resp.JSON200 == nil || resp.JSON200.Id == nil || strings.TrimSpace(*resp.JSON200.Id) == "" {
+		return "", fmt.Errorf("API returned %d with no session id", resp.StatusCode())
+	}
+	return strings.TrimSpace(*resp.JSON200.Id), nil
+}
+
 // SendSessionMessage delivers a message to a session via the async
 // POST /v0/city/{cityName}/session/{id}/messages endpoint. Internally
 // handles the async protocol: POST → 202 + request_id → SSE event.
