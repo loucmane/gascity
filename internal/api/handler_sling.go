@@ -73,11 +73,11 @@ type slingResponse struct {
 var apiSlingStderr = func() io.Writer { return os.Stderr }
 
 type managedProductDispatchVerifier interface {
-	VerifyManagedProductDispatch(rigName string) error
+	VerifyManagedProductDispatch(rigName, profileName string) error
 }
 
-func apiManagedProductDispatchGate(state State) func(string) error {
-	return func(rigName string) error {
+func apiManagedProductDispatchGate(state State) func(string, string) error {
+	return func(rigName, profileName string) error {
 		managed := false
 		if cfg := state.Config(); cfg != nil {
 			for _, rig := range cfg.Rigs {
@@ -91,7 +91,7 @@ func apiManagedProductDispatchGate(state State) func(string) error {
 			return nil
 		}
 		if verifier, ok := state.(managedProductDispatchVerifier); ok {
-			return verifier.VerifyManagedProductDispatch(rigName)
+			return verifier.VerifyManagedProductDispatch(rigName, profileName)
 		}
 		err := managedworker.RefuseDispatch("dispatch_gate", "available", "unavailable")
 		if recorder := state.EventProvider(); recorder != nil {

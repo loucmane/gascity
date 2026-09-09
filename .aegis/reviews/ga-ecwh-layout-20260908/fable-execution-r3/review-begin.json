@@ -1,0 +1,17 @@
+{
+  "model": "claude-fable-5-1",
+  "tools": [],
+  "pins": {
+    "inventory-r3-20260909.json": "3279a85ce344a79937a6014f67e1decc3e48c563e38c5e583c7fefff3a3c27d2",
+    "daily-continuation-20260909.json": "402d83eb76ec98999152761a00f356449cf2d37dc8d20b6b2acdd83a6d15a3f8",
+    "execution-bundle-r3-20260909.json": "112b5acb015a20d8ba0a1cb54d326d91e1b5534028497431685603faebe8a344",
+    "fable-inventory-r3/review-result.json": "c5052fad782e4b582a30d1a13a1f363c4b3ba09458d11c47f636d1da5c2086a4"
+  },
+  "source_pins": {
+    "docs/operations/core-evidence-layout.md": "b9fc0fe08a6a84d2b192cb494edd568aa35ac6e44537700a169302b1c45cbe21",
+    "scripts/_core_layout_apply.py": "f3ae8c90d682bf4a58170a8058d1331ca454bee162e67123a69a11028b03b0fa",
+    "scripts/core-evidence-layout": "e0b0d6e215ab306720a6d566afd482ea7ee51a4b0307f245e7cce6c32c2507ca"
+  },
+  "prompt_sha256": "72bfa6a768e7896bbe6c5ad5b2bd4a62f8c2b4305e45d62231dab09295f7725b",
+  "disclosure": "In-scope infrastructure inventory and task evidence only"
+}

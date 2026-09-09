@@ -1,0 +1,1195 @@
+{
+  "branch": "codex/ga-ecwh-typed-worker-receipts",
+  "config_before": {
+    "kind": "absent"
+  },
+  "entries": [
+    {
+      "destination": "engdocs/workflow/work-tracking",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": "docs/ai/work-tracking",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": "docs/ai/work-tracking/active",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/CHANGELOG.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "cd11caca810c831a4c0b7122abb018bf038ff2906934de2328340ce532c6cf80",
+      "size": 4672,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/CHANGELOG.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/DECISIONS.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "56f50b711b6e0252a7dfff1f9d0e77f781d0bf6e418bf149a6db79e855afc090",
+      "size": 4578,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/DECISIONS.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/FINDINGS.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "1e362fa61705c1334a2258b10e6a3396e7a300a1e9b76346491b76244372e338",
+      "size": 4573,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/FINDINGS.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/HANDOFF.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "226abf36c8a05e5c9ec6bd970e10488503cc46e5f4da6174f775a7bd2cba1c56",
+      "size": 5767,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/HANDOFF.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/IMPLEMENTATION.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "ac7e692fb651b29cc881be3e0bff6a7c85abac16af15b88195e1ee9ecdb8059c",
+      "size": 4649,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/IMPLEMENTATION.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/TRACKER.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "0fc8f4e820520fad07978e81e1fe2ce422047b495729108a83a20c9ccd9d6ebe",
+      "size": 6965,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/TRACKER.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/designs",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/designs",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-adapter-first-green.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "faf4ba807ad30c961542437b28411ceb26ff31af9593122fab88a6efdeb414aa",
+      "size": 3492,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-adapter-first-green.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-contract-red.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "bcb979a0cfb6b2aebc285cf7d7d740d86f0be4982a0f24e710656537c1d14a61",
+      "size": 4542,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-contract-red.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-policy-during-scenario-red.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "376bdf093f41bcb9daea2a16286a73e9db2119eea144dc8936ad4b5aa08990e7",
+      "size": 4154,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-policy-during-scenario-red.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-policy-red.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "f92730ec87478be1e51fffde071aa7cb8c7e6e6fa5d4357bbaa1573282b52a62",
+      "size": 1322,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-policy-red.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-transport-checkpoint-20260908.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "09f2ef97a079fdf17eca7554b01fc07593feb53b7f1b2e188b70222193349a12",
+      "size": 4273,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-transport-checkpoint-20260908.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-transport-green.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "fca0f778470d7ef9141b224599d43ca9a2fba89e0bf9cbe97f9c790f0a3b6682",
+      "size": 1510,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-transport-green.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-transport-profile.json",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "8881707dadff049a7d4e35fa8512a7d4738d4528fbaffade818b2cbe983b0e65",
+      "size": 1251,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/canary-transport-profile.json",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/conformance-proof-scope-assessment-20260908.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "0e8454c62452edcd32637cda073a39171a0ed6224af3853ad0724dbd68d3100b",
+      "size": 6078,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/conformance-proof-scope-assessment-20260908.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o700",
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-begin.json",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "66f63a163a24cdfb26e192fa77dc6698cc3c4fff88d4fd98857d19b20434be52",
+      "size": 4115,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-begin.json",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-process.json",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "b7883496b6577862fd20d197d88030c4770cbd96d376b03ca9af8b9133bee0dc",
+      "size": 15,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-process.json",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-result.json",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "eee3029fc54de4ecb7ce56223a74b39a77fa6e6afcce83f992bd9edd63ad5166",
+      "size": 8634,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-result.json",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-stderr.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-stderr.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-stdout.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "971db39a14055f5126601f6a43c9aaf8f377fce1e6555edc9ab9c6ed77971966",
+      "size": 8009,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/review-stdout.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/source-input.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "b41e31d246381d4112274ce5afbc6cea5e61bb2ce1d4538e556f2f024378a9fb",
+      "size": 205421,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fable-source-review-r1/source-input.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o700",
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/fsys-darwin-compile.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/fsys-darwin-compile.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/local-concurrency-selftest.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "0a875d123abf74adf6b0e19c90b14ed6d42867ff3bc381d47dc563815c309b04",
+      "size": 1068,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/local-concurrency-selftest.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/push-gate-lock-selftest.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "37384ec220e486174cba57b29c9866f987464538d097e64d35c1db89162dd814",
+      "size": 2421,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/push-gate-lock-selftest.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-1-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "c5b53de8536bb8ae4240470761362a25e25234b76bd6df70d3e4a345bea5756a",
+      "size": 73142,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-1-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-2-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "fd2319a38d88fa43a2fe638302c392a2ae4c27851a2ef046f000d45467563d66",
+      "size": 74087,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-2-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-3-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "b14eb7abf60028b3218867a9e55d11cd485714c5c0ff3fa88419496f94354c88",
+      "size": 73252,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-3-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-4-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "7a4b4ab7b36676f7db88932d4dd44b3bc43f1206a664954a0351785e2ef6adfa",
+      "size": 72844,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-4-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-5-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "9f31039777ae7ceb0b4361baf06868eb19e0f558936f5afb440807786c005cc4",
+      "size": 73197,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-5-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-6-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "2e167aa14e121c8c9440f7956a0764d353b389f0dea3ba3a79c6b389bfdbcf0a",
+      "size": 73120,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-cmd-gc-6-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-core.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "6aa6fb46b174d5be403c1c65e02165be58214757d48b5b03f512f4211c21751a",
+      "size": 15801,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-final-20260908/unit-core.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o700",
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/fsys-darwin-compile.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/fsys-darwin-compile.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/local-concurrency-selftest.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "0a875d123abf74adf6b0e19c90b14ed6d42867ff3bc381d47dc563815c309b04",
+      "size": 1068,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/local-concurrency-selftest.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/push-gate-lock-selftest.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "37384ec220e486174cba57b29c9866f987464538d097e64d35c1db89162dd814",
+      "size": 2421,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/push-gate-lock-selftest.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-1-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "c5b53de8536bb8ae4240470761362a25e25234b76bd6df70d3e4a345bea5756a",
+      "size": 73142,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-1-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-2-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "fd2319a38d88fa43a2fe638302c392a2ae4c27851a2ef046f000d45467563d66",
+      "size": 74087,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-2-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-3-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "b14eb7abf60028b3218867a9e55d11cd485714c5c0ff3fa88419496f94354c88",
+      "size": 73252,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-3-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-4-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "7a4b4ab7b36676f7db88932d4dd44b3bc43f1206a664954a0351785e2ef6adfa",
+      "size": 72844,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-4-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-5-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "9f31039777ae7ceb0b4361baf06868eb19e0f558936f5afb440807786c005cc4",
+      "size": 73197,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-5-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-6-of-6.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "2e167aa14e121c8c9440f7956a0764d353b389f0dea3ba3a79c6b389bfdbcf0a",
+      "size": 73120,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-cmd-gc-6-of-6.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-core.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "af3a85133c98250474f9e40647047ebe5011aacd617954f27d97e047d9b76d1a",
+      "size": 3536,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-fast-baseline-snapshot-20260908/unit-core.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-source-review-driver.py",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "5a131d7dd6552780313dde4fc1a9e2e7b3f8733610337580d87e25e182350382",
+      "size": 9398,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/core-source-review-driver.py",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-canary-checkpoint-20260908.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "110bfe4c972b9da069edef7aa3fdbb85cfb6e7129055c3c193579cf391d7e10a",
+      "size": 5591,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-canary-checkpoint-20260908.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-final-green.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "84464b18a59bdf9983d0ef55d0bacac122854c678ff5ab887f64b3f3cc33e72b",
+      "size": 9525,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-final-green.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-intermediate-file-identity.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "0c2f61d3dea4ff5f7b4a7c20c940fe5dc08a0afbe420409bfcb5cda4bd811158",
+      "size": 9460,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-intermediate-file-identity.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-intermediate-timestamp-fixture.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "5cca39e78c5c55f9fd76f81677d344ce2fe15d59997d88c348801f890d941013",
+      "size": 358,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-intermediate-timestamp-fixture.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-red.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "f80b0f3856e459870409c0ace8bbbcf7ec693bf6273860889eab9d24ecfd86b9",
+      "size": 3271,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-red.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-source-hashes.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "253b8a6726b329df074707ee88e68d52b5c99b7f6e7fd65f701cdd8a46c02756",
+      "size": 2039,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/policy-integrity-source-hashes.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/profile-dispatch-checkpoint-20260908.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "b01e51f9bc6ddcea81b937de7d2c251b7625d0cb0bb08fdfd4b54dd6991c4a0d",
+      "size": 4340,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/profile-dispatch-checkpoint-20260908.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/profile-dispatch-green.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "4f02616d848d5d49323c95cdb309bef01ce875f8194444382ef4fc293ded94b9",
+      "size": 2426,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/profile-dispatch-green.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/profile-dispatch-red.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "c9db577ac1dcd6bae7f4ce813abf1cd818e1743f341702c37e9c7119b6a80eca",
+      "size": 2226,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/profile-dispatch-red.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/profile-dispatch-regression.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "5e3f166c0e7632085e1bed31fc14f867ba5d6f71e88695fc4c4c5ef58bfc5d79",
+      "size": 230,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/profile-dispatch-regression.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/receipt-contract-checkpoint-20260908.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "f12ee0ac43377acd3dd4eac19c827562a5a00e33f23c685bb35817d9af3ddc61",
+      "size": 6600,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/receipt-contract-checkpoint-20260908.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/receipt-contract-red.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "23a3a4478211253befb0067b08ba366209fd94129b2c3613f8bef530c686a980",
+      "size": 3801,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/receipt-contract-red.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/shard-registration-and-vet-green-20260908.txt",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "736b51d2499271d8aa887625d44b6286be0b7920cd2618e5b6320ab2f5f10366",
+      "size": 2180,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/shard-registration-and-vet-green-20260908.txt",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/template-runner-read-only-probe.json",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "a0bf9f54a93b10a006f480230e8059cbab6837f6bf01bddb3ad0466a3b82b363",
+      "size": 600,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/template-runner-read-only-probe.json",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/typed-controller-composition-20260908.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "550c268064ab47b01ff585bb8f61ddbab6e19b8ef14a2d8fc6c703c1d7e57957",
+      "size": 4847,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/typed-controller-composition-20260908.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/typed-controller-first-fixture-failure.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "481a5dee811eb4d0a7e50b649c174fac74d2712283f619b88509778a941a5654",
+      "size": 1260,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/typed-controller-first-fixture-failure.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/typed-worker-receipts",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/typed-worker-receipts",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/upstream-waiver-assessment-20260908.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "50100f2eed25b5a7cae1145849ca7c4f5454f747f008d193c854b20246d826bc",
+      "size": 3902,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/upstream-waiver-assessment-20260908.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/verification-triage-20260908.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "8e1b4402dc62f3744adf1111bd8e204c31dd8b50b3de093ad94a8cef61b2393d",
+      "size": 6531,
+      "source": "docs/ai/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/verification-triage-20260908.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/sessions",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": "sessions",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/sessions/2026",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": "sessions/2026",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/sessions/2026/09",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": "sessions/2026/09",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/sessions/2026/09/2026-09-08-001-ga-ecwh-typed-worker-receipts.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "49739218456a3aa3476ed320dfdb6e75222489225a94dc2619aac842d893cf22",
+      "size": 6477,
+      "source": "sessions/2026/09/2026-09-08-001-ga-ecwh-typed-worker-receipts.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/sessions/2026/09/2026-09-09-001-ga-ecwh-typed-worker-receipts.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "d56092982e82a2dee3b8fa501593dab94acfad14398938d0b2ee067af3071f70",
+      "size": 2351,
+      "source": "sessions/2026/09/2026-09-09-001-ga-ecwh-typed-worker-receipts.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/sessions/current",
+      "gid": 1000,
+      "kind": "symlink",
+      "mode": "0o777",
+      "source": "sessions/current",
+      "target": "2026/09/2026-09-09-001-ga-ecwh-typed-worker-receipts.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/sessions/state.json",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "516a119c35a1296d4acb4c6277c8726ee6a61099db642e59eab8edb44818fbc2",
+      "size": 128,
+      "source": "sessions/state.json",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/plan-state",
+      "gid": 1000,
+      "kind": "directory",
+      "mode": "0o755",
+      "source": ".plan_state",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/plan-state/sync.log",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "4fec39a4b0780e579d67f59445d57a8d5fb9cd79a06346502826e31bc9d48b5d",
+      "size": 2993,
+      "source": ".plan_state/sync.log",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "b52ae5f46db6a599f410b58a6291e5a8a607867067a1b70ecb1970feb967b4a0",
+      "size": 3452,
+      "source": "plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+      "uid": 1000
+    },
+    {
+      "destination": "engdocs/workflow/plans/current",
+      "gid": 1000,
+      "kind": "symlink",
+      "mode": "0o777",
+      "source": "plans/current",
+      "target": "2026-09-08-ga-ecwh-typed-worker-receipts.md",
+      "uid": 1000
+    }
+  ],
+  "head": "a5a900f1173c8caccaa0bce23c946991ca52e50b",
+  "index": {
+    "gid": 1000,
+    "kind": "file",
+    "mode": "0o644",
+    "path": "/home/loucmane/gascity/city/rigs/gascity/.git/worktrees/ga-ecwh-typed-worker-receipts/index",
+    "sha256": "9f2d00f81ed465918068494f19cbbd96b20cf84c96004fceaf4e5588708dd63f",
+    "size": 545561,
+    "uid": 1000
+  },
+  "journal": {
+    "gid": 1000,
+    "kind": "file",
+    "mode": "0o600",
+    "path": "/home/loucmane/gascity/city/rigs/gascity/.git/gas-city-workflow/transactions/ga-ecwh.json",
+    "sha256": "e694063055af8057a85af6fe65a13ec0159ab6649606cb5447eb6396331d330f",
+    "size": 476303,
+    "uid": 1000
+  },
+  "maps": [
+    {
+      "destination": "engdocs/workflow/work-tracking",
+      "source": "docs/ai/work-tracking"
+    },
+    {
+      "destination": "engdocs/workflow/sessions",
+      "source": "sessions"
+    },
+    {
+      "destination": "engdocs/workflow/plan-state",
+      "source": ".plan_state"
+    },
+    {
+      "destination": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+      "source": "plans/2026-09-08-ga-ecwh-typed-worker-receipts.md"
+    },
+    {
+      "destination": "engdocs/workflow/plans/current",
+      "source": "plans/current"
+    }
+  ],
+  "protected": {
+    "cmd/gc/api_state.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "65bf85e75eda1e59401e39c1f921a341df375453076d69432a9f7cc991cdf817",
+      "size": 107809,
+      "uid": 1000
+    },
+    "cmd/gc/cmd_platform_canary.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "9202558c5567822c562aabab748e90ac46dcbf74c127e83cf5c250aca8ea3245",
+      "size": 14216,
+      "uid": 1000
+    },
+    "cmd/gc/cmd_platform_canary_profile_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "071589c35a39802e6960a7618c5ba93d57ad7ea32db2dcb13f1dd54ae7abc038",
+      "size": 5832,
+      "uid": 1000
+    },
+    "cmd/gc/cmd_platform_canary_transport_integration_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "123348b63bceafc20d13df1b020a93ff085ed9fbadc3553325b427f1c82f0b6c",
+      "size": 3953,
+      "uid": 1000
+    },
+    "cmd/gc/cmd_sling.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "846b55b8efeaf0cf6a6286262da34e6488225796775e4afc5e2dc51476e75834",
+      "size": 83904,
+      "uid": 1000
+    },
+    "cmd/gc/managed_product_dispatch_gate.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "835bac6f311470cfbd7c69f6da7ce1fa0e0e8723b92d8c3d9c5a5d1443f292ab",
+      "size": 10713,
+      "uid": 1000
+    },
+    "cmd/gc/managed_profile_dispatch_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "223adf94d647a9adbf7b03b062e4638cb20cd69a914e913dfdccd942a998a8e9",
+      "size": 7977,
+      "uid": 1000
+    },
+    "cmd/gc/managed_worker_policy_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "be24734b38fa75d50b81eace3e3e75ef2ccc712a27fcb1679f2090b5d2495b72",
+      "size": 3747,
+      "uid": 1000
+    },
+    "cmd/gc/managed_worker_preflight.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "da8d32299c2fa0aaa6810f47066cc79f4675a76a43ea6ae4a3d31da4e5e3a515",
+      "size": 10337,
+      "uid": 1000
+    },
+    "cmd/gc/managed_worker_typed_launch_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "084c2b6815417b10032393c0de63e820e10496bc75f67fd6bb21bfc763ee8a2f",
+      "size": 7699,
+      "uid": 1000
+    },
+    "engdocs/architecture/index.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "bf672076b58ce719b9d01207cd88d76f1905a41487957f4afc4b55c0f1766bec",
+      "size": 4329,
+      "uid": 1000
+    },
+    "engdocs/architecture/managed-worker-contracts.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "4f5692d2dc5e4da1840d486ed9f5fe73b60b49f0892bf3f042609d7c8d85f37b",
+      "size": 7411,
+      "uid": 1000
+    },
+    "internal/api/handler_sling.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "d3a86110b59f8137dfc8d6ca2e8082ee085d703a2f42be66ed20cd15f38782f6",
+      "size": 19698,
+      "uid": 1000
+    },
+    "internal/api/handler_sling_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "33765b9d2b8d6976f72353895ec20cf23c8e2998387e4d6d756d314eda81e011",
+      "size": 48123,
+      "uid": 1000
+    },
+    "internal/fsys/atomic.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "36b6596b52371bbe16221dc25bd20cb90ff3ff7f8393d2be0d2b5ed0f49b481a",
+      "size": 7388,
+      "uid": 1000
+    },
+    "internal/fsys/file_identity.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "e1f6d17dc48529d93a0fed224e167341d4d5491b0a02b483956a4274b032fe25",
+      "size": 433,
+      "uid": 1000
+    },
+    "internal/managedworker/canary.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "ecab12a04cc86262d0f00d02517914a084eba2c25410fa489fdb9cf56299c6dc",
+      "size": 16193,
+      "uid": 1000
+    },
+    "internal/managedworker/canary_profile.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "fdd1914f10fa5524f4ff0ad201699779207366a731c085e34cac4fce63182c34",
+      "size": 6969,
+      "uid": 1000
+    },
+    "internal/managedworker/canary_profile_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "edf173e6bb81deed14f9227247c7078e9942493ade03709a32bf6b099ec42a14",
+      "size": 9618,
+      "uid": 1000
+    },
+    "internal/managedworker/canary_run.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "deeff1c64d6f305917d7882538bcebde8b1249425bda36495fba88259ee5a6d1",
+      "size": 15127,
+      "uid": 1000
+    },
+    "internal/managedworker/policy_file.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "57ab0e3d861b470b7e0eac3a95aa8fc5b22752a3d05ec1e16bceef6a8dd8c01b",
+      "size": 2242,
+      "uid": 1000
+    },
+    "internal/managedworker/policy_file_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "eb4ee282539ba7dc9a44a19b03de0390ffc972a913236d8547201a10e2cd14dc",
+      "size": 4653,
+      "uid": 1000
+    },
+    "internal/managedworker/preflight.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "c8951d7d045d51d076a2e24772fa84eb2fbee016e85db2949fe3216ca9404804",
+      "size": 6696,
+      "uid": 1000
+    },
+    "internal/managedworker/profile_contract.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "a9faa6c1a383025fb4ee2d7f9045e095d741eec1415807f30b522b658d67872e",
+      "size": 7161,
+      "uid": 1000
+    },
+    "internal/managedworker/profile_contract_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "951345bf909ba0a757dd45590e9d1c67148f4c28c7b41322cad4f6e4943089ec",
+      "size": 10185,
+      "uid": 1000
+    },
+    "internal/managedworker/receipt.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "667383dbdc28f334a5cd740a81101cf8fbac57b2919e1db49207e74448a85eb1",
+      "size": 17564,
+      "uid": 1000
+    },
+    "internal/sling/dispatch_gate_test.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "bf2531f381dd502ce9f1d837ef2f255abc10bb03575107c2d7c4e0ff10d295e9",
+      "size": 2879,
+      "uid": 1000
+    },
+    "internal/sling/sling.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "1cb9f7134c9dd736615f7c99db01f8c71214ba891da3c238699987365497ea2b",
+      "size": 57342,
+      "uid": 1000
+    },
+    "internal/sling/sling_core.go": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "6532534dc7ff20a481dd4862571ea9ebd80d20c2e22beeff8c7a39e12b73bec1",
+      "size": 71302,
+      "uid": 1000
+    },
+    "plans/archive/646-supervisor-websocket-transport.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "2b9623278c472f9db5077b7dbea6522b41a0713c2afd662705b4a131a2c796ba",
+      "size": 16850,
+      "uid": 1000
+    },
+    "plans/archive/huma-openapi-migration-history.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "4e7c9bf5484519e70ae08fd5f2e0f1c052ee675f120ca7f2463e9d4ee55bb3e9",
+      "size": 69794,
+      "uid": 1000
+    },
+    "plans/archive/huma-openapi-migration.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "81d6a14c8256beca2ad77f8ae6f37b93316b76c549e72a29a2d1c6dbdff45408",
+      "size": 17722,
+      "uid": 1000
+    },
+    "plans/archive/shared-object-model-ops-layer.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "05acc047dd6810e2ad81cb57a65c1879a35fb816604fa117cea5ac9530579322",
+      "size": 3377,
+      "uid": 1000
+    },
+    "plans/new-dashboard-supervisor-hosting.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "241eedeaaad1b1417bba4a53d95d8b5e9a3d984593bcff95501362adaa88b4a2",
+      "size": 37077,
+      "uid": 1000
+    },
+    "plans/runs-view-HANDOFF.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "305867876e37fcfafa71846dbacfc107783b323670fab3c66bb5657b698374c2",
+      "size": 26743,
+      "uid": 1000
+    },
+    "plans/runs-view-NEXT-SESSION-PROMPT.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "afa00c74abdabd13f08f6710bb96ebdced7c136d07d50b22fef32c1ba642efd2",
+      "size": 6011,
+      "uid": 1000
+    },
+    "plans/runs-view-architecture-adr.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "8cb8e389b5704f6e87627d300e52999dae09ddafac5f87f8bf359dad95c771dc",
+      "size": 15414,
+      "uid": 1000
+    },
+    "plans/runs-view-event-sourcing.md": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o644",
+      "sha256": "eb2498435579e5909730356ae5c452f7f05577fd9365df8eb5f0974dc00e1d8f",
+      "size": 16821,
+      "uid": 1000
+    },
+    "scripts/test-integration-shard": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o755",
+      "sha256": "1197470250f311732f80afc715bcd33986297fdf719194f8784f6bff3a559d87",
+      "size": 12935,
+      "uid": 1000
+    }
+  },
+  "purpose": "Read-only 2026-09-09 snapshot after one reviewed target-aware daily continuation; not an executable plan or authority.",
+  "root": "/home/loucmane/gascity-core-worktrees/ga-ecwh-typed-worker-receipts",
+  "schema": "ga-ecwh.layout-relocation-review-inventory.v1",
+  "session_wal": {
+    ".aegis/state/session-continuation.json": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "5a74b5c6c401a529089759e2ffa06d5aba13b7b678f88bf6f6e97c77d91a231c",
+      "size": 30725,
+      "uid": 1000
+    },
+    ".aegis/state/session-continuations/2f7ecfe5e040489c8c35f03114ee1293.json": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "8d8cbacb75fb8ceba6c24df9c1caa14fd2fc864144672ae40aac5b7c20464668",
+      "size": 94482,
+      "uid": 1000
+    },
+    ".aegis/state/session-continuations/607c4bee010c4178acb6b6876ef925da.json": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "d90a50c799aeb24cdd5611a39e7c155eaa1f2ef68a8bcb46da1518528f0938f9",
+      "size": 19054,
+      "uid": 1000
+    },
+    ".aegis/state/session-continuations/7c51550c12dc4e85bc39a3e72b58db9b.json": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "6bd471b6050b3131f7cfc2434e9701ccd1c31bb4d655d8ba81c1d14ddb14fa8e",
+      "size": 29698,
+      "uid": 1000
+    },
+    ".aegis/state/session-continuations/8ac5eb51f5cc445c9242892dcbe11b79.json": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "26def3391f2a867187d023da667b0dde397b3dd83323087ca3fc56adfeb1ab7d",
+      "size": 81466,
+      "uid": 1000
+    },
+    ".aegis/state/session-continuations/9603843eb08a49c49dc473f32230c703.json": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "d0f8e97df94e64dc022b8bfee2c0823bfe7bc16b7c004fabc56c14ee66c68f9b",
+      "size": 69510,
+      "uid": 1000
+    },
+    ".aegis/state/session-continuations/c43b50d231a94502ae378375dabdd75d.json": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "a6e574397968c389e4813a72f2085b61ef24885ecc7e525fa6e3eeec4fca35f3",
+      "size": 41218,
+      "uid": 1000
+    },
+    ".aegis/state/session-continuations/d4513723acf040f89102f9953d75946a.json": {
+      "gid": 1000,
+      "kind": "file",
+      "mode": "0o600",
+      "sha256": "fd4c6f8e498d69f777a48b5c94b5bc16dfd70d326cc4c489a5efb290a972906d",
+      "size": 56966,
+      "uid": 1000
+    }
+  },
+  "tracked_diff_sha256": "a4e66b98cc96c1a0fb4243dde1d4fcd177a0250d79922d3665eae63bd66ea72c"
+}

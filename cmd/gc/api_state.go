@@ -1122,12 +1122,12 @@ func (cs *controllerState) currentConfigRevision() (string, error) {
 
 // VerifyManagedProductDispatch implements the API dispatch-gate capability
 // from one fresh config/provenance snapshot.
-func (cs *controllerState) VerifyManagedProductDispatch(rigName string) error {
+func (cs *controllerState) VerifyManagedProductDispatch(rigName, profileName string) error {
 	cfg, revision, err := cs.loadCurrentConfigSnapshot()
 	if err != nil {
 		return err
 	}
-	return newManagedProductDispatchGate(cs.cityPath, cfg, revision, cs.EventProvider()).Verify(rigName)
+	return newManagedProductDispatchGate(cs.cityPath, cfg, revision, cs.EventProvider()).VerifyProfile(rigName, profileName)
 }
 
 func (cs *controllerState) markConfigMutationPending(revision string) {

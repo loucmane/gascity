@@ -100,6 +100,7 @@ type CanaryRunRequest struct {
 	CityPath            string
 	Environment         CanaryEnvironment
 	MaxWallTime         time.Duration
+	Profile             *CanaryProfile
 	ProvisioningReceipt ProvisioningReceipt
 	Runner              FilePin
 	RunID               string
@@ -130,20 +131,31 @@ func RequiredCleanLauncherSteps() []string {
 // write is the final operation; failed or partial runs leave any prior receipt
 // byte-for-byte untouched.
 func RunGoldenPathCanary(ctx context.Context, request CanaryRunRequest, deps CanaryRunDeps) (CanaryReceipt, error) {
+	if request.Profile != nil {
+		profile := *request.Profile
+		request.Profile = &profile
+	}
 	if err := validateCanaryRunRequest(request, deps); err != nil {
 		return CanaryReceipt{}, err
 	}
 	runContext, cancel := context.WithTimeout(ctx, request.MaxWallTime)
 	defer cancel()
 
-	scenarios := make([]CanaryScenario, 0, len(requiredCanaryScenarios))
-	for _, name := range requiredCanaryScenarios {
+	names := RequiredCanaryScenarios()
+	if request.Profile != nil {
+		names, _ = RequiredCanaryScenariosFor(request.Profile.Kind)
+	}
+	scenarios := make([]CanaryScenario, 0, len(names))
+	for _, name := range names {
 		evidence, err := deps.RunScenario(runContext, name)
 		if err != nil {
 			return CanaryReceipt{}, fmt.Errorf("canary scenario %q: %w", name, err)
 		}
 		if err := validateCanaryScenarioEvidence(name, evidence); err != nil {
 			return CanaryReceipt{}, fmt.Errorf("canary scenario %q: %w", name, err)
+		}
+		if request.Profile != nil && evidence.AttentionLatencyCycles > 1 {
+			return CanaryReceipt{}, fmt.Errorf("canary scenario %q: attention exceeds one reconciliation cycle", name)
 		}
 		scenarios = append(scenarios, CanaryScenario{
 			Name:                   name,
@@ -165,6 +177,10 @@ func RunGoldenPathCanary(ctx context.Context, request CanaryRunRequest, deps Can
 		Runner:              request.Runner,
 		Scenarios:           scenarios,
 	}
+	if request.Profile != nil {
+		receipt.Schema = CanaryReceiptSchemaV2
+		receipt.Profile = request.Profile
+	}
 	return PublishCanaryReceipt(deps.FS, request.CityPath, receipt)
 }
 
@@ -183,10 +199,15 @@ func PublishCanaryReceipt(filesystem fsys.FS, cityPath string, receipt CanaryRec
 	if err != nil {
 		return CanaryReceipt{}, fmt.Errorf("finalize canary receipt: %w", err)
 	}
-	path := CanaryReceiptPath(cityPath)
+	path := CurrentCanaryReceiptPath(cityPath, finalized)
 	historyPath := CanaryHistoryReceiptPath(cityPath, finalized.ReceiptSHA256)
 	if err := filesystem.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil {
 		return CanaryReceipt{}, fmt.Errorf("create canary receipt directory: %w", err)
+	}
+	if filepath.Dir(path) != filepath.Dir(historyPath) {
+		if err := filesystem.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return CanaryReceipt{}, fmt.Errorf("create current canary directory: %w", err)
+		}
 	}
 	if err := publishCanaryHistoryReceipt(filesystem, historyPath, encoded); err != nil {
 		return CanaryReceipt{}, err
@@ -258,6 +279,9 @@ func validateCanaryRunRequest(request CanaryRunRequest, deps CanaryRunDeps) erro
 	if strings.TrimSpace(request.CityPath) == "" {
 		return errors.New("canary city path is required")
 	}
+	if !filepath.IsAbs(request.CityPath) || filepath.Clean(request.CityPath) != request.CityPath || request.CityPath == string(filepath.Separator) {
+		return errors.New("canary city path must be a clean absolute non-root path")
+	}
 	if deps.FS == nil {
 		return errors.New("canary filesystem is required")
 	}
@@ -266,6 +290,23 @@ func validateCanaryRunRequest(request CanaryRunRequest, deps CanaryRunDeps) erro
 	}
 	if deps.RunScenario == nil {
 		return errors.New("canary scenario runner is required")
+	}
+	// Validate input authority before invoking a scenario, not at final publish.
+	wire, err := canonicalJSON(request.ProvisioningReceipt)
+	if err != nil {
+		return err
+	}
+	if _, err := LoadProvisioningReceipt(wire); err != nil {
+		return fmt.Errorf("canary provisioning receipt: %w", err)
+	}
+	if err := validateCanaryEnvironment(canonicalizeCanaryEnvironment(request.Environment)); err != nil {
+		return err
+	}
+	if request.Profile == nil {
+		return validateLegacyCanaryProfiles(request.ProvisioningReceipt)
+	}
+	if err := validateCanaryProfile(request.ProvisioningReceipt, request.Environment, request.Profile); err != nil {
+		return err
 	}
 	return nil
 }
@@ -288,6 +329,16 @@ func validateCanaryScenarioEvidence(wantName string, evidence CanaryScenarioEvid
 	}
 
 	switch wantName {
+	case CanaryScenarioCandidateLauncher:
+		if evidence.Resolution != CanaryResolutionCompleted {
+			return errors.New("candidate launcher did not complete")
+		}
+		if evidence.SignedCandidate {
+			return errors.New("candidate-only launcher must not sign")
+		}
+		if !reflect.DeepEqual(evidence.CompletedSteps, RequiredCandidateLauncherSteps()) {
+			return errors.New("candidate launcher did not complete the eight candidate-only steps")
+		}
 	case CanaryScenarioCleanLauncher:
 		if evidence.Resolution != CanaryResolutionCompleted {
 			return fmt.Errorf("resolution = %q, want %q", evidence.Resolution, CanaryResolutionCompleted)

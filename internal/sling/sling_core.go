@@ -58,7 +58,7 @@ func DoSling(opts SlingOpts, deps SlingDeps, querier BeadQuerier) (SlingResult, 
 		return SlingResult{}, err
 	}
 	if !opts.dispatchGatePassed && deps.DispatchGate != nil {
-		if err := deps.DispatchGate(rigNameForAgent(deps.Cfg, opts.Target)); err != nil {
+		if err := deps.DispatchGate(rigNameForAgent(deps.Cfg, opts.Target), opts.Target.QualifiedName()); err != nil {
 			return SlingResult{Target: opts.Target.QualifiedName()}, err
 		}
 		opts.dispatchGatePassed = true
@@ -1415,7 +1415,7 @@ func DoSlingBatch(opts SlingOpts, deps SlingDeps, querier BeadChildQuerier) (Sli
 		return SlingResult{}, err
 	}
 	if !opts.dispatchGatePassed && deps.DispatchGate != nil {
-		if err := deps.DispatchGate(rigNameForAgent(deps.Cfg, opts.Target)); err != nil {
+		if err := deps.DispatchGate(rigNameForAgent(deps.Cfg, opts.Target), opts.Target.QualifiedName()); err != nil {
 			return SlingResult{Target: opts.Target.QualifiedName()}, err
 		}
 		opts.dispatchGatePassed = true

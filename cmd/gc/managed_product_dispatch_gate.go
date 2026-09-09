@@ -25,6 +25,7 @@ type managedProductDispatchGate struct {
 	permissionRevision string
 	recorder           events.Recorder
 	readFile           func(string) ([]byte, error)
+	readControlPolicy  func(string) ([]byte, error)
 	observe            func(context.Context, string, string) (managedworker.CanaryEnvironment, error)
 }
 
@@ -35,17 +36,55 @@ func newManagedProductDispatchGate(cityPath string, cfg *config.City, permission
 		permissionRevision: permissionRevision,
 		recorder:           recorder,
 		readFile:           os.ReadFile,
+		readControlPolicy:  readManagedControlPolicy,
 	}
 	gate.observe = gate.observeLiveEnvironment
 	return gate
 }
 
 func (gate *managedProductDispatchGate) Verify(rigName string) error {
+	return gate.verify(rigName, "")
+}
+
+// VerifyProfile binds a product route to its exact configured agent. Product
+// work retains the signing contract; unsigned candidate evidence cannot grant it.
+func (gate *managedProductDispatchGate) VerifyProfile(rigName, profileName string) error {
+	if gate == nil || !managedProductRig(gate.cfg, rigName) {
+		return nil
+	}
+	matched := 0
+	if profileName != "" && strings.TrimSpace(profileName) == profileName {
+		for i := range gate.cfg.Agents {
+			agent := &gate.cfg.Agents[i]
+			if agent.QualifiedName() == profileName && configuredRigName(gate.cityPath, agent, gate.cfg.Rigs) == rigName {
+				matched++
+			}
+		}
+	}
+	if matched != 1 {
+		err := managedworker.RefuseDispatch("profile.name", "one exact configured agent in the selected rig", profileName)
+		gate.recordRefusal(rigName, err)
+		return err
+	}
+	return gate.verify(rigName, profileName)
+}
+
+func (gate *managedProductDispatchGate) verify(rigName, profileName string) error {
 	if gate == nil || !managedProductRig(gate.cfg, rigName) {
 		return nil
 	}
 	receiptPath := managedworker.CanaryReceiptPath(gate.cityPath)
+	scoped := profileName != ""
+	if scoped {
+		receiptPath = managedworker.ProfileCanaryReceiptPath(gate.cityPath, profileName)
+	}
 	receiptData, err := gate.readFile(receiptPath)
+	if scoped && errors.Is(err, os.ErrNotExist) {
+		// Only absence permits the old untyped proof. An unreadable or invalid
+		// existing scoped proof must never be hidden by a historical fallback.
+		scoped = false
+		receiptData, err = gate.readFile(managedworker.CanaryReceiptPath(gate.cityPath))
+	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			err = managedworker.RefuseDispatch("receipt", "present", "missing")
@@ -64,7 +103,17 @@ func (gate *managedProductDispatchGate) Verify(rigName string) error {
 		gate.recordRefusal(rigName, err)
 		return err
 	}
-	_, err = managedworker.VerifyCanaryReceipt(receiptData, observed)
+	if scoped {
+		_, err = managedworker.VerifyProfileCanaryReceipt(receiptData, observed, profileName, managedworker.ProfileKindSigning)
+	} else {
+		var receipt managedworker.CanaryReceipt
+		receipt, err = managedworker.VerifyCanaryReceipt(receiptData, observed)
+		if err == nil && profileName != "" {
+			if _, exists := receipt.ProvisioningReceipt.Profile(profileName); !exists {
+				err = managedworker.RefuseDispatch("profile.name", profileName, "absent from legacy provisioning receipt")
+			}
+		}
+	}
 	if err != nil {
 		gate.recordRefusal(rigName, err)
 	}
@@ -142,6 +191,9 @@ func (gate *managedProductDispatchGate) observeLiveEnvironment(ctx context.Conte
 	profiles := make([]managedworker.ProfilePin, 0, len(provisioning.Profiles))
 	providers := make(map[string]platforminstall.ProviderPin)
 	for _, profile := range provisioning.Profiles {
+		if err := managedworker.VerifyControlPolicy(gate.readControlPolicy, profile); err != nil {
+			return managedworker.CanaryEnvironment{}, managedworker.RefuseDispatch("profiles["+profile.Name+"].control_policy", "exact protected policy", err.Error())
+		}
 		if err := verifyDispatchFilePin(gate.readFile, "profiles["+profile.Name+"].check_path", profile.CheckPath); err != nil {
 			return managedworker.CanaryEnvironment{}, err
 		}

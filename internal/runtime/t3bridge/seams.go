@@ -2,6 +2,7 @@ package t3bridge
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gastownhall/gascity/internal/runtime"
 )
@@ -46,6 +47,11 @@ var (
 // turn-able once created, so the Transport.Launch over the returned Place is a
 // no-op.
 func (r *t3Runtime) Provision(ctx context.Context, name string, req runtime.ProvisionRequest) (runtime.Place, error) {
+	// Provision creates a new running session. Raw Start also supports thread
+	// reuse, but reusing an already-live session is not Provider.Start's contract.
+	if r.p.isRunning(name, true) {
+		return nil, fmt.Errorf("%w: %s", runtime.ErrSessionExists, name)
+	}
 	if err := r.p.Start(ctx, name, req.Config); err != nil {
 		return nil, err
 	}
@@ -54,7 +60,7 @@ func (r *t3Runtime) Provision(ctx context.Context, name string, req runtime.Prov
 
 // Open re-resolves a running session by name without creating it (←IsRunning).
 func (r *t3Runtime) Open(_ context.Context, name string) (runtime.Place, bool, error) {
-	if !r.p.IsRunning(name) {
+	if !r.p.isRunning(name, true) {
 		return nil, false, nil
 	}
 	return &t3Place{p: r.p, name: name}, true, nil
@@ -70,7 +76,7 @@ func (r *t3Runtime) Teardown(_ context.Context, name string) error {
 
 // List returns running session names with the prefix (←ListRunning).
 func (r *t3Runtime) List(_ context.Context, prefix string) ([]string, error) {
-	return r.p.ListRunning(prefix)
+	return r.p.listRunning(prefix, true)
 }
 
 // Capabilities maps the provider capabilities to the box/Place half (t3bridge
@@ -121,7 +127,7 @@ func (pl *t3Place) Stage(_ context.Context, files []runtime.CopyEntry) error {
 }
 
 func (pl *t3Place) IsRunning(_ context.Context) (bool, error) {
-	return pl.p.IsRunning(pl.name), nil
+	return pl.p.isRunning(pl.name, true), nil
 }
 
 // Teardown is Stop's where-half: stop the T3 session (←Stop).

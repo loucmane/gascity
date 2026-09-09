@@ -38,16 +38,43 @@ func TestAPIManagedProductDispatchGateFailsClosedWhenCapabilityIsUnavailable(t *
 		{Name: "control"},
 	}
 	gate := apiManagedProductDispatchGate(state)
-	if err := gate("control"); err != nil {
+	if err := gate("control", "control/custom.worker"); err != nil {
 		t.Fatalf("control-plane gate: %v", err)
 	}
-	err := gate("product")
+	err := gate("product", "product/custom.worker")
 	var refusal *managedworker.DispatchRefusal
 	if !errors.As(err, &refusal) || refusal.Field != "dispatch_gate" {
 		t.Fatalf("product gate error = %T %[1]v, want dispatch_gate refusal", err)
 	}
 	if len(recorder.Events) != 1 || recorder.Events[0].Type != events.ManagedProductDispatchRefused {
 		t.Fatalf("events = %+v, want one dispatch refusal", recorder.Events)
+	}
+}
+
+type profileDispatchState struct {
+	*fakeState
+	calls [][2]string
+	err   error
+}
+
+func (s *profileDispatchState) VerifyManagedProductDispatch(rigName, profileName string) error {
+	s.calls = append(s.calls, [2]string{rigName, profileName})
+	return s.err
+}
+
+func TestAPIManagedProductDispatchForwardsExactTarget(t *testing.T) {
+	wantErr := errors.New("synthetic scoped refusal")
+	state := &profileDispatchState{fakeState: newFakeState(t), err: wantErr}
+	state.cfg.Rigs = []config.Rig{{Name: "product", ManagedProduct: true}, {Name: "control"}}
+	gate := apiManagedProductDispatchGate(state)
+	if err := gate("control", "control/custom.worker"); err != nil {
+		t.Fatal(err)
+	}
+	if err := gate("product", "product/custom.worker"); !errors.Is(err, wantErr) {
+		t.Fatalf("error=%v", err)
+	}
+	if len(state.calls) != 1 || state.calls[0] != [2]string{"product", "product/custom.worker"} {
+		t.Fatalf("profile binding lost: %v", state.calls)
 	}
 }
 

@@ -110,8 +110,15 @@ rest_smoke_tests=(
 cmd_gc_integration_tests=(
   TestCapstoneIntegrationRealMinter
   TestControllerDiscoversAddedCronOrderWithoutRestart
+  TestHybridConformance
+  TestHybridConformanceEnvironmentOverrideAndInvalidConfig
+  TestHybridConformanceMissingLocalBackendReported
+  TestHybridConformanceRoutesAndMergesBothBackends
+  TestHybridLocalConformance
+  TestHybridRemoteConformance
   TestManagedBdRigProviderStoreRecoversAfterHardKillPortRebind
   TestPhase2WorkerCoreRealTransportProof
+  TestPlatformCanaryRunnerRoundTripsSelectedProfile
   TestRigAddIncludeResolvesScopedRegistryPackName
 )
 

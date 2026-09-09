@@ -69,10 +69,12 @@ type WorkerProfile struct {
 	ApprovalPolicy      string                      `json:"approval_policy"`
 	Argv                []string                    `json:"argv"`
 	CheckPath           FilePin                     `json:"check_path"`
+	ControlPolicy       *FilePin                    `json:"control_policy,omitempty"`
 	Environment         map[string]string           `json:"environment,omitempty"`
 	Name                string                      `json:"name"`
 	NetworkPolicy       string                      `json:"network_policy"`
 	Provider            platforminstall.ProviderPin `json:"provider"`
+	ProfileKind         ProfileKind                 `json:"profile_kind,omitempty"`
 	SandboxMode         string                      `json:"sandbox_mode"`
 	SignerIdentity      string                      `json:"signer_identity"`
 	Toolchains          []ToolchainPin              `json:"toolchains,omitempty"`
@@ -195,6 +197,10 @@ func canonicalizeReceiptSlices(receipt ProvisioningReceipt) ProvisioningReceipt 
 	receipt.Profiles = append([]WorkerProfile(nil), receipt.Profiles...)
 	for index := range receipt.Profiles {
 		receipt.Profiles[index].Argv = append([]string(nil), receipt.Profiles[index].Argv...)
+		if receipt.Profiles[index].ControlPolicy != nil {
+			policy := *receipt.Profiles[index].ControlPolicy
+			receipt.Profiles[index].ControlPolicy = &policy
+		}
 		receipt.Profiles[index].Environment = cloneStringMap(receipt.Profiles[index].Environment)
 		receipt.Profiles[index].Toolchains = append([]ToolchainPin(nil), receipt.Profiles[index].Toolchains...)
 		for toolchainIndex := range receipt.Profiles[index].Toolchains {
@@ -278,6 +284,9 @@ func validateReceiptContent(receipt ProvisioningReceipt) error {
 }
 
 func validateWorkerProfile(profile WorkerProfile, requireDigest, requireRuntime bool) error {
+	if err := validateProfileContract(profile, requireRuntime); err != nil {
+		return err
+	}
 	for name, value := range map[string]string{
 		"name": profile.Name, "approval_policy": profile.ApprovalPolicy,
 		"sandbox_mode": profile.SandboxMode, "network_policy": profile.NetworkPolicy,

@@ -1,0 +1,15 @@
+{
+  "model": "claude-fable-5-1",
+  "tools": [],
+  "pins": {
+    "inventory.json": "4424e1aa756243adc11f5316f21d42ed44998f8ad065cffbb8583c28b25a2dc3",
+    "inventory-r3-20260909.json": "3279a85ce344a79937a6014f67e1decc3e48c563e38c5e583c7fefff3a3c27d2",
+    "daily-continuation-20260909.json": "402d83eb76ec98999152761a00f356449cf2d37dc8d20b6b2acdd83a6d15a3f8"
+  },
+  "source_pins": {
+    "docs/operations/core-evidence-layout.md": "b9fc0fe08a6a84d2b192cb494edd568aa35ac6e44537700a169302b1c45cbe21",
+    "scripts/_core_layout_apply.py": "f3ae8c90d682bf4a58170a8058d1331ca454bee162e67123a69a11028b03b0fa"
+  },
+  "prompt_sha256": "04ef9f52510442c2c21e83e03f590680f3d89f86bb6339c59adc303eac11539f",
+  "disclosure": "In-scope infrastructure inventory and task evidence only"
+}

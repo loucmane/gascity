@@ -24,11 +24,12 @@ type PreflightRequest struct {
 
 // Probes supplies the side-effecting boundaries used by Preflight.
 type Probes struct {
-	ReadFile         func(string) ([]byte, error)
-	InspectProvider  func(context.Context, platforminstall.ProviderPin) error
-	InspectToolchain func(context.Context, ToolchainPin, map[string]string) error
-	ProbeReadiness   func(context.Context, string) error
-	ProbeSigner      func(context.Context, string) error
+	ReadFile          func(string) ([]byte, error)
+	ReadControlPolicy func(string) ([]byte, error)
+	InspectProvider   func(context.Context, platforminstall.ProviderPin) error
+	InspectToolchain  func(context.Context, ToolchainPin, map[string]string) error
+	ProbeReadiness    func(context.Context, string) error
+	ProbeSigner       func(context.Context, string) error
 }
 
 // PreflightReport records whether every required managed-worker check passed.
@@ -73,7 +74,7 @@ func Preflight(ctx context.Context, request PreflightRequest, probes Probes) (Pr
 	if !ok {
 		return report, fmt.Errorf("managed worker profile %q is not declared in the provisioning receipt", request.ProfileName)
 	}
-	if err := validateProbes(probes, len(profile.Toolchains) > 0); err != nil {
+	if err := validateProbes(probes, len(profile.Toolchains) > 0, profile.EffectiveProfileKind() == ProfileKindSigning); err != nil {
 		return report, err
 	}
 	report.Checks = append(report.Checks, "profile")
@@ -108,6 +109,12 @@ func Preflight(ctx context.Context, request PreflightRequest, probes Probes) (Pr
 		return report, err
 	}
 	report.Checks = append(report.Checks, "check_path")
+	if profile.ControlPolicy != nil {
+		if err := VerifyControlPolicy(probes.ReadControlPolicy, profile); err != nil {
+			return report, err
+		}
+		report.Checks = append(report.Checks, "control_policy")
+	}
 
 	if err := probes.InspectProvider(ctx, profile.Provider); err != nil {
 		return report, fmt.Errorf("provider identity %q: %w", profile.Provider.Name, err)
@@ -125,20 +132,26 @@ func Preflight(ctx context.Context, request PreflightRequest, probes Probes) (Pr
 		return report, fmt.Errorf("provider readiness %q: %w", profile.Provider.Name, err)
 	}
 	report.Checks = append(report.Checks, "provider_readiness")
-	if err := probes.ProbeSigner(ctx, profile.SignerIdentity); err != nil {
-		return report, fmt.Errorf("signer readiness %q: %w", profile.SignerIdentity, err)
+	if profile.EffectiveProfileKind() == ProfileKindSigning {
+		if err := probes.ProbeSigner(ctx, profile.SignerIdentity); err != nil {
+			return report, fmt.Errorf("signer readiness %q: %w", profile.SignerIdentity, err)
+		}
+		report.Checks = append(report.Checks, "signer")
+	} else {
+		report.Checks = append(report.Checks, "no_signer")
 	}
-	report.Checks = append(report.Checks, "signer")
 	report.OK = true
 	return report, nil
 }
 
-func validateProbes(probes Probes, requireToolchains bool) error {
+func validateProbes(probes Probes, requireToolchains, requireSigner bool) error {
 	required := map[string]bool{
 		"read file":          probes.ReadFile != nil,
 		"inspect provider":   probes.InspectProvider != nil,
 		"provider readiness": probes.ProbeReadiness != nil,
-		"signer readiness":   probes.ProbeSigner != nil,
+	}
+	if requireSigner {
+		required["signer readiness"] = probes.ProbeSigner != nil
 	}
 	if requireToolchains {
 		required["inspect toolchain"] = probes.InspectToolchain != nil

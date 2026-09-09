@@ -17,6 +17,7 @@ import (
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/managedworker"
 	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/gastownhall/gascity/internal/shellquote"
@@ -122,9 +123,10 @@ func managedWorkerProfileName(candidate startCandidate, cfg *config.City) string
 
 func defaultManagedWorkerPreflightProbes() managedworker.Probes {
 	return managedworker.Probes{
-		ReadFile:         os.ReadFile,
-		InspectProvider:  platforminstall.VerifyProviderPin,
-		InspectToolchain: probeManagedWorkerToolchain,
+		ReadFile:          os.ReadFile,
+		ReadControlPolicy: readManagedControlPolicy,
+		InspectProvider:   platforminstall.VerifyProviderPin,
+		InspectToolchain:  probeManagedWorkerToolchain,
 		ProbeReadiness: func(ctx context.Context, provider string) error {
 			if !api.SupportsProviderReadiness(provider) {
 				return fmt.Errorf("provider %q has no independent readiness probe", provider)
@@ -144,6 +146,10 @@ func defaultManagedWorkerPreflightProbes() managedworker.Probes {
 		},
 		ProbeSigner: probeManagedWorkerSigner,
 	}
+}
+
+func readManagedControlPolicy(path string) ([]byte, error) {
+	return managedworker.ReadControlPolicy(fsys.OSFS{}, path)
 }
 
 func probeManagedWorkerToolchain(ctx context.Context, pin managedworker.ToolchainPin, environment map[string]string) error {

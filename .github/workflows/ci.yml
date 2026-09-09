@@ -730,6 +730,12 @@ jobs:
           dolt-version: ${{ env.DOLT_VERSION }}
           bd-version: ${{ env.BD_VERSION }}
           install-claude-cli: "false"
+      - name: Provision pinned Herdr conformance dependency
+        if: startsWith(matrix.shard_name, 'packages-core-')
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_install_herdr_test_dependency.py
+          herdr_dir="$(python3 scripts/install_herdr_test_dependency.py)"
+          printf '%s\n' "$herdr_dir" >> "$GITHUB_PATH"
       - name: Run integration shard
         run: ${{ matrix.command }}
 

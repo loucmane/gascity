@@ -24,6 +24,8 @@ type platformCanaryOptions struct {
 	baseCommit     string
 	launcherSource string
 	maxWallTime    time.Duration
+	profileName    string
+	profileKind    string
 	runID          string
 	runnerPath     string
 	runnerSHA256   string
@@ -73,6 +75,8 @@ func newPlatformCanaryCmd(stdout, _ io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&options.launcherSource, "launcher-source", "", "absolute clean launcher source cloned by the runner")
 	cmd.Flags().StringVar(&options.baseCommit, "base-commit", "", "full lowercase Git commit for the fresh launcher clone")
 	cmd.Flags().StringVar(&options.scratchRoot, "scratch-root", "", "absolute empty-parent root for canary artifacts")
+	cmd.Flags().StringVar(&options.profileName, "profile", "", "exact resolved profile identity for a profile-scoped canary")
+	cmd.Flags().StringVar(&options.profileKind, "profile-kind", "", "expected profile contract: candidate or signing (requires --profile)")
 	cmd.Flags().DurationVar(&options.maxWallTime, "max-wall-time", 30*time.Minute, "hard wall-clock bound for the complete canary")
 	for _, name := range []string{"run-id", "runner", "runner-sha256", "launcher-source", "base-commit", "scratch-root"} {
 		_ = cmd.MarkFlagRequired(name)
@@ -103,14 +107,29 @@ func runPlatformCanary(ctx context.Context, options platformCanaryOptions, runti
 	if err := verifyPlatformCanaryRunner(runtime.FS, runner.Path, runner.SHA256); err != nil {
 		return managedworker.CanaryReceipt{}, "", err
 	}
-	workerProfile, err := selectCanaryWorkerProfile(provisioning)
+	var workerProfile managedworker.WorkerProfile
+	var selectedProfile *managedworker.CanaryProfile
+	if options.profileName != "" {
+		kind := managedworker.ProfileKind(options.profileKind)
+		workerProfile, err = managedworker.SelectCanaryProfile(provisioning, options.profileName, kind)
+		if err == nil {
+			selectedProfile = &managedworker.CanaryProfile{Name: workerProfile.Name, Kind: kind, SHA256: workerProfile.WorkerProfileSHA256}
+		}
+	} else {
+		workerProfile, err = selectCanaryWorkerProfile(provisioning)
+	}
 	if err != nil {
+		return managedworker.CanaryReceipt{}, "", err
+	}
+	readPolicy := func(path string) ([]byte, error) { return managedworker.ReadControlPolicy(runtime.FS, path) }
+	if err := managedworker.VerifyControlPolicy(readPolicy, workerProfile); err != nil {
 		return managedworker.CanaryReceipt{}, "", err
 	}
 	receipt, err := managedworker.RunGoldenPathCanary(ctx, managedworker.CanaryRunRequest{
 		CityPath:            cityPath,
 		Environment:         environment,
 		MaxWallTime:         options.maxWallTime,
+		Profile:             selectedProfile,
 		ProvisioningReceipt: provisioning,
 		Runner:              runner,
 		RunID:               options.runID,
@@ -118,7 +137,10 @@ func runPlatformCanary(ctx context.Context, options platformCanaryOptions, runti
 		FS:  runtime.FS,
 		Now: runtime.Now,
 		RunScenario: func(scenarioContext context.Context, scenario string) (managedworker.CanaryScenarioEvidence, error) {
-			return runtime.RunScenario(scenarioContext, platformCanaryScenarioCall{
+			if err := managedworker.VerifyControlPolicy(readPolicy, workerProfile); err != nil {
+				return managedworker.CanaryScenarioEvidence{}, err
+			}
+			evidence, err := runtime.RunScenario(scenarioContext, platformCanaryScenarioCall{
 				BaseCommit:     options.baseCommit,
 				CityPath:       cityPath,
 				LauncherSource: options.launcherSource,
@@ -129,12 +151,19 @@ func runPlatformCanary(ctx context.Context, options platformCanaryOptions, runti
 				ScratchRoot:    options.scratchRoot,
 				WorkerProfile:  workerProfile,
 			})
+			if err != nil {
+				return evidence, err
+			}
+			if err := managedworker.VerifyControlPolicy(readPolicy, workerProfile); err != nil {
+				return managedworker.CanaryScenarioEvidence{}, err
+			}
+			return evidence, nil
 		},
 	})
 	if err != nil {
 		return managedworker.CanaryReceipt{}, "", err
 	}
-	return receipt, managedworker.CanaryReceiptPath(cityPath), nil
+	return receipt, managedworker.CurrentCanaryReceiptPath(cityPath, receipt), nil
 }
 
 func defaultPlatformCanaryRuntime() platformCanaryRuntime {
@@ -203,19 +232,17 @@ func runPlatformCanaryScenarioCommand(ctx context.Context, call platformCanarySc
 }
 
 func selectCanaryWorkerProfile(receipt managedworker.ProvisioningReceipt) (managedworker.WorkerProfile, error) {
-	var matches []managedworker.WorkerProfile
-	for _, profile := range receipt.Profiles {
-		if strings.HasSuffix(profile.Name, "/gc.implementation-worker") {
-			matches = append(matches, profile)
-		}
+	// Omission is retained only for an unambiguous legacy receipt. New typed
+	// contracts and multi-profile receipts require explicit selection; role
+	// suffixes and provider names are never used to guess the intended target.
+	if len(receipt.Profiles) != 1 || receipt.Profiles[0].ProfileKind != "" {
+		return managedworker.WorkerProfile{}, errors.New("canary requires explicit --profile and --profile-kind for typed or multiple profiles")
 	}
-	if len(matches) != 1 {
-		return managedworker.WorkerProfile{}, fmt.Errorf("canary requires exactly one gc.implementation-worker profile, got %d", len(matches))
-	}
-	if len(matches[0].Environment) == 0 || len(matches[0].Toolchains) == 0 {
+	profile := receipt.Profiles[0]
+	if len(profile.Environment) == 0 || len(profile.Toolchains) == 0 {
 		return managedworker.WorkerProfile{}, errors.New("canary requires a v2 implementation-worker profile with environment and toolchains")
 	}
-	return matches[0], nil
+	return profile, nil
 }
 
 func validatePlatformCanaryRuntime(runtime platformCanaryRuntime) error {
@@ -234,6 +261,12 @@ func validatePlatformCanaryRuntime(runtime platformCanaryRuntime) error {
 }
 
 func validatePlatformCanaryOptions(options platformCanaryOptions) error {
+	if options.profileName != "" || options.profileKind != "" {
+		if strings.TrimSpace(options.profileName) == "" || options.profileName != strings.TrimSpace(options.profileName) ||
+			(options.profileKind != string(managedworker.ProfileKindCandidate) && options.profileKind != string(managedworker.ProfileKindSigning)) {
+			return errors.New("platform canary requires both exact --profile and --profile-kind candidate or signing")
+		}
+	}
 	for name, value := range map[string]string{
 		"run-id":          options.runID,
 		"runner":          options.runnerPath,

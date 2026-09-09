@@ -49,6 +49,7 @@ const (
 	bridgeHTTPTimeout        = 12 * time.Second
 	bridgeWSTimeout          = 3 * time.Second
 	snapshotCacheTTL         = 10 * time.Second
+	seamDetachedMetadataKey  = "gc.seamDetached"
 )
 
 // Provider wraps an exec.Provider, moving the T3-specific lifecycle and turn
@@ -1453,32 +1454,33 @@ func buildGCMetadata(envelope StartupEnvelope, runtimeProvider string, sessionEn
 		agentLabel = agentLabel[dot+1:]
 	}
 	meta := map[string]interface{}{
-		"gc.agent":             envelope.GC.Agent,
-		"gc.sessionName":       envelope.GC.SessionName,
-		"gc.rig":               envelope.GC.RigName,
-		"gc.rigPath":           envelope.GC.RigPath,
-		"gc.city":              envelope.GC.CityName,
-		"gc.bead":              envelope.Assignment.BeadID,
-		"gc.beadTitle":         envelope.Assignment.BeadTitle,
-		"gc.convoy":            envelope.Assignment.ConvoyID,
-		"gc.convoyTitle":       envelope.Assignment.ConvoyTitle,
-		"gc.convoyStatus":      envelope.Assignment.ConvoyStatus,
-		"gc.convoyClosedCount": envelope.Assignment.ConvoyClosedCount,
-		"gc.convoyTotalCount":  envelope.Assignment.ConvoyTotalCount,
-		"gc.provider":          "t3bridge",
-		"gc.runtimeProvider":   runtimeProvider,
-		"gc.state":             state,
-		"gc.startupVersion":    fmt.Sprintf("%d", envelope.Version),
-		"gc.startupTemplate":   envelope.GC.Template,
-		"gc.startupModel":      envelope.Runtime.Model,
-		"gc.startupWorkDir":    envelope.Runtime.WorkDir,
-		"gc.molecule":          envelope.Assignment.MoleculeID,
-		"gc.formula":           envelope.Assignment.Formula,
-		"gc.groupKind":         groupKind,
-		"gc.groupId":           groupID,
-		"gc.groupLabel":        groupLabel,
-		"gc.agentQualified":    agentQualified,
-		"gc.agentLabel":        agentLabel,
+		"gc.agent":              envelope.GC.Agent,
+		"gc.sessionName":        envelope.GC.SessionName,
+		"gc.rig":                envelope.GC.RigName,
+		"gc.rigPath":            envelope.GC.RigPath,
+		"gc.city":               envelope.GC.CityName,
+		"gc.bead":               envelope.Assignment.BeadID,
+		"gc.beadTitle":          envelope.Assignment.BeadTitle,
+		"gc.convoy":             envelope.Assignment.ConvoyID,
+		"gc.convoyTitle":        envelope.Assignment.ConvoyTitle,
+		"gc.convoyStatus":       envelope.Assignment.ConvoyStatus,
+		"gc.convoyClosedCount":  envelope.Assignment.ConvoyClosedCount,
+		"gc.convoyTotalCount":   envelope.Assignment.ConvoyTotalCount,
+		"gc.provider":           "t3bridge",
+		"gc.runtimeProvider":    runtimeProvider,
+		"gc.state":              state,
+		seamDetachedMetadataKey: "0",
+		"gc.startupVersion":     fmt.Sprintf("%d", envelope.Version),
+		"gc.startupTemplate":    envelope.GC.Template,
+		"gc.startupModel":       envelope.Runtime.Model,
+		"gc.startupWorkDir":     envelope.Runtime.WorkDir,
+		"gc.molecule":           envelope.Assignment.MoleculeID,
+		"gc.formula":            envelope.Assignment.Formula,
+		"gc.groupKind":          groupKind,
+		"gc.groupId":            groupID,
+		"gc.groupLabel":         groupLabel,
+		"gc.agentQualified":     agentQualified,
+		"gc.agentLabel":         agentLabel,
 	}
 	if len(sessionEnv) > 0 {
 		if encodedEnv, err := json.Marshal(sessionEnv); err == nil {
@@ -1957,6 +1959,12 @@ func t3bridgeDebugf(format string, args ...interface{}) {
 // even before T3 reports a provider session, avoiding duplicate starts while
 // the first turn is still materializing.
 func (p *Provider) IsRunning(name string) bool {
+	return p.isRunning(name, false)
+}
+
+// The raw provider reports the persistent T3 thread. The seam reports the
+// attached Gas City session, which Stop can detach without killing the thread.
+func (p *Provider) isRunning(name string, attachedOnly bool) bool {
 	snapshot, err := p.rpcSnapshot()
 	if err != nil {
 		if p.withinRecentStart(name) {
@@ -1967,6 +1975,9 @@ func (p *Provider) IsRunning(name string) bool {
 		return false
 	}
 	thread := snapshotThreadBySessionName(snapshot, name)
+	if attachedOnly && detachedPersistentThread(thread) {
+		return false
+	}
 	binding := snapshotThreadBinding(thread)
 	if binding == nil {
 		t3bridgeDebugf("t3bridge: IsRunning(%s) — no snapshot binding\n", name)
@@ -1982,8 +1993,18 @@ func (p *Provider) IsRunning(name string) bool {
 	return result
 }
 
-// ListRunning enumerates live GC-managed session names from the T3 snapshot.
+// ListRunning enumerates active GC-managed thread names from the T3 snapshot,
+// including threads whose provider runtime has stopped. The seam adapter
+// separately filters this inventory to running Gas City sessions.
 func (p *Provider) ListRunning(prefix string) ([]string, error) {
+	return p.listRunning(prefix, false)
+}
+
+func detachedPersistentThread(thread map[string]interface{}) bool {
+	return assignmentFromThread(thread) == "" && threadCustomMetadata(thread)[seamDetachedMetadataKey] == "1"
+}
+
+func (p *Provider) listRunning(prefix string, attachedOnly bool) ([]string, error) {
 	snapshot, err := p.rpcSnapshot()
 	if err != nil {
 		if isSoftBridgeUnavailable(err) {
@@ -1995,6 +2016,9 @@ func (p *Provider) ListRunning(prefix string) ([]string, error) {
 	names := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, thread := range snapshotThreads(snapshot) {
+		if attachedOnly && detachedPersistentThread(thread) {
+			continue
+		}
 		if deletedAt, ok := thread["deletedAt"]; ok && deletedAt != nil {
 			continue
 		}
@@ -2007,6 +2031,12 @@ func (p *Provider) ListRunning(prefix string) ([]string, error) {
 			continue
 		}
 		if prefix != "" && !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		session, _ := thread["session"].(map[string]interface{})
+		status, _ := session["status"].(string)
+		if attachedOnly && status != "running" && status != "ready" &&
+			((status != "none" && status != "gone") || !p.withinRecentStart(name)) {
 			continue
 		}
 		if _, ok := seen[name]; ok {
@@ -2163,7 +2193,7 @@ func (p *Provider) Start(_ context.Context, name string, cfg runtime.Config) err
 			if reuse.Decision == ReuseDecisionRebind {
 				_ = p.dispatchThreadModelSelection(threadID, providerName, modelName)
 			}
-			if p.threadSessionStatus(threadID) != "running" {
+			if status := p.threadSessionStatus(threadID); status != "running" && status != "ready" {
 				_ = p.dispatchThreadSessionStop(threadID)
 			}
 			binding := threadBinding{
@@ -2176,7 +2206,10 @@ func (p *Provider) Start(_ context.Context, name string, cfg runtime.Config) err
 				Model:       modelName,
 			}
 			p.setRecentStart(name, time.Now())
-			_ = p.dispatchThreadMeta(threadID, buildGCMetadata(envelope, providerName, buildThreadEnv(cfg.Env)))
+			if err := p.dispatchThreadMeta(threadID, buildGCMetadata(envelope, providerName, buildThreadEnv(cfg.Env))); err != nil {
+				p.clearRecentStart(name)
+				return fail(err)
+			}
 			if worktreePath != "" {
 				_ = p.rpcUpdateThreadMeta(threadID, worktreeBranch, worktreePath)
 			}
@@ -2192,6 +2225,7 @@ func (p *Provider) Start(_ context.Context, name string, cfg runtime.Config) err
 				"decision":    string(reuse.Decision),
 			})
 			p.ensureEventWatcher(name, cfg, binding, envelope, providerName)
+			p.clearSnapshotCache()
 			return nil
 		default:
 			fmt.Fprintf(os.Stderr, "t3bridge: Start(%s) discard existing thread=%s decision=%s\n", name, existingBinding.ThreadID, reuse.Decision) //nolint:errcheck
@@ -2298,10 +2332,10 @@ func (p *Provider) Start(_ context.Context, name string, cfg runtime.Config) err
 // Stop tears down the session's event watcher and stops or archives its T3
 // thread; persistent agents are left running.
 func (p *Provider) Stop(name string) error {
-	p.stopEventWatcher(name)
 	snapshot, err := p.rpcSnapshot()
 	if err != nil {
 		if isSoftBridgeUnavailable(err) {
+			p.stopEventWatcher(name)
 			p.clearRecentStart(name)
 			p.clearBridgeMeta(name)
 			return nil
@@ -2311,19 +2345,29 @@ func (p *Provider) Stop(name string) error {
 	thread := snapshotThreadBySessionName(snapshot, name)
 	binding := snapshotThreadBinding(thread)
 	if binding == nil {
+		p.stopEventWatcher(name)
 		p.clearRecentStart(name)
 		p.clearBridgeMeta(name)
 		return nil
 	}
 
 	if p.isPersistentAgent(thread) {
-		p.recordStateChange(binding.ThreadID, "persistent-alive", "GC stop skipped (persistent agent)", map[string]interface{}{
+		// This metadata is the durable detach boundary for the seam adapter.
+		// Do not report successful detachment when its publication failed.
+		if err := p.dispatchThreadMeta(binding.ThreadID, map[string]interface{}{"gc.state": "persistent-alive", seamDetachedMetadataKey: "1"}); err != nil {
+			return err
+		}
+		p.stopEventWatcher(name)
+		_ = p.dispatchActivity(binding.ThreadID, "gc.state.changed", "GC stop skipped (persistent agent)", stateChangePayload("persistent-alive", map[string]interface{}{
 			"reason": "persistent agent not killed",
-		})
+		}))
 		p.clearBridgeMeta(name)
+		p.clearRecentStart(name)
+		p.clearSnapshotCache()
 		return nil
 	}
 
+	p.stopEventWatcher(name)
 	drained, _ := p.GetMeta(name, "drained")
 	p.recordStateChange(binding.ThreadID, "stopped", "GC session stopped", nil)
 	_ = p.dispatchThreadSessionStop(binding.ThreadID)

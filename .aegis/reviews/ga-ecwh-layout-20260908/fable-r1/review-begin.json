@@ -1,0 +1,16 @@
+{
+  "base": "a5a900f1173c8caccaa0bce23c946991ca52e50b",
+  "source_pins": {
+    ".aegis/reviews/ga-ecwh-layout-20260908/review-plan.md": "5589487774c365edde9a88065541ee16293abeae12dcd7ef8c85dc68890f16c4",
+    ".aegis/reviews/ga-ecwh-layout-20260908/inventory.json": "4424e1aa756243adc11f5316f21d42ed44998f8ad065cffbb8583c28b25a2dc3",
+    ".aegis/reviews/ga-ecwh-layout-20260908/source-context.md": "2a53e383edc0820e0bc754fb8e0d24436bc518c9254176ca79867cdfe87bd4f2"
+  },
+  "evidence_pins": {},
+  "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "prompt_sha256": "d63e291fe6f2f7419f0d66067558bfeebb4cb2e436c133d277079df2474e5a3e",
+  "prompt_bytes": 86009,
+  "model": "claude-fable-5-1",
+  "tools": [],
+  "disclosure": "Infrastructure source and synthetic tests only",
+  "baseline_status_at_preparation": "not run; design review only"
+}
