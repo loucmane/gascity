@@ -409,15 +409,22 @@ name = "bright-lights"
 }
 
 func TestFinalizeInitDoesNotWriteImplicitImportState(t *testing.T) {
+	t.Setenv("GIT_ALLOW_PROTOCOL", "file")
 	t.Setenv("GC_BEADS", "file")
 	t.Setenv("GC_DOLT", "skip")
 	configureIsolatedRuntimeEnv(t)
 
 	cityPath := filepath.Join(t.TempDir(), "bright-lights")
 	var initStdout, initStderr bytes.Buffer
-	code := doInit(fsys.OSFS{}, cityPath, defaultWizardConfig(), "", &initStdout, &initStderr, false)
+	// This local-state assertion does not require the default template's remote roles pack.
+	code := doInit(fsys.OSFS{}, cityPath, wizardConfig{configName: "minimal"}, "", &initStdout, &initStderr, false)
 	if code != 0 {
 		t.Fatalf("doInit = %d, want 0: %s", code, initStderr.String())
+	}
+	// Bundled imports still exercise the real remote-import installation path, without a download.
+	hasRemoteImports, err := initHasRemoteImports(cityPath)
+	if err != nil || !hasRemoteImports {
+		t.Fatalf("fixture must exercise remote-import installation: remote=%v err=%v", hasRemoteImports, err)
 	}
 
 	oldLookPath := initLookPath
@@ -840,6 +847,7 @@ func TestCmdInitSkipProviderReadinessAllowsBuiltinWithoutProbe(t *testing.T) {
 }
 
 func TestCmdInitNoStartSkipsSupervisorRegistration(t *testing.T) {
+	t.Setenv("GIT_ALLOW_PROTOCOL", "file")
 	t.Setenv("GC_BEADS", "file")
 	t.Setenv("GC_DOLT", "skip")
 	configureIsolatedRuntimeEnv(t)
@@ -855,7 +863,8 @@ func TestCmdInitNoStartSkipsSupervisorRegistration(t *testing.T) {
 	t.Cleanup(func() { registerCityWithSupervisorTestHook = oldRegister })
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--provider", "claude", "--skip-provider-readiness", "--no-start", cityPath}, &stdout, &stderr)
+	// Exercise real finalization without making supervisor-control coverage depend on a remote pack.
+	code := run([]string{"init", "--template", "minimal", "--provider", "claude", "--skip-provider-readiness", "--no-start", cityPath}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("gc init --no-start = %d, want 0; stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}

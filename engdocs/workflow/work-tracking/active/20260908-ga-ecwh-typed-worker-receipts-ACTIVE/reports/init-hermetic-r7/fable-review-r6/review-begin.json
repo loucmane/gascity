@@ -1,0 +1,52 @@
+{
+  "base": "38a45465858eb186309997f9ebeaee8ae6559477",
+  "source_pins": {
+    "cmd/gc/init_provider_readiness_test.go": {
+      "sha256": "4b6852501133c0b03f7e6cd4c81634fd76bbd4f9f33bf9bb09d338b678690a5b",
+      "mode": 420
+    },
+    "cmd/gc/init_provider_readiness.go": {
+      "sha256": "b5b971ced1739717892b5b837aa924a474f9e3ad85f73afc60fa558149988e4f",
+      "mode": 420
+    },
+    "cmd/gc/cmd_init.go": {
+      "sha256": "b747038ddc6fd0597f59d248a7cce8ef78320e23ed56632e170a0000169fafbd",
+      "mode": 420
+    },
+    "cmd/gc/cmd_init_gascity_test.go": {
+      "sha256": "8a5c4c5dab2f906e6a3db3ebcc9c3c535467c71e3bc5274cd77cb2d58ff47a3e",
+      "mode": 420
+    },
+    "cmd/gc/legacy_pack_preflight.go": {
+      "sha256": "d4de60082aef1363e220b547acb998a8f74f418ec6e2ffaa5f686b8270886cea",
+      "mode": 420
+    }
+  },
+  "evidence_pins": {
+    "/tmp/ga-ecwh-init-hermetic-20260909/red.log": {
+      "sha256": "18d02c90fe06c445a89831cbc995b41c7949d8c4ecb085f256a9bda3e170b6cc",
+      "mode": 420
+    },
+    "/tmp/ga-ecwh-init-hermetic-20260909/repeat-green.log": {
+      "sha256": "6a73fc04920e894239c71631f000ce414622086f748b0f23c50308fe55d576fc",
+      "mode": 420
+    },
+    "/tmp/ga-ecwh-init-hermetic-20260909/owners-green.log": {
+      "sha256": "76f2e3c5faf753fd72ccd3341e2b449b1a2a0ed3a40bba89c6497515ea90cd52",
+      "mode": 420
+    },
+    "/tmp/ga-ecwh-init-hermetic-20260909/resource-green.log": {
+      "sha256": "f31d769ed162e0589ec6ceacacdbb30d61e4a79601064124e57d31caaac63933",
+      "mode": 420
+    },
+    "/tmp/ga-ecwh-init-hermetic-20260909/diff-check.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mode": 420
+    }
+  },
+  "prompt_sha256": "534fd9cc6de182070cebcd77da46a7a12f70311d5cabb3276df922203e71093c",
+  "prompt_bytes": 28811,
+  "model": "claude-fable-5-1",
+  "tools": [],
+  "scope": "two local init-test owners only"
+}
