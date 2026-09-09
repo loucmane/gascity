@@ -1,0 +1,61 @@
+{
+  "schema": "ga-ecwh.layout-relocation-parent-review.v1",
+  "purpose": "read-only planning snapshot; not an execution plan",
+  "parents": [
+    {
+      "path": "engdocs",
+      "before": {
+        "kind": "directory",
+        "mode": "0o755",
+        "uid": 1000,
+        "gid": 1000
+      },
+      "create": false,
+      "after": {
+        "kind": "directory",
+        "mode": "0o755",
+        "uid": 1000,
+        "gid": 1000
+      }
+    },
+    {
+      "path": "engdocs/workflow",
+      "before": {
+        "kind": "absent"
+      },
+      "create": true,
+      "after": {
+        "kind": "directory",
+        "mode": "0o755",
+        "uid": 1000,
+        "gid": 1000
+      }
+    },
+    {
+      "path": "engdocs/workflow/plans",
+      "before": {
+        "kind": "absent"
+      },
+      "create": true,
+      "after": {
+        "kind": "directory",
+        "mode": "0o755",
+        "uid": 1000,
+        "gid": 1000
+      }
+    },
+    {
+      "path": ".codex",
+      "before": {
+        "kind": "absent"
+      },
+      "create": true,
+      "after": {
+        "kind": "directory",
+        "mode": "0o755",
+        "uid": 1000,
+        "gid": 1000
+      }
+    }
+  ]
+}

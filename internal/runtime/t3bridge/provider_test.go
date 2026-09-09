@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gastownhall/gascity/internal/runtime"
@@ -255,11 +257,12 @@ func TestAuthenticatedWsURL_UsesBearerTokenForNonLoopback(t *testing.T) {
 }
 
 func TestStart_ReusedThreadDoesNotInjectStartupTurns(t *testing.T) {
+	workDir := t.TempDir()
 	server := newT3BridgeTestServer(t, map[string]interface{}{
 		"projects": []interface{}{
 			map[string]interface{}{
 				"id":            "project-1",
-				"workspaceRoot": "/tmp/mayor",
+				"workspaceRoot": workDir,
 			},
 		},
 		"threads": []interface{}{
@@ -281,16 +284,15 @@ func TestStart_ReusedThreadDoesNotInjectStartupTurns(t *testing.T) {
 		recentStarts: make(map[string]time.Time),
 	}
 	cfg := runtime.Config{
-		WorkDir:      "/tmp/mayor",
+		WorkDir:      workDir,
 		Command:      "codex",
 		PromptSuffix: "gc prime --hook",
 		Nudge:        "Check mail and hook status, then act accordingly.",
 		Env: map[string]string{
-			"GC_CITY_PATH": "/tmp/gc",
-			"GC_ALIAS":     "mayor",
-			"GC_TEMPLATE":  "mayor",
-			"GC_PROVIDER":  "codex",
-			"GC_MODEL":     "gpt-5.4",
+			"GC_ALIAS":    "mayor",
+			"GC_TEMPLATE": "mayor",
+			"GC_PROVIDER": "codex",
+			"GC_MODEL":    "gpt-5.4",
 		},
 	}
 	server.snapshot["threads"] = []interface{}{
@@ -316,6 +318,7 @@ func TestStart_ReusedThreadDoesNotInjectStartupTurns(t *testing.T) {
 	if err := p.Start(context.Background(), "mayor", cfg); err != nil {
 		t.Fatalf("Start(reuse): %v", err)
 	}
+	t.Cleanup(func() { p.stopEventWatcher("mayor") })
 
 	for _, typ := range server.commandTypes() {
 		if typ == "thread.turn.start" {
@@ -673,6 +676,8 @@ func TestCopyTo_RejectsRelDstEscapingWorkDir(t *testing.T) {
 	}
 }
 
+var t3TestDialTargets sync.Map
+
 type t3BridgeTestServer struct {
 	t                 *testing.T
 	server            *httptest.Server
@@ -762,11 +767,13 @@ func newT3BridgeTestServer(t *testing.T, snapshot map[string]interface{}) *t3Bri
 			t.Errorf("write websocket response: %v", err)
 		}
 	}))
+	t3TestDialTargets.Store(ts.server.Listener.Addr().String(), true)
 	return ts
 }
 
 func (ts *t3BridgeTestServer) Close() {
 	ts.server.Close()
+	t3TestDialTargets.Delete(ts.server.Listener.Addr().String())
 }
 
 func (ts *t3BridgeTestServer) wsURL() string {
@@ -923,57 +930,76 @@ func TestRPCSnapshot_FallsBackToWSURLFileWhenEnvStale(t *testing.T) {
 }
 
 func TestStart_TransientBridgeFailureReturnsInitializing(t *testing.T) {
-	oldDefaults := defaultWSURLCandidates
-	defaultWSURLCandidates = nil
-	t.Cleanup(func() {
-		defaultWSURLCandidates = oldDefaults
+	synctest.Test(t, func(t *testing.T) {
+		refuseT3TestConnections(t)
+		oldDefaults := defaultWSURLCandidates
+		defaultWSURLCandidates = nil
+		t.Cleanup(func() {
+			defaultWSURLCandidates = oldDefaults
+		})
+
+		t.Setenv("T3_HOME", t.TempDir())
+		t.Setenv("T3_WS_URL", "ws://127.0.0.1:1/ws")
+
+		p := &Provider{
+			watchers:     make(map[string]context.CancelFunc),
+			recentStarts: make(map[string]time.Time),
+		}
+
+		err := p.Start(context.Background(), "deacon", runtime.Config{
+			WorkDir: t.TempDir(),
+			Command: "codex",
+			Env: map[string]string{
+				"GC_TEMPLATE": "deacon",
+				"GC_PROVIDER": "codex",
+				"GC_MODEL":    "gpt-5.4",
+			},
+		})
+		if !errors.Is(err, runtime.ErrSessionInitializing) {
+			t.Fatalf("Start error = %v, want ErrSessionInitializing", err)
+		}
 	})
-
-	t.Setenv("T3_HOME", t.TempDir())
-	t.Setenv("T3_WS_URL", "ws://127.0.0.1:1/ws")
-
-	p := &Provider{
-		watchers:     make(map[string]context.CancelFunc),
-		recentStarts: make(map[string]time.Time),
-	}
-
-	err := p.Start(context.Background(), "deacon", runtime.Config{
-		WorkDir: "/tmp/deacon",
-		Command: "codex",
-		Env: map[string]string{
-			"GC_CITY_PATH": "/tmp/gc",
-			"GC_TEMPLATE":  "deacon",
-			"GC_PROVIDER":  "codex",
-			"GC_MODEL":     "gpt-5.4",
-		},
-	})
-	if !errors.Is(err, runtime.ErrSessionInitializing) {
-		t.Fatalf("Start error = %v, want ErrSessionInitializing", err)
-	}
 }
 
 func TestPeek_TransientBridgeFailureSoftDegrades(t *testing.T) {
-	oldDefaults := defaultWSURLCandidates
-	defaultWSURLCandidates = nil
-	t.Cleanup(func() {
-		defaultWSURLCandidates = oldDefaults
+	synctest.Test(t, func(t *testing.T) {
+		refuseT3TestConnections(t)
+		oldDefaults := defaultWSURLCandidates
+		defaultWSURLCandidates = nil
+		t.Cleanup(func() {
+			defaultWSURLCandidates = oldDefaults
+		})
+
+		t.Setenv("T3_HOME", t.TempDir())
+		t.Setenv("T3_WS_URL", "ws://127.0.0.1:1/ws")
+
+		p := &Provider{
+			watchers:     make(map[string]context.CancelFunc),
+			recentStarts: make(map[string]time.Time),
+		}
+
+		out, err := p.Peek("deacon", 10)
+		if err != nil {
+			t.Fatalf("Peek error = %v, want nil", err)
+		}
+		if !strings.Contains(out, "temporarily unavailable") {
+			t.Fatalf("Peek output = %q, want temporary-unavailable message", out)
+		}
 	})
+}
 
-	t.Setenv("T3_HOME", t.TempDir())
-	t.Setenv("T3_WS_URL", "ws://127.0.0.1:1/ws")
-
-	p := &Provider{
-		watchers:     make(map[string]context.CancelFunc),
-		recentStarts: make(map[string]time.Time),
+// These error-classification tests need a refused connection, not a real host
+// port that merely happens to be closed. No address is dialed by this fixture.
+func refuseT3TestConnections(t *testing.T) {
+	t.Helper()
+	previous := websocket.DefaultDialer
+	dialer := *previous
+	dialer.Proxy, dialer.NetDial, dialer.NetDialTLSContext = nil, nil, nil
+	dialer.NetDialContext = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connect: connection refused (synthetic fixture)")
 	}
-
-	out, err := p.Peek("deacon", 10)
-	if err != nil {
-		t.Fatalf("Peek error = %v, want nil", err)
-	}
-	if !strings.Contains(out, "temporarily unavailable") {
-		t.Fatalf("Peek output = %q, want temporary-unavailable message", out)
-	}
+	websocket.DefaultDialer = &dialer
+	t.Cleanup(func() { websocket.DefaultDialer = previous })
 }
 
 func TestResolveConfigProviderModel_PrefersStoredEnvelopeIntent(t *testing.T) {

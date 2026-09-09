@@ -1,0 +1,48 @@
+{
+  "base": "57f681a6b87c08cdfffd3c9e993c314cb9a1f09f",
+  "source_pins": {
+    "internal/testpolicy/resourcecensus/census.go": {
+      "sha256": "26bb83413e826fbcfbdf3a94b79a289ec6fd2e577e0e3fbb538c9afa3c17c7b7",
+      "mode": 420
+    },
+    "internal/testpolicy/resourcecensus/census_test.go": {
+      "sha256": "84dc09c0cf0f03b5c11bd89e2fe00deb44efa93381d0255ae34cc33c096a9a70",
+      "mode": 420
+    },
+    "test/test-resources.toml": {
+      "sha256": "12f4a518031e4115ac60b8fe574323034976deca12fa11fab851f24a95495055",
+      "mode": 420
+    },
+    "TESTING.md": {
+      "sha256": "9e68a6e7131580945c50e3c7e23ff9cf3ffca21f50fdfa9bb876d8eb8732ff8a",
+      "mode": 420
+    },
+    "cmd/gc/hybrid_conformance_fixture_test.go": {
+      "sha256": "c30f2f0d7926a9337026b7aabaf43b84c14b3ffc7a5787d5be43273c45e44e77",
+      "mode": 420
+    },
+    "internal/runtime/ssh/conformance_fixture_test.go": {
+      "sha256": "2296749e351f4588a96749d04ea692c58855d0bdc632855ccffe65870114b322",
+      "mode": 420
+    }
+  },
+  "evidence_pins": {
+    "/tmp/ga-ecwh-resource-ledger-20260909/red.log": {
+      "sha256": "780a480fbd7c5b418eaf7ca96a3cb11b47c52910b1e9715d50c1e2c5679eaeb5",
+      "mode": 420
+    },
+    "/tmp/ga-ecwh-resource-ledger-20260909/green.log": {
+      "sha256": "59c16278154cb29778f3d0678c90158e9bc1b26f9a1fb7dd817230bf1747e6c8",
+      "mode": 420
+    },
+    "/tmp/ga-ecwh-resource-ledger-20260909/diff-check.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mode": 420
+    }
+  },
+  "prompt_sha256": "9e738c3cf9949b5bb2b7d04dd14a93fd879ddbe0e22a0f0ef42cf6b1cfb30513",
+  "prompt_bytes": 23403,
+  "model": "claude-fable-5-1",
+  "tools": [],
+  "scope": "explicit tagged-subprocess audit increase only; preserved tighter budgets"
+}

@@ -1,0 +1,5 @@
+[repo_structure]
+sessions_root = "engdocs/workflow/sessions"
+plans_root = "engdocs/workflow/plans"
+plan_state_dir = "engdocs/workflow/plan-state"
+work_tracking_root = "engdocs/workflow/work-tracking"

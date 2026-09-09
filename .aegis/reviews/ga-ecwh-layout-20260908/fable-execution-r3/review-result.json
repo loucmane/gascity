@@ -1,0 +1,96 @@
+{
+  "duration_api_ms": 52714,
+  "stop_reason": "end_turn",
+  "session_id": "063dd21a-4030-4784-8e24-d338a57943e6",
+  "total_cost_usd": 1.6454199999999999,
+  "usage": {
+    "input_tokens": 2,
+    "cache_creation_input_tokens": 72615,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 3862,
+    "output_tokens_details": {
+      "thinking_tokens": 2285
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 72615,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 3862,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 72615,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 72615
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 3862,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 72615,
+      "webSearchRequests": 0,
+      "costUSD": 1.6454199999999999,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 2285,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "is_error": false,
+  "num_turns": 1,
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "**Verdict: PASS** \u2014 the bundle is the declared operation, binds r3 exactly (at the level a read-only prose review can check), and the decoded plan rewrite is confined to active references plus one appended amendment.\n\n**Verified by hand against the supplied files**\n\n1. **Operation shape.** `plan.moves` are exactly the five reviewed pairs, in the same order as r3 `maps`. `parents` show `engdocs` present, `engdocs/workflow`, `engdocs/workflow/plans` and `.codex` absent \u2014 consistent with `config_before: absent` and no clobbering. No other path, root, source, provider, broker or lifecycle setting appears.\n2. **Inventory binding.** Bundle `entries` count 79, keyed by r3 sources, with modes converted (493/420/448/384/511 \u2194 0o755/0o644/0o700/0o600/0o777), `symlink\u2192link`, identical sha256/size/targets (spot-checked TRACKER `0fc8f4e8\u2026/6965`, sync.log `4fec39a4\u2026/2993`, state.json `516a119c\u2026/128`, both session files, both link targets, plan `b52ae5f4\u2026/3452`). Same `head a5a900f1\u2026`, root, branch, 39 protected images, index (`9f2d00f8\u2026/545561`), ownership journal (`e6940630\u2026/476303`, 0o600), `tracked_diff a4e66b98\u2026`. `wal_before` holds the same eight r3 WAL files plus the directory, which `compare_baseline` correctly excludes from the file-set check.\n3. **Source/runtime/tools.** Source head `7feeac49\u2026`, tree `9b8f43d1\u2026`, approved worktree root, two config digests, Python 3.12.3. Runtime: four project rigs suspended/not running, `sessions: []`, supervisor active/running, NRestarts 0, MainPID 1769, monotonic 210566291 (matches the earlier observation), boot_id and start_ticks recorded. Five tool pins present.\n4. **Plan before\u2192after.** Changes are only: frontmatter `evidence_summary[0]`, Header Evidence Summary, three table Evidence cells, Scope bullet 1, Continuation steps 1 and 3 \u2014 all `docs/ai/...`/`sessions/current` \u2192 `engdocs/workflow/...`. Statuses unchanged (completed/pending/pending/n/a). Both 2026-09-08 amendments preserved verbatim, including the historical `docs/ai/.../policy-canary-checkpoint-20260908.md` reference (correctly not rewritten). One amendment appended, citing the common-dir originals path under plan ID `f1fec32e\u2026` and SHA-256 `b52ae5f4\u2026`, which equals the r3 plan hash. No task status changed.\n5. **Contract.** `apply` re-checks bundle key set/schema, source identity, bead/root, `policy_sha256`, existing lock, readiness, runtime equality and tool pins before the transaction; postflight runs Core's `go test -json -count=1 ./test/docsync` offline/read-only, refuses on nonzero/zero-pass/fail/skip, saves raw output first, then `check_external`. The replay branch returns the stored proof without rerunning Go or logging. Matches the documented apply/rollback/no-op contract.\n\n**Blockers:** none.\n\n**Acceptance limits (not independently observed by me)**\n\n- I cannot recompute `baseline_sha256 3279a85c\u2026`, `policy_sha256 e23d3fee\u2026`, or confirm `plan_before_b64` decodes to exactly `b52ae5f4\u2026/3452` bytes; I relied on the supplied decoded text. The launcher's `frozen_json` and `policy_sha256` checks must do this at apply.\n- The new amendment is preceded by a blank line, splitting the Markdown list. Cosmetic, but if actual plan-sync parses amendment structure it will surface there; refusal is the correct outcome, not a manual edit.\n- F1 (pre-existing Sep-8 sync-hash mismatch) remains acknowledged, unexplained, and untouched by this bundle; apply's plan-sync will append a further record, not repair history.\n- Runtime equality is strict: any supervisor restart, rig resume, native session, tool rebuild or further daily continuation before apply must refuse and requires a new inventory/prepare cycle.\n- Executor test/PR/merge facts are retained observations, not my verification.\n\nAfter this PASS only the already-authorized exact public apply may run; acceptance still requires actual docsync pass, exact preserved source/index/owner state, and immediate read-only no-op reapplication. No Bead close or provider-parity claim follows.",
+  "ttft_ms": 32736,
+  "type": "result",
+  "duration_ms": 52836,
+  "uuid": "c0417525-50a9-4177-b2ea-c135a2eb440b",
+  "ttft_stream_ms": 1842,
+  "time_to_request_ms": 124,
+  "first_content_frame_ms": 2713,
+  "queued_turn_count": 0
+}

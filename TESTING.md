@@ -20,7 +20,7 @@ not describe a target as an existing gate.
 | Policy area | Mechanical status today |
 |---|---|
 | Sleep/process/listener/tmux/env/CWD growth | Checked by the source-resource ledger below |
-| Runtime constructor and `runtime.Fake` conformance binding | Checked by the runtime provider ledger below; several explicit waivers remain |
+| Runtime constructor and `runtime.Fake` conformance binding | Checked by the runtime provider ledger below; no active runtime-constructor waivers; individual proof scopes remain explicit |
 | Other provider conformance | Shared suites exist, but exact production-constructor coverage is still a manual audit with known gaps |
 | Sub-five-minute PR feedback and timing ratchets | Target; current Go timing artifacts measure test execution, not workflow queue/bootstrap/graph time (`ga-80po0c.4`) |
 | Large/E2E ownership and cadence | Target; the executable manifest is owned by `ga-80po0c.6` |
@@ -453,7 +453,7 @@ all-source audit while staying outside untagged and Small debt.
 | --- | --- | --- | --- | --- | --- | --- |
 | Audit baseline | all tracked test source | fixed_sleep: 424 calls / 156 files (historical regex census: 447 / 157) | ga-80po0c.2 | tracked test source totals remain visible as audit evidence; ga-80po0c.2 owns this point-in-time source census | P0.4a | 2026-10-01 |
 | Audit baseline | all tracked test source | listener_helper: 58 calls / 23 files | ga-80po0c.2.2.3 | all-source listener-helper call/file totals cannot drift without an explicit checked policy update; ga-80po0c.2.2.3 owns this all-source audit; tagged calls stay Large and receive no Medium exemption | P0.4c-listener-helper | 2026-10-01 |
-| Audit baseline | all tracked test source | subprocess: 545 calls / 164 files (historical regex census: 495 / 135) | ga-80po0c.2 | tracked test source totals remain visible as audit evidence; ga-80po0c.2 owns this point-in-time source census | P0.4a | 2026-10-01 |
+| Audit baseline | all tracked test source | subprocess: 552 calls / 166 files (historical regex census: 495 / 135) | ga-80po0c.2 | tracked test source totals remain visible as audit evidence; ga-80po0c.2 owns this point-in-time source census | P0.4a | 2026-10-01 |
 | Medium owner | `cmd/gc` package `main` | TestMain: environment, tmux | ga-80po0c.2.1 | cmd/gc TestMain is the checked package-level Medium owner for process environment and tmux namespace setup; only declared environment and tmux calls lexically inside TestMain leave Small debt | P0.4b/P0.4c-tmux | 2026-10-01 |
 | Medium owner | `internal/api` package `api` | TestEveryEmittedErrorCodeIsRegistered: subprocess | ga-80po0c.2.1 | internal/api tracked-source error URN guard is a checked Medium owner; only the git ls-files call lexically inside TestEveryEmittedErrorCodeIsRegistered leaves Small debt | P0.4b | 2026-10-01 |
 | Medium owner | `internal/doctor` package `doctor` | TestCustomTypesCheck_TableDrift: subprocess | ga-80po0c.2.1 | doctor custom-types config-CSV-vs-table drift detect+heal proof is a checked Medium owner; the bd and dolt subprocesses are confined to TestCustomTypesCheck_TableDrift, which manufactures and heals real table drift against a throwaway store | P0.4b | 2026-10-01 |
@@ -1217,6 +1217,17 @@ if !guard.HasSession(session) { ... }
 - `RequireTmux(t)` — skips test if tmux not installed
 - `KillAllTestSessions(t)` — package-level sweep for TestMain
 
+The `internal/runtime/tmux` package instead creates a private `gc-tmux-*`
+socket parent through `NewIsolatedSocketParentDir`. Creation never sweeps
+historical directories; the existing pre/post socket cleanup can select only
+that fresh root, not sibling or city sockets. The sentinel stays referenced
+until cleanup. Disposable-fixture regressions preserve an old sibling's bytes
+and exclude an old sibling socket from the cleanup selection.
+`TestTmuxConformance` requires a real tmux executable and runs the full shared
+contract against `NewSeamBackedWithConfig`; missing tmux and a degraded server
+fail rather than skip. The existing runtime-tmux integration manifest owns
+this test; this is provider conformance, not managed-worker handover proof.
+
 ### 5. Coordination tests (`cmd/gc/lifecycle_coordination_test.go`)
 
 Test that components are **called in the right order**. Conformance tests
@@ -1300,7 +1311,11 @@ a visible contract gap, not evidence that conformance passes.
 
 A proved row names one runnable test whose final top-level statement invokes
 the declared shared contract with an inline factory. The source guard requires
-that factory to return the row's exact constructor directly, rejects pre-run
+that factory to return the row's exact constructor directly, or bind its
+provider/error pair, call the factory's own `t.Fatal(err)` on `err != nil`, and
+return that same provider. The latter is exactly three statements, not general
+control-flow inference; renamed/shadowed bindings, substitutions, ignored errors
+and extra branches/actions are guarded by negative tests. The guard rejects pre-run
 helper gates and direct skip syntax, and permits only named testing operations
 plus explicitly ledgered setup functions. E1 separately proves that
 build-tagged rows execute in their required CI lane; a source-bound proof does
@@ -1346,32 +1361,121 @@ wrapper. `TestSeamBackedCapabilitiesParity` separately guards exec's
 handshake-derived stream and TTY flags because the shared contract does not
 assert optional capability fidelity. Focused raw provider and seam tests remain
 for these packages, including legacy overlap that later consolidation may
-remove case by case. The default subprocess constructor remains a separate
-H5-owned gap because its reachable empty-city-path branch uses shared temporary
-state. The default ACP constructor is also an H5-owned gap because it always
-uses shared `os.TempDir()/gc-acp` state. E1 (`ga-80po0c.6`) owns the Large
+remove case by case. The default subprocess and ACP constructors now have
+separate bound proofs covering their default temporary-state branches.
+`TestT3SeamConformance` runs the exact production T3 constructor against an
+isolated stateful WebSocket protocol fixture. Its integration-only `TestMain`
+owns HOME, legacy/state roots and outbound dial targets before construction;
+setup failure fails the process, never skips. Persistent T3 threads remain alive
+when their Gas City seam detaches; a focused Stop/Start proof retains thread
+identity and watcher registration/cancellation, and an assigned-session proof
+retains actual runtime stop. Watcher assertions do not prove Bead-event
+projection: the fixture has no city and its event goroutine exits without
+opening a store. A refused persistent detach retains the existing watcher.
+Raw thread enumeration preserves its inventory semantics; only the seam list
+filters non-running sessions. Legacy `persistent-alive` threads without a
+`gc.seamDetached` marker remain attached and duplicate-protected until a
+supported Stop/Start; this candidate performs no automatic migration. Any live
+activation must inventory those threads and preserve that disposition.
+
+Both T3 registry paths bind this same integration-tagged proof. Run it with
+`go test -tags=integration -count=1 ./internal/runtime/t3bridge`; the CI
+`integration-shards` core-package lanes discover this package through
+`scripts/test-integration-shard`. The source ledger alone does not prove that
+CI executed the lane. `go.mod` and the shared Ubuntu CI setup both pin Go
+1.26.6, covering the `testing/synctest` dependency in the two local simulated
+connection-refusal tests. Those cases prove error-marker classification and
+retry behavior, not actual host-port failures. This is protocol/constructor
+conformance, not live T3 inference or Claude/Codex handover acceptance.
+E1 (`ga-80po0c.6`) owns the Large
 provider/E2E manifest and required lane/cadence execution; it does not own
 constructor-to-contract source binding.
+
+`TestK8sConformance` uses the exact `k8s.NewSeamBacked` constructor, including
+real client-go config/client creation, pod HTTP calls and v4 SPDY exec streams.
+Its integration-only `TestMain` supplies an isolated credential-free kubeconfig
+and strict loopback protocol fixture before construction. It prevents in-cluster
+or personal-config discovery, rejects unexpected API/exec traffic, and checks
+that all synthetic pods are deleted. Missing/invalid setup fails, never skips.
+No live cluster, kubectl, pod or tmux process runs; pod admission, scheduling,
+container startup, interactive kubectl attach and real-cluster behavior are not
+claimed by this protocol-level provider contract. Existing focused K8s tests own
+those adapter decisions they already cover. The full contract is discovered by
+the integration core-package shards; source binding is not hosted execution proof.
+
+`TestHerdrConformance` runs the exact `herdr.New` constructor through the full
+shared contract with the real Herdr CLI. Its integration-only `TestMain` clears
+inherited provider/city/authentication environment, uses a private short `/tmp`
+HOME, disables background version/manifest checks, and gives each factory a
+separate session server. Missing Herdr fails before tests instead of skipping.
+The fixture stops only its own servers and checks their sockets before removing
+its own temporary HOME; a still-live server fails and preserves that HOME.
+It never launches a coding agent or uses a personal Herdr configuration.
+
+CI core-package integration shards obtain Herdr 0.7.1 from the official release
+using `scripts/install_herdr_test_dependency.py`. The script enforces reviewed
+asset sizes and SHA-256 digests, makes the download executable only after both
+checks pass, and prints its private `/tmp` directory. It neither changes global
+PATH nor installs a system/user package. Failed attempts are preserved without
+retry. The six offline installer tests cover integrity, bounds and failure
+behavior. For a local run, prepend the returned directory to that command's
+PATH and run `go test -tags=integration -count=1 ./internal/runtime/herdr`.
+Only the CI job writes the returned directory to its ephemeral `GITHUB_PATH`.
+This is provider conformance, not live managed-worker/signing/handover proof.
+
+`TestSSHConformance` calls the production `ssh.NewSeamBacked` constructor and
+complete shared contract using real OpenSSH and real tmux on a private test
+socket. A loopback SSH peer accepts only a synthetic username and the closed
+shared-suite command vocabulary; it decodes argv without executing a remote
+shell. Its public deterministic test host key is not an operator credential.
+The test-only SSH wrapper disables personal/system config and identity-agent
+discovery, while preserving real transport, arguments, exit status and host-key
+checking against the fixture's explicit known_hosts. Changed-host-key and wrong
+user negatives must fail; unexpected command grammar fails the fixture.
+Missing OpenSSH/tmux is a failure, not a skip. Teardown verifies no sessions,
+no open connections and no unexpected commands, retaining the private fixture
+directory. This proves the constructor/transport contract, not real remote-host
+provisioning, interactive attach, CopyTo or provider handover. Both executables
+are required in the existing core-package integration shard's PATH.
+
+`TestHybridConformance` binds the exact selected `cmd/gc.newHybridProvider`
+constructor with mixed local/remote names; separate complete local and remote
+suites use that same constructor and are also source-validated. The local side
+uses real tmux, and the remote side uses real client-go against the shared
+integration-only `internal/testutil/k8sfixture` protocol endpoint. One fixture
+per leaf test is shared by its factories so cleanup follows all provider stops.
+Both backends are available for positive discovery; the missing-local-backend
+negative must retain remote results and report the partial error. The fixture
+retires only its own proven-empty tmux server after Stop and then verifies
+absence. It does not change Stop's production suspension semantics.
+
+The six Hybrid test entries are in the checked cmd/gc integration manifest.
+For a local standalone compiled-test run, use fresh private parents for both
+`TMPDIR` and `GC_TEST_TMUX_SOCKET_PARENT_ROOT` so the existing cmd/gc TestMain's
+sibling sweep never reaches prior evidence. Compile with the normal host Go
+shim/cache and on-disk compile temp, not a /tmp build cache. Protocol-constructor
+conformance does not prove real Kubernetes provisioning, coding-agent execution,
+managed signing or provider handover.
 
 <!-- BEGIN CHECKED RUNTIME PROVIDER LEDGER -->
 This table is rendered from `internal/testutil/providerledger` and checked by `go test ./internal/testutil/providerledger`; edit the Go ledger, then use the expected block printed on drift.
 
 | Provider path | Roles | Reusable type | Port | Constructor | Discovery | Contract | Status |
 |---|---|---|---|---|---|---|---|
-| `runtime.builtin.acp` | production_provider | — | `runtime.Provider` | `internal/runtime/acp.NewSeamBacked` | runtime.builtin/exact:acp | `runtime.Provider` | waived by ga-80po0c.3 through 2026-09-02: NewSeamBacked always uses shared os.TempDir()/gc-acp state; the WithDir proof does not exercise that composition |
+| `runtime.builtin.acp` | production_provider | — | `runtime.Provider` | `internal/runtime/acp.NewSeamBacked` | runtime.builtin/exact:acp | `runtime.Provider` | proved by internal/runtime/acp/conformance_test.go#TestACPDefaultDirConformance |
 | `runtime.builtin.acp` | production_provider | — | `runtime.Provider` | `internal/runtime/acp.NewSeamBackedWithDir` | runtime.builtin/exact:acp | `runtime.Provider` | proved by internal/runtime/acp/conformance_test.go#TestACPConformance |
 | `runtime.builtin.exec` | production_provider | — | `runtime.Provider` | `internal/runtime/exec.NewSeamBacked` | runtime.builtin/prefix:exec: | `runtime.Provider` | proved by internal/runtime/exec/exec_test.go#TestExecConformance |
-| `runtime.builtin.exec` | production_provider | — | `runtime.Provider` | `internal/runtime/t3bridge.NewSeamBacked` | runtime.builtin/prefix:exec: | `runtime.Provider` | waived by ga-80po0c.3 through 2026-09-02: the legacy gc-session-t3 prefix branch selects the T3 bridge composition, which has no full shared runtime contract |
+| `runtime.builtin.exec` | production_provider | — | `runtime.Provider` | `internal/runtime/t3bridge.NewSeamBacked` | runtime.builtin/prefix:exec: | `runtime.Provider` | proved by internal/runtime/t3bridge/conformance_test.go#TestT3SeamConformance |
 | `runtime.builtin.fail` | production_provider, reusable_double | `internal/runtime.Fake` | `runtime.Provider` | `internal/runtime.NewFailFake` | runtime.builtin/exact:fail; reusable: internal/runtime/fake.go | `runtime.Provider` | not applicable: intentional faulting double: a successful lifecycle cannot be exercised, so the successful-provider contract is not applicable |
 | `runtime.builtin.fake` | production_provider, reusable_double | `internal/runtime.Fake` | `runtime.Provider` | `internal/runtime.NewFake` | runtime.builtin/exact:fake; reusable: internal/runtime/fake.go | `runtime.Provider` | proved by internal/runtime/fake_conformance_test.go#TestFakeConformance |
-| `runtime.builtin.herdr` | production_provider | — | `runtime.Provider` | `internal/runtime/herdr.New` | runtime.builtin/exact:herdr | `runtime.Provider` | waived by ga-80po0c.3 through 2026-09-02: the existing full conformance run skips in short mode or when the herdr executable is absent |
-| `runtime.builtin.hybrid` | production_provider | — | `runtime.Provider` | `cmd/gc.newHybridProvider` | runtime.builtin/exact:hybrid | `runtime.Provider` | waived by ga-80po0c.3 through 2026-09-02: cmd/gc.newHybridProvider is the selected registry construction boundary; its internal tmux, K8s, and hybrid constructors are not claimed here, and the wrapper has no full shared runtime contract |
-| `runtime.builtin.k8s` | production_provider | — | `runtime.Provider` | `internal/runtime/k8s.NewSeamBacked` | runtime.builtin/exact:k8s | `runtime.Provider` | waived by ga-80po0c.3 through 2026-09-02: the actual K8s production composition has no full shared runtime contract |
-| `runtime.builtin.ssh` | production_provider | — | `runtime.Provider` | `internal/runtime/ssh.NewSeamBacked` | runtime.builtin/prefix:ssh: | `runtime.Provider` | waived by ga-80po0c.3 through 2026-09-02: the production SSH composition has no full shared runtime contract |
+| `runtime.builtin.herdr` | production_provider | — | `runtime.Provider` | `internal/runtime/herdr.New` | runtime.builtin/exact:herdr | `runtime.Provider` | proved by internal/runtime/herdr/conformance_test.go#TestHerdrConformance |
+| `runtime.builtin.hybrid` | production_provider | — | `runtime.Provider` | `cmd/gc.newHybridProvider` | runtime.builtin/exact:hybrid | `runtime.Provider` | proved by cmd/gc/hybrid_conformance_test.go#TestHybridConformance |
+| `runtime.builtin.k8s` | production_provider | — | `runtime.Provider` | `internal/runtime/k8s.NewSeamBacked` | runtime.builtin/exact:k8s | `runtime.Provider` | proved by internal/runtime/k8s/conformance_test.go#TestK8sConformance |
+| `runtime.builtin.ssh` | production_provider | — | `runtime.Provider` | `internal/runtime/ssh.NewSeamBacked` | runtime.builtin/prefix:ssh: | `runtime.Provider` | proved by internal/runtime/ssh/conformance_test.go#TestSSHConformance |
 | `runtime.builtin.subprocess` | production_provider | — | `runtime.Provider` | `internal/runtime/subprocess.NewSeamBacked` | runtime.builtin/exact:subprocess | `runtime.Provider` | proved by internal/runtime/subprocess/seam_conformance_test.go#TestSubprocessDefaultDirSeamConformance |
 | `runtime.builtin.subprocess` | production_provider | — | `runtime.Provider` | `internal/runtime/subprocess.NewSeamBackedWithDir` | runtime.builtin/exact:subprocess | `runtime.Provider` | proved by internal/runtime/subprocess/seam_conformance_test.go#TestSubprocessSeamConformance |
-| `runtime.builtin.t3bridge` | production_provider | — | `runtime.Provider` | `internal/runtime/t3bridge.NewSeamBacked` | runtime.builtin/exact:t3bridge | `runtime.Provider` | waived by ga-80po0c.3 through 2026-09-02: the production T3 bridge composition has focused tests but no full shared runtime contract |
-| `runtime.builtin.tmux` | production_provider | — | `runtime.Provider` | `internal/runtime/tmux.NewSeamBackedWithConfig` | runtime.builtin/exact:tmux | `runtime.Provider` | waived by ga-80po0c.3 through 2026-09-02: the existing full conformance run skips when the tmux executable is absent |
+| `runtime.builtin.t3bridge` | production_provider | — | `runtime.Provider` | `internal/runtime/t3bridge.NewSeamBacked` | runtime.builtin/exact:t3bridge | `runtime.Provider` | proved by internal/runtime/t3bridge/conformance_test.go#TestT3SeamConformance |
+| `runtime.builtin.tmux` | production_provider | — | `runtime.Provider` | `internal/runtime/tmux.NewSeamBackedWithConfig` | runtime.builtin/exact:tmux | `runtime.Provider` | proved by internal/runtime/tmux/adapter_test.go#TestTmuxConformance |
 | `runtime.composition.auto` | production_provider | — | `runtime.Provider` | `internal/runtime/auto.New` | source: cmd/gc/providers.go#resolveSessionTransportProvider — conditional transport composition is outside the runtime registry | `runtime.Provider` | proved by internal/runtime/auto/conformance_test.go#TestAutoConformance (default-route conformance; ACP route covered by focused auto routing tests) |
 <!-- END CHECKED RUNTIME PROVIDER LEDGER -->
 

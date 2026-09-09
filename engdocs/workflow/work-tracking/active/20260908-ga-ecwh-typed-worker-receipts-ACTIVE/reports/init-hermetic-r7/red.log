@@ -1,0 +1,15 @@
+--- FAIL: TestFinalizeInitDoesNotWriteImplicitImportState (0.07s)
+    init_provider_readiness_test.go:440: finalizeInit = 1, want 0: gc init: installing imports: import "default-rig:gc": cloning "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles": git clone --quiet https://github.com/gastownhall/gascity-packs.git /var/tmp/gp6/gct2921466-872142933/TestFinalizeInitDoesNotWriteImplicitImportState1354883279/001/cache/repos/af5bc8992ed2965413edcc17674aafcc9b5c28c53f8b4178f8e63316d044af38: fatal: transport 'https' not allowed: exit status 128
+--- FAIL: TestCmdInitNoStartSkipsSupervisorRegistration (0.06s)
+    init_provider_readiness_test.go:862: gc init --no-start = 1, want 0; stderr=gc init: installing imports: import "default-rig:gc": cloning "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles": git clone --quiet https://github.com/gastownhall/gascity-packs.git /var/tmp/gp6/gct2921466-872142933/TestCmdInitNoStartSkipsSupervisorRegistration205368517/001/cache/repos/af5bc8992ed2965413edcc17674aafcc9b5c28c53f8b4178f8e63316d044af38: fatal: transport 'https' not allowed: exit status 128
+         stdout=[1/8] Creating runtime scaffold
+        [2/8] Installing hooks (Claude Code)
+        [3/8] Writing default prompts
+        [4/8] Writing pack.toml
+        [5/8] Writing city configuration
+        Welcome to Gas City!
+        Initialized city "bright-lights" with default provider "claude".
+        [6/8] Skipping provider readiness checks
+FAIL
+FAIL	github.com/gastownhall/gascity/cmd/gc	0.241s
+FAIL

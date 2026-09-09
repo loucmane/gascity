@@ -180,9 +180,15 @@ func Catalog() []Entry {
 		),
 		builtin(
 			"acp", "exact:acp", nil,
-			waivedRuntime(
+			provedRuntime(
 				repoSymbol("internal/runtime/acp", "NewSeamBacked"),
-				"NewSeamBacked always uses shared os.TempDir()/gc-acp state; the WithDir proof does not exercise that composition",
+				"internal/runtime/acp/conformance_test.go",
+				"TestACPDefaultDirConformance",
+				SymbolRef{ImportPath: "fmt", Name: "Sprintf"},
+				SymbolRef{ImportPath: "os", Name: "Getpid"},
+				repoSymbol("internal/runtime/acp", "acpDefaultConformanceConfig"),
+				repoSymbol("internal/runtime/acp", "acpConformanceCommand"),
+				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
 			provedRuntime(
 				repoSymbol("internal/runtime/acp", "NewSeamBackedWithDir"),
@@ -196,30 +202,45 @@ func Catalog() []Entry {
 		),
 		builtin(
 			"t3bridge", "exact:t3bridge", nil,
-			waivedRuntime(
+			provedRuntime(
 				repoSymbol("internal/runtime/t3bridge", "NewSeamBacked"),
-				"the production T3 bridge composition has focused tests but no full shared runtime contract",
+				"internal/runtime/t3bridge/conformance_test.go",
+				"TestT3SeamConformance",
+				SymbolRef{ImportPath: "fmt", Name: "Sprintf"},
+				repoSymbol("internal/runtime/t3bridge", "t3ConformanceConfig"),
+				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
 		),
 		builtin(
 			"k8s", "exact:k8s", nil,
-			waivedRuntime(
+			provedRuntime(
 				repoSymbol("internal/runtime/k8s", "NewSeamBacked"),
-				"the actual K8s production composition has no full shared runtime contract",
+				"internal/runtime/k8s/conformance_test.go",
+				"TestK8sConformance",
+				SymbolRef{ImportPath: "fmt", Name: "Sprintf"},
+				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
 		),
 		builtin(
 			"herdr", "exact:herdr", nil,
-			waivedRuntime(
+			provedRuntime(
 				repoSymbol("internal/runtime/herdr", "New"),
-				"the existing full conformance run skips in short mode or when the herdr executable is absent",
+				"internal/runtime/herdr/conformance_test.go",
+				"TestHerdrConformance",
+				repoSymbol("internal/runtime/herdr", "herdrConformanceSession"),
+				SymbolRef{ImportPath: "fmt", Name: "Sprintf"},
+				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
 		),
 		builtin(
 			"hybrid", "exact:hybrid", nil,
-			waivedRuntime(
+			provedRuntime(
 				repoSymbol("cmd/gc", "newHybridProvider"),
-				"cmd/gc.newHybridProvider is the selected registry construction boundary; its internal tmux, K8s, and hybrid constructors are not claimed here, and the wrapper has no full shared runtime contract",
+				"cmd/gc/hybrid_conformance_test.go",
+				"TestHybridConformance",
+				repoSymbol("cmd/gc", "hybridConformanceConfig"),
+				repoSymbol("cmd/gc", "hybridConformanceName"),
+				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
 		),
 		builtin(
@@ -232,23 +253,34 @@ func Catalog() []Entry {
 				repoSymbol("internal/runtime/exec", "execConformanceScript"),
 				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
-			waivedRuntime(
+			provedRuntime(
 				repoSymbol("internal/runtime/t3bridge", "NewSeamBacked"),
-				"the legacy gc-session-t3 prefix branch selects the T3 bridge composition, which has no full shared runtime contract",
+				"internal/runtime/t3bridge/conformance_test.go",
+				"TestT3SeamConformance",
+				SymbolRef{ImportPath: "fmt", Name: "Sprintf"},
+				repoSymbol("internal/runtime/t3bridge", "t3ConformanceConfig"),
+				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
 		),
 		builtin(
 			"ssh", "prefix:ssh:", nil,
-			waivedRuntime(
+			provedRuntime(
 				repoSymbol("internal/runtime/ssh", "NewSeamBacked"),
-				"the production SSH composition has no full shared runtime contract",
+				"internal/runtime/ssh/conformance_test.go",
+				"TestSSHConformance",
+				SymbolRef{ImportPath: "fmt", Name: "Sprintf"},
+				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
 		),
 		builtin(
 			"tmux", "exact:tmux", nil,
-			waivedRuntime(
+			provedRuntime(
 				repoSymbol("internal/runtime/tmux", "NewSeamBackedWithConfig"),
-				"the existing full conformance run skips when the tmux executable is absent",
+				"internal/runtime/tmux/adapter_test.go",
+				"TestTmuxConformance",
+				repoSymbol("internal/runtime/tmux", "tmuxConformanceConfig"),
+				SymbolRef{ImportPath: "fmt", Name: "Sprintf"},
+				SymbolRef{ImportPath: "sync/atomic", Name: "AddInt64"},
 			),
 		),
 		{
@@ -324,19 +356,9 @@ func provedRuntimeScoped(constructor SymbolRef, file, test, scope string, allowe
 	return claim
 }
 
-// runtimeWaiverExpiry dates every remaining runtime.Provider waiver owned by
-// runtimeContractWaiverOwner. The 2026-08-19 review reconfirmed the eight
-// remaining live gaps and extended their forcing-function deadline to
-// 2026-09-02. This is a renewal, not a first grant.
-//
-// Each gap was re-checked against cmd/gc/runtime_registry.go. The subprocess
-// default-directory composition gained a runnable full contract in v1.4.1 and
-// was retired from the waiver set; the other eight constructors remain live
-// registrations without a full shared contract.
-//
-// The short horizon deliberately avoids hiding stalled contract work behind
-// the validator's 90-day maximum. Renewing again without contracts landing is
-// debt, and the next renewal must say so.
+// runtimeWaiverExpiry is the fixed forcing-function boundary exercised by the
+// waiver-policy regressions. Catalog has no active runtime-constructor waivers;
+// reintroducing this expired claim must fail validation rather than gain grace.
 var runtimeWaiverExpiry = time.Date(2026, time.September, 2, 0, 0, 0, 0, time.UTC)
 
 func waivedRuntime(constructor SymbolRef, reason string) ContractClaim {

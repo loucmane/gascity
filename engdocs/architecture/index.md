@@ -64,6 +64,8 @@ Each is provably composable from the primitives.
     dispatch, rig-scoped labels
 15. **[Gas City Pack Specification (2.0)](../../docs/reference/specs/pack-spec.md)** —
     authoritative pack data model, file format, and loader semantics
+16. **[Managed Worker Contracts](./managed-worker-contracts.md)** — exact-profile
+    provisioning, policy integrity, and scoped canary receipt boundaries
 
 ### End-to-End Traces
 

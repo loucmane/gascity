@@ -3125,6 +3125,8 @@ gc platform canary [flags]
 | `--base-commit` | string |  | full lowercase Git commit for the fresh launcher clone |
 | `--launcher-source` | string |  | absolute clean launcher source cloned by the runner |
 | `--max-wall-time` | duration | `30m0s` | hard wall-clock bound for the complete canary |
+| `--profile` | string |  | exact resolved profile identity for a profile-scoped canary |
+| `--profile-kind` | string |  | expected profile contract: candidate or signing (requires --profile) |
 | `--run-id` | string |  | unique canary run identifier |
 | `--runner` | string |  | absolute path to the reviewed canary scenario runner |
 | `--runner-sha256` | string |  | lowercase SHA-256 of the reviewed runner |

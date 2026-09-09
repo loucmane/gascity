@@ -16,21 +16,21 @@ func TestDoSlingDispatchGateRefusesBeforeAnyMutation(t *testing.T) {
 	deps := testDeps(cfg, runtime.NewFake(), runner.run)
 	deps.Store = seededStore("PD-42")
 	gateErr := errors.New("managed product canary stale: permission_revision")
-	var calls []string
-	deps.DispatchGate = func(rigName string) error {
-		calls = append(calls, rigName)
+	var calls [][2]string
+	deps.DispatchGate = func(rigName, profileName string) error {
+		calls = append(calls, [2]string{rigName, profileName})
 		return gateErr
 	}
 
 	_, err := DoSling(SlingOpts{
-		Target:        config.Agent{Name: "worker", Dir: "product", MaxActiveSessions: intPtr(1)},
+		Target:        config.Agent{Name: "worker", BindingName: "custom", Dir: "product", MaxActiveSessions: intPtr(1)},
 		BeadOrFormula: "PD-42",
 	}, deps, deps.Store)
 	if !errors.Is(err, gateErr) {
 		t.Fatalf("DoSling error = %v, want gate error", err)
 	}
-	if len(calls) != 1 || calls[0] != "product" {
-		t.Fatalf("gate calls = %v, want [product]", calls)
+	if len(calls) != 1 || calls[0] != [2]string{"product", "product/custom.worker"} {
+		t.Fatalf("gate calls = %v, want exact rig and binding-qualified profile", calls)
 	}
 	bead, getErr := deps.Store.Get("PD-42")
 	if getErr != nil {
@@ -62,15 +62,15 @@ func TestDoSlingBatchRunsDispatchGateExactlyOnce(t *testing.T) {
 	deps := testDeps(cfg, runtime.NewFake(), newFakeRunner().run)
 	deps.Store = seededStore("PD-42")
 	var calls int
-	deps.DispatchGate = func(rigName string) error {
+	deps.DispatchGate = func(rigName, profileName string) error {
 		calls++
-		if rigName != "product" {
-			t.Fatalf("gate rig = %q, want product", rigName)
+		if rigName != "product" || profileName != "product/custom.worker" {
+			t.Fatalf("gate target = %q/%q, want product and product/custom.worker", rigName, profileName)
 		}
 		return nil
 	}
 	if _, err := DoSlingBatch(SlingOpts{
-		Target:        config.Agent{Name: "worker", Dir: "product", MaxActiveSessions: intPtr(1)},
+		Target:        config.Agent{Name: "worker", BindingName: "custom", Dir: "product", MaxActiveSessions: intPtr(1)},
 		BeadOrFormula: "PD-42",
 	}, deps, deps.Store); err != nil {
 		t.Fatalf("DoSlingBatch: %v", err)

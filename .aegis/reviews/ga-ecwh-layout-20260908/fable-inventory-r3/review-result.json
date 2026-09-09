@@ -1,0 +1,96 @@
+{
+  "duration_api_ms": 47768,
+  "stop_reason": "end_turn",
+  "session_id": "fe209d21-6697-4c73-8775-2c1959d7ecab",
+  "total_cost_usd": 1.3270499999999998,
+  "usage": {
+    "input_tokens": 2,
+    "cache_creation_input_tokens": 58064,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 3315,
+    "output_tokens_details": {
+      "thinking_tokens": 1938
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 58064,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 3315,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 58064,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 58064
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 3315,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 58064,
+      "webSearchRequests": 0,
+      "costUSD": 1.3270499999999998,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 1938,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "is_error": false,
+  "num_turns": 1,
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "**Verdict: PASS** (delta is fully acknowledged; no unexplained drift found in the supplied inventories)\n\n**What I compared (by hand, hash/size level):**\n\n1. **Entries** \u2014 All 74 September-8 entries reappear in r3 with identical source/destination/kind/mode/uid/gid/sha256/size, except exactly the five items the continuation declares:\n   - `TRACKER.md`: `a6e1a4e1\u2026`/6121 \u2192 `0fc8f4e8\u2026`/6965. The +844 bytes is consistent with the four tracker lines in the patch, and the new hash equals the `tracker_hash` in the appended sync record.\n   - `.plan_state/sync.log`: `2dc07dae\u2026`/2694 \u2192 `4fec39a4\u2026`/2993 (+299), consistent with one appended six-line record.\n   - `sessions/state.json`: same 128 bytes, new sha; patch changes only `current` and `updated_at` with equal-length substitutions.\n   - `sessions/current`: symlink target repointed to `2026/09/2026-09-09-001-\u2026`.\n   - New `sessions/2026/09/2026-09-09-001-\u2026md` (2351 bytes). No removals.\n2. **Invariants** \u2014 `head`, `branch`, `root`, `maps` (same five moves, same order), `index` (path/sha/size), `journal` (sha/size), `tracked_diff_sha256`, `config_before: absent`, and all 39 `protected` images are byte-identical between the two files. The active plan (`b52ae5f4\u2026`/3452) and `plans/current` target are unchanged; the Sep-8 session file hash is unchanged.\n3. **WAL** \u2014 Old current `session-continuation.json` (`8d8cbacb\u2026`/94482) reappears exactly as archived `2f7ecfe5\u2026.json`; new current is `5a74b5c6\u2026`/30725, matching `wal_sha256` in the continuation record. The other six continuation files are unchanged; count 7\u21928.\n4. **Timestamps** \u2014 tracker lines (05:39), `state.json` (05:39:56), sync record (05:39:57) are mutually consistent.\n5. **Contract** \u2014 r3 keeps schema `\u2026review-inventory.v1`; `compare_baseline` checks root/head/branch/moves/entries/protected/WAL/external/tracked-diff, all of which are present and internally coherent. Only `purpose` text changed, which the adapter does not compare. r3 is the correct input; the doc's rule against applying the obsolete Sep-8 snapshot is respected.\n\n**Findings to carry into the bundle review (non-blocking):**\n\n- **F1 \u2014 Pre-existing sync-hash mismatch.** The prior sync record (2026-09-08T16:54) carries `plan_hash de6df2e2\u2026` and `tracker_hash f2e7788d\u2026`, which match neither the Sep-8 inventory's plan (`b52ae5f4\u2026`) nor tracker (`a6e1a4e1\u2026`), whereas the new record's hashes equal raw file sha256s. Either the plan/tracker were edited after that sync or the helper's hashing changed. Not Sep8\u2192Sep9 drift, but it should be acknowledged before `apply` invokes plan-sync.\n- **F2 \u2014 Unverifiable claims.** `old_inventory_sha256 4424e1aa\u2026` cannot be checked against the supplied `inventory.json` text; the new session file and WAL contents were not supplied, so only their hashes were reviewed. Executor exit 0, snapshot checks, CI/PR facts, Fable PASS and host observation (PID 1769, monotonic 210566291) are reported evidence I did not observe.\n- **F3 \u2014 Strictness reminder.** `compare_baseline` requires the `.aegis/state` file set to equal r3's `session_wal` exactly; any further continuation or WAL rotation before `prepare` will correctly refuse and require a new inventory.\n\n**Scope:** This passes r3 as input to the read-only `prepare` only. The emitted bundle still needs independent review; no waiver retirement, Bead closure, or provider-parity claim follows.",
+  "ttft_ms": 30071,
+  "type": "result",
+  "duration_ms": 47860,
+  "uuid": "86fe8967-834c-496a-a75f-a8fed76b7a2f",
+  "ttft_stream_ms": 1655,
+  "time_to_request_ms": 93,
+  "first_content_frame_ms": 2431,
+  "queued_turn_count": 0
+}

@@ -1,0 +1,19 @@
+{
+  "base": "a5a900f1173c8caccaa0bce23c946991ca52e50b",
+  "source_pins": {
+    ".aegis/reviews/ga-ecwh-layout-20260908/review-plan-r2.md": "73b3d74d7dbe8863d8574ce74c23e45be9b0d59c05b9f0bb9ee2459b1a87d60d",
+    ".aegis/reviews/ga-ecwh-layout-20260908/inventory.json": "4424e1aa756243adc11f5316f21d42ed44998f8ad065cffbb8583c28b25a2dc3",
+    ".aegis/reviews/ga-ecwh-layout-20260908/parent-images.json": "9013d9ee28f6f07fadaf94df501fddcc485ef1adb52e4046b0edcc93b2726760",
+    ".aegis/reviews/ga-ecwh-layout-20260908/source-context-r2.md": "c84c28bbe12242a6ac289650d06d043ed0899c56a727509a29cecfe56e507e83"
+  },
+  "evidence_pins": {
+    "fable-r1/review-result.json": "2ff599d0800f41463fc9637269e331f8c75634fad304b5974238016c84f27ea1"
+  },
+  "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "prompt_sha256": "16a4689bd098df00c1911d51ed7886e485b77b38cdb8f6fb23eb58bf953f619f",
+  "prompt_bytes": 104416,
+  "model": "claude-fable-5-1",
+  "tools": [],
+  "disclosure": "Infrastructure source and synthetic tests only",
+  "baseline_status_at_preparation": "not run; design review only"
+}

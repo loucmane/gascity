@@ -63,6 +63,7 @@ type CanaryReceipt struct {
 	CanaryRunID         string              `json:"canary_run_id"`
 	Environment         CanaryEnvironment   `json:"environment"`
 	IssuedAt            string              `json:"issued_at"`
+	Profile             *CanaryProfile      `json:"profile,omitempty"`
 	ProvisioningReceipt ProvisioningReceipt `json:"provisioning_receipt"`
 	ReceiptSHA256       string              `json:"receipt_sha256,omitempty"`
 	Result              string              `json:"result"`
@@ -150,6 +151,17 @@ func LoadCanaryReceipt(data []byte) (CanaryReceipt, error) {
 
 // VerifyCanaryReceipt requires the receipt fingerprint to equal live state.
 func VerifyCanaryReceipt(data []byte, observed CanaryEnvironment) (CanaryReceipt, error) {
+	receipt, err := verifyCanaryFingerprint(data, observed)
+	if err != nil {
+		return CanaryReceipt{}, err
+	}
+	if receipt.Schema != CanaryReceiptSchemaV1 {
+		return CanaryReceipt{}, newDispatchRefusal("profile", "legacy unscoped signing receipt", "profile-scoped receipt requires an exact-profile verifier")
+	}
+	return receipt, nil
+}
+
+func verifyCanaryFingerprint(data []byte, observed CanaryEnvironment) (CanaryReceipt, error) {
 	if len(data) == 0 {
 		return CanaryReceipt{}, newDispatchRefusal("receipt", "present", "missing")
 	}
@@ -171,6 +183,10 @@ func VerifyCanaryReceipt(data []byte, observed CanaryEnvironment) (CanaryReceipt
 }
 
 func canonicalizeCanaryReceipt(receipt CanaryReceipt) CanaryReceipt {
+	if receipt.Profile != nil {
+		profile := *receipt.Profile
+		receipt.Profile = &profile
+	}
 	receipt.Environment = canonicalizeCanaryEnvironment(receipt.Environment)
 	receipt.ProvisioningReceipt = canonicalizeReceiptSlices(receipt.ProvisioningReceipt)
 	receipt.Scenarios = append([]CanaryScenario(nil), receipt.Scenarios...)
@@ -190,7 +206,7 @@ func canonicalizeCanaryEnvironment(environment CanaryEnvironment) CanaryEnvironm
 }
 
 func validateCanaryReceiptContent(receipt CanaryReceipt) error {
-	if receipt.Schema != CanaryReceiptSchemaV1 {
+	if receipt.Schema != CanaryReceiptSchemaV1 && receipt.Schema != CanaryReceiptSchemaV2 {
 		return fmt.Errorf("canary receipt schema %q is unsupported", receipt.Schema)
 	}
 	if strings.TrimSpace(receipt.CanaryRunID) == "" {
@@ -221,6 +237,21 @@ func validateCanaryReceiptContent(receipt CanaryReceipt) error {
 	}
 	if receipt.Runner != provisioning.CanaryRunner {
 		return errors.New("runner is not bound to provisioning receipt")
+	}
+	if receipt.Schema == CanaryReceiptSchemaV1 {
+		if receipt.Profile != nil {
+			return errors.New("v1 canary must not carry a typed profile")
+		}
+		if err := validateLegacyCanaryProfiles(provisioning); err != nil {
+			return err
+		}
+	} else {
+		if err := validateCanaryProfile(provisioning, receipt.Environment, receipt.Profile); err != nil {
+			return err
+		}
+		if err := validateTypedCanaryScenarios(receipt); err != nil {
+			return err
+		}
 	}
 	if len(receipt.Scenarios) == 0 {
 		return errors.New("scenarios must not be empty")

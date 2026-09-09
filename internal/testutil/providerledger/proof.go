@@ -14,7 +14,8 @@ import (
 
 // ValidateProofRefs verifies that every proved claim names one runnable test
 // whose final top-level statement invokes the declared contract runner with an
-// inline factory that returns the exact constructor directly. The deliberately
+// inline factory that returns the exact constructor directly, or returns its
+// bound provider after an exact fail-closed error check. The deliberately
 // narrow shape makes pre-run gates and silent skips visible instead of trying
 // to infer arbitrary helper behavior.
 func ValidateProofRefs(root string, entries []Entry) error {
@@ -148,16 +149,9 @@ func validateProofFactory(factory *ast.FuncLit, constructor SymbolRef, proof Pro
 	if err != nil {
 		return err
 	}
-	if len(factory.Body.List) != 1 {
-		return fmt.Errorf("runner factory must contain exactly one direct return statement")
-	}
-	ret, ok := factory.Body.List[0].(*ast.ReturnStmt)
-	if !ok || len(ret.Results) == 0 {
-		return fmt.Errorf("runner factory must contain exactly one direct return statement")
-	}
-	constructorCall, ok := unparen(ret.Results[0]).(*ast.CallExpr)
-	if !ok {
-		return fmt.Errorf("factory must return constructor %s directly", renderSymbolRef(constructor))
+	constructorCall, checkedFailure, err := proofFactoryConstructor(factory, factoryParam, constructor)
+	if err != nil {
+		return err
 	}
 	constructorRef, err := resolveProofCallSymbol(constructorCall, imports, localImportPath)
 	if err != nil || constructorRef != constructor {
@@ -177,6 +171,11 @@ func validateProofFactory(factory *ast.FuncLit, constructor SymbolRef, proof Pro
 		}
 		call, ok := node.(*ast.CallExpr)
 		if !ok {
+			return true
+		}
+		// Only this syntactically verified Fatal(error) call may terminate a
+		// fallible factory. No general Fatal/helper exemption is introduced.
+		if call == checkedFailure {
 			return true
 		}
 		if selector, ok := unparen(call.Fun).(*ast.SelectorExpr); ok {

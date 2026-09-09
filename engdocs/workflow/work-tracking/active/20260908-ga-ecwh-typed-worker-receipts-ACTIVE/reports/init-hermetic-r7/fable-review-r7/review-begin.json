@@ -1,0 +1,56 @@
+{
+  "base": "38a45465858eb186309997f9ebeaee8ae6559477",
+  "source_pins": {
+    "cmd/gc/init_provider_readiness_test.go": {
+      "sha256": "0077230abf19a240fda896f12be7b3a5a65f0e83478c40bf39b5a98fdc26e2d3",
+      "mode": 420
+    },
+    "cmd/gc/init_provider_readiness.go": {
+      "sha256": "b5b971ced1739717892b5b837aa924a474f9e3ad85f73afc60fa558149988e4f",
+      "mode": 420
+    },
+    "cmd/gc/cmd_init.go": {
+      "sha256": "b747038ddc6fd0597f59d248a7cce8ef78320e23ed56632e170a0000169fafbd",
+      "mode": 420
+    },
+    "cmd/gc/cmd_init_gascity_test.go": {
+      "sha256": "8a5c4c5dab2f906e6a3db3ebcc9c3c535467c71e3bc5274cd77cb2d58ff47a3e",
+      "mode": 420
+    },
+    "cmd/gc/legacy_pack_preflight.go": {
+      "sha256": "d4de60082aef1363e220b547acb998a8f74f418ec6e2ffaa5f686b8270886cea",
+      "mode": 420
+    },
+    "cmd/gc/embed_builtin_packs.go": {
+      "sha256": "2e4a10efb31fe1ff6dc78a624359db0bb8b7f56f10269f78f215b5e0ff3bb4f2",
+      "mode": 420
+    },
+    "cmd/gc/cmd_import.go": {
+      "sha256": "21481048de93aebad2bdc31f236a5c6df09e125d1f4e50ba0abbf96e59b1c75d",
+      "mode": 420
+    },
+    "internal/builtinpacks/registry.go": {
+      "sha256": "fc86ef5266883fa150c07764b3c43cfd70022f79b2026ee0c26ae23b52c39e1a",
+      "mode": 420
+    }
+  },
+  "evidence_pins": {
+    "/tmp/ga-ecwh-init-hermetic-20260909/fable-review-r6/review-result.json": {
+      "sha256": "de747e6e07c210da14bcbec5393d39875c48b00a3ef535569bc4338c4a656bf7",
+      "mode": 384
+    },
+    "/tmp/ga-ecwh-init-hermetic-20260909/coverage-repeat-green.jsonl": {
+      "sha256": "f96e11fc29d90b2556ad8482b636e089c18615089e946facd2e16281ffff26ce",
+      "mode": 420
+    },
+    "/tmp/ga-ecwh-init-hermetic-20260909/coverage-owners-green.jsonl": {
+      "sha256": "551ac96bbf844374aa9de7bf8338b51ea03ad611601ac2d3d92022aa35b8297b",
+      "mode": 420
+    }
+  },
+  "prompt_sha256": "67f62b284bb23a2fa852f78d050f04d6e6ea03615f6e900797f88cd69952edfa",
+  "prompt_bytes": 25534,
+  "model": "claude-fable-5-1",
+  "tools": [],
+  "scope": "R6 one coverage question and five-line assertion"
+}

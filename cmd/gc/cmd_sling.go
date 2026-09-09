@@ -504,7 +504,7 @@ func cmdSlingWithJSON(args []string, isFormula, doNudge, force bool, title strin
 			cfg,
 			configRevisionForLoadedCity(cityPath, cfg, prov),
 			openCityRecorderAt(cityPath, stderr),
-		).Verify,
+		).VerifyProfile,
 		SourceWorkflowStores: func() ([]sling.SourceWorkflowStore, error) {
 			stores, skips, err := openSourceWorkflowStoresWithProvider(cfg, cityPath, "", func(scopeRoot string) string {
 				return authoritativeBeadsProviderForScope(scopeRoot, cityPath)

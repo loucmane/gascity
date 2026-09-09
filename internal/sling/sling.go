@@ -138,8 +138,9 @@ type SlingDeps struct {
 	SourceWorkflowStoreScanWarning func(storeRef string, err error)
 	Tracer                         func(format string, args ...any)
 	// DispatchGate refuses work routing before any bead or workflow mutation.
-	// Composition roots provide it only for managed-product policy.
-	DispatchGate func(rigName string) error
+	// It receives the resolved rig and exact qualified target, never a role
+	// suffix. Composition roots provide it for managed-product policy.
+	DispatchGate func(rigName, profileName string) error
 
 	// Narrow interfaces (matches established internal package patterns).
 	Resolver AgentResolver  // agent name resolution
