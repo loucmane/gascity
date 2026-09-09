@@ -2353,6 +2353,64 @@ func TestReplaceMarkdownBlockRequiresOneOrderedMarkerPair(t *testing.T) {
 	}
 }
 
+func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.T) {
+	root := repositoryRoot(t)
+	ledger, err := LoadLedger(filepath.Join(root, "test", "test-resources.toml"))
+	if err != nil {
+		t.Fatalf("LoadLedger: %v", err)
+	}
+	census, err := ScanRepository(root)
+	if err != nil {
+		t.Fatalf("ScanRepository: %v", err)
+	}
+	wantCalls := map[string]int{
+		"cmd/gc/hybrid_conformance_fixture_test.go":        6,
+		"internal/runtime/ssh/conformance_fixture_test.go": 1,
+	}
+	gotCalls := make(map[string]int)
+	withoutFixtures := Census{}
+	for _, occurrence := range census.Occurrences {
+		_, fixture := wantCalls[occurrence.Path]
+		if fixture && occurrence.Resource == ResourceSubprocess {
+			gotCalls[occurrence.Path]++
+			if !occurrence.Tagged {
+				t.Errorf("conformance subprocess escaped the integration-tagged population: %+v", occurrence)
+			}
+			continue
+		}
+		withoutFixtures.Occurrences = append(withoutFixtures.Occurrences, occurrence)
+	}
+	for name, want := range wantCalls {
+		if gotCalls[name] != want {
+			t.Errorf("conformance subprocess attribution for %s: got %d, want %d", name, gotCalls[name], want)
+		}
+	}
+	if count := withoutFixtures.Count(ScopeAll, ResourceSubprocess); count.Calls > 545 || count.Files > 164 {
+		t.Errorf("subprocess growth outside the two reviewed fixtures: %+v", count)
+	}
+	audit := findRow(t, ledger.AuditBaseline, ScopeAll, ResourceSubprocess)
+	if audit.BaselineCalls != 552 || audit.BaselineFiles != 166 {
+		t.Errorf("reviewed tagged subprocess audit = %d calls / %d files, want 552 / 166", audit.BaselineCalls, audit.BaselineFiles)
+	}
+	if audit.ReportedCalls != 495 || audit.ReportedFiles != 135 || audit.Expires != "2026-10-01" {
+		t.Errorf("historical audit or expiry changed: %+v", audit)
+	}
+	for _, budget := range []struct {
+		name  string
+		rows  []Baseline
+		calls int
+		files int
+	}{
+		{"untagged", ledger.Debt, 406, 113},
+		{"Small", ledger.SmallDebt, 401, 110},
+	} {
+		row := findRow(t, budget.rows, ScopeUntagged, ResourceSubprocess)
+		if row.BaselineCalls != budget.calls || row.BaselineFiles != budget.files || row.Expires != "2026-10-01" {
+			t.Errorf("%s subprocess budget changed: %+v", budget.name, row)
+		}
+	}
+}
+
 func TestRepositoryLedgerMatchesCensusAndDocumentation(t *testing.T) {
 	root := repositoryRoot(t)
 	ledger, err := LoadLedger(filepath.Join(root, "test", "test-resources.toml"))

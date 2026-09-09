@@ -148,5 +148,17 @@
     "plan_hash": "1de6ba0c7ca423ea54d3a46a4b6d16a8e380fc611b381b5948a8680f5662cd3b",
     "tracker_hash": "229f482ce76255e5fe5673b3bbf2b10c68f17ed29f2f88ebb4e5ed2f5c8697c6",
     "synced_at": "2026-09-09T13:37:31.910751+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "1de6ba0c7ca423ea54d3a46a4b6d16a8e380fc611b381b5948a8680f5662cd3b",
+    "tracker_hash": "acc62c2e31414d4f65af9cea7a05da5849ef42a4731a61cb54520fe53ae80e41",
+    "synced_at": "2026-09-09T14:35:36.225427+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "1de6ba0c7ca423ea54d3a46a4b6d16a8e380fc611b381b5948a8680f5662cd3b",
+    "tracker_hash": "3518691f3ca1dd6f6c7bb3845f14c5ab465bfdc6656d51e37fb17712c2bb6e45",
+    "synced_at": "2026-09-09T14:46:25.684870+02:00"
   }
 ]

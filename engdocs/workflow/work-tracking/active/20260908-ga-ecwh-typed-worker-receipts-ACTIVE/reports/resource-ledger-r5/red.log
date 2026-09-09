@@ -1,0 +1,5 @@
+--- FAIL: TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget (1.72s)
+    census_test.go:2393: reviewed tagged subprocess audit = 545 calls / 164 files, want 552 / 166
+FAIL
+FAIL	github.com/gastownhall/gascity/internal/testpolicy/resourcecensus	1.741s
+FAIL
