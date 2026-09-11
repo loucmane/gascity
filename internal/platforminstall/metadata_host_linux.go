@@ -311,7 +311,7 @@ func (session *metadataHostSession) check(ctx context.Context) error {
 	}
 	// Recheck the protected host layout at every existing grant checkpoint.
 	if err := metadataProtectedHostCheckpoint(session.manifest); err != nil {
-		return err
+		return fmt.Errorf("host grant checkpoint validation: %w", err)
 	}
 	if session.manifest.Metadata != nil && len(session.manifest.Metadata.ProtectedTrees) > 0 {
 		return metadataNowBefore(session.binding)

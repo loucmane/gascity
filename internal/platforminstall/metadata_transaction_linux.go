@@ -207,7 +207,7 @@ func MetadataWriterEntrypoint() (returnErr error) {
 		return fmt.Errorf("writer transaction identity differs")
 	}
 	if err := metadataWriterBoundary(manifest); err != nil {
-		return err
+		return fmt.Errorf("writer boundary validation: %w", err)
 	}
 	if err := validateRuntimeProof(manifest, request.Proof); err != nil {
 		return err
@@ -249,7 +249,7 @@ func MetadataWriterEntrypoint() (returnErr error) {
 			return err
 		}
 		if err := validateMetadataInputs(manifest, false); err != nil {
-			return err
+			return fmt.Errorf("writer prepare input validation: %w", err)
 		}
 		if request.PlanOnly {
 			steps, err := adoptPlan(ctx, manifest, true)
@@ -339,7 +339,7 @@ func MetadataWriterEntrypoint() (returnErr error) {
 			return fmt.Errorf("final receipt grant mismatch")
 		}
 		if err := validateMetadataInputs(manifest, false); err != nil {
-			return err
+			return fmt.Errorf("writer publication input validation: %w", err)
 		}
 		if err := metadataNowBefore(binding); err != nil {
 			return err
@@ -389,7 +389,7 @@ func RunMetadataTransaction(ctx context.Context, manifest Manifest, planOnly boo
 		return Receipt{}, nil, err
 	}
 	if err := validateMetadataInputs(manifest, true); err != nil {
-		return Receipt{}, nil, err
+		return Receipt{}, nil, fmt.Errorf("initial host input validation: %w", err)
 	}
 	session, err = openMetadataHost(ctx, manifest)
 	if err != nil {
@@ -400,7 +400,7 @@ func RunMetadataTransaction(ctx context.Context, manifest Manifest, planOnly boo
 		return Receipt{}, nil, err
 	}
 	if err := validateMetadataInputs(manifest, true); err != nil {
-		return Receipt{}, nil, err
+		return Receipt{}, nil, fmt.Errorf("post-begin host input validation: %w", err)
 	}
 	childInput, parentOutput, err := os.Pipe()
 	if err != nil {
