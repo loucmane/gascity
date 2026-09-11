@@ -2372,7 +2372,17 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 	}
 	gotCalls := make(map[string]int)
 	withoutFixtures := Census{}
+	guardCalls := 0
 	for _, occurrence := range census.Occurrences {
+		// This shell harness is separately reviewed exact Medium ownership,
+		// not a new integration tag or an exemption from raw source counts.
+		if occurrence.Path == "scripts/native_dependency_guard_test.go" && occurrence.Resource == ResourceSubprocess {
+			guardCalls++
+			if occurrence.Owner != "TestNativeDependencyGuard" || occurrence.PackageDir != "scripts" || occurrence.PackageName != "scripts_test" || !occurrence.Runnable || occurrence.Tagged {
+				t.Errorf("native guard subprocess ownership changed: %+v", occurrence)
+			}
+			continue
+		}
 		_, fixture := wantCalls[occurrence.Path]
 		if fixture && occurrence.Resource == ResourceSubprocess {
 			gotCalls[occurrence.Path]++
@@ -2388,12 +2398,15 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 			t.Errorf("conformance subprocess attribution for %s: got %d, want %d", name, gotCalls[name], want)
 		}
 	}
+	if guardCalls != 1 {
+		t.Errorf("native guard subprocess attribution: got %d, want exactly 1", guardCalls)
+	}
 	if count := withoutFixtures.Count(ScopeAll, ResourceSubprocess); count.Calls > 545 || count.Files > 164 {
-		t.Errorf("subprocess growth outside the four reviewed fixtures: %+v", count)
+		t.Errorf("subprocess growth outside four reviewed integration fixtures and one exact Medium guard: %+v", count)
 	}
 	audit := findRow(t, ledger.AuditBaseline, ScopeAll, ResourceSubprocess)
-	if audit.BaselineCalls != 554 || audit.BaselineFiles != 168 {
-		t.Errorf("reviewed tagged subprocess audit = %d calls / %d files, want 554 / 168", audit.BaselineCalls, audit.BaselineFiles)
+	if audit.BaselineCalls != 555 || audit.BaselineFiles != 169 {
+		t.Errorf("reviewed subprocess audit = %d calls / %d files, want 555 / 169", audit.BaselineCalls, audit.BaselineFiles)
 	}
 	if audit.ReportedCalls != 495 || audit.ReportedFiles != 135 || audit.Expires != "2026-10-01" {
 		t.Errorf("historical audit or expiry changed: %+v", audit)
@@ -2404,13 +2417,45 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 		calls int
 		files int
 	}{
-		{"untagged", ledger.Debt, 406, 113},
+		{"untagged", ledger.Debt, 407, 114},
 		{"Small", ledger.SmallDebt, 401, 110},
 	} {
 		row := findRow(t, budget.rows, ScopeUntagged, ResourceSubprocess)
 		if row.BaselineCalls != budget.calls || row.BaselineFiles != budget.files || row.Expires != "2026-10-01" {
 			t.Errorf("%s subprocess budget changed: %+v", budget.name, row)
 		}
+	}
+}
+
+func TestReviewedNativeGuardCannotAdmitAdditionalSubprocess(t *testing.T) {
+	root := repositoryRoot(t)
+	ledger, err := LoadLedger(filepath.Join(root, "test", "test-resources.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	census, err := ScanRepository(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := Validate(ledger, census, now); err != nil {
+		t.Fatalf("reviewed baseline invalid: %v", err)
+	}
+	for _, where := range []string{"same-owner", "other-owner", "other-file"} {
+		t.Run(where, func(t *testing.T) {
+			extra := Occurrence{Path: "scripts/native_dependency_guard_test.go", PackageDir: "scripts", PackageName: "scripts_test", Owner: "TestNativeDependencyGuard", Runnable: true, Resource: ResourceSubprocess}
+			if where == "other-owner" {
+				extra.Owner = "TestUnreviewedOwner"
+			}
+			if where == "other-file" {
+				extra.Path = "scripts/unreviewed_guard_test.go"
+			}
+			changed := census
+			changed.Occurrences = append(append([]Occurrence(nil), census.Occurrences...), extra)
+			if err := Validate(ledger, changed, now); err == nil || !strings.Contains(err.Error(), "source resource census grew") {
+				t.Fatalf("additional subprocess must trip raw census: %v", err)
+			}
+		})
 	}
 }
 
