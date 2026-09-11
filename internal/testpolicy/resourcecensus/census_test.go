@@ -2364,8 +2364,11 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 		t.Fatalf("ScanRepository: %v", err)
 	}
 	wantCalls := map[string]int{
-		"cmd/gc/hybrid_conformance_fixture_test.go":        6,
-		"internal/runtime/ssh/conformance_fixture_test.go": 1,
+		"cmd/gc/hybrid_conformance_fixture_test.go":                    6,
+		"internal/runtime/ssh/conformance_fixture_test.go":             1,
+		"internal/platforminstall/metadata_pipe_process_linux_test.go": 1,
+		// Pre-existing in 5a74ab60; omitted from that commit's static census.
+		"internal/platforminstall/metadata_kernel_component_linux_test.go": 1,
 	}
 	gotCalls := make(map[string]int)
 	withoutFixtures := Census{}
@@ -2386,11 +2389,11 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 		}
 	}
 	if count := withoutFixtures.Count(ScopeAll, ResourceSubprocess); count.Calls > 545 || count.Files > 164 {
-		t.Errorf("subprocess growth outside the two reviewed fixtures: %+v", count)
+		t.Errorf("subprocess growth outside the four reviewed fixtures: %+v", count)
 	}
 	audit := findRow(t, ledger.AuditBaseline, ScopeAll, ResourceSubprocess)
-	if audit.BaselineCalls != 552 || audit.BaselineFiles != 166 {
-		t.Errorf("reviewed tagged subprocess audit = %d calls / %d files, want 552 / 166", audit.BaselineCalls, audit.BaselineFiles)
+	if audit.BaselineCalls != 554 || audit.BaselineFiles != 168 {
+		t.Errorf("reviewed tagged subprocess audit = %d calls / %d files, want 554 / 168", audit.BaselineCalls, audit.BaselineFiles)
 	}
 	if audit.ReportedCalls != 495 || audit.ReportedFiles != 135 || audit.Expires != "2026-10-01" {
 		t.Errorf("historical audit or expiry changed: %+v", audit)

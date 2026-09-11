@@ -134,19 +134,50 @@ func metadataRestoreManifest(installer *installer, manifest Manifest, previous [
 	return parent.Sync()
 }
 
+func metadataWriterPipes(deadline time.Time) (_ *os.File, _ *os.File, returnErr error) {
+	ownedByFiles := false
+	defer func() {
+		if !ownedByFiles {
+			for _, descriptor := range []int{3, 4} {
+				if err := unix.Close(descriptor); err != nil && !errors.Is(err, unix.EBADF) {
+					returnErr = errors.Join(returnErr, err)
+				}
+			}
+		}
+	}()
+	// Exec inheritance makes pipes blocking. NewFile must see O_NONBLOCK to
+	// register the inherited endpoints with the runtime poller for deadlines.
+	for _, descriptor := range []int{3, 4} {
+		if err := unix.SetNonblock(descriptor, true); err != nil {
+			return nil, nil, fmt.Errorf("initialize metadata pipe %d: %w", descriptor, err)
+		}
+	}
+	input, output := os.NewFile(3, "metadata-request"), os.NewFile(4, "metadata-response")
+	ownedByFiles = true
+	defer func() {
+		if returnErr != nil {
+			returnErr = errors.Join(returnErr, input.Close(), output.Close())
+		}
+	}()
+	if err := input.SetReadDeadline(deadline); err != nil {
+		return nil, nil, err
+	}
+	if err := output.SetWriteDeadline(deadline); err != nil {
+		return nil, nil, err
+	}
+	return input, output, nil
+}
+
 // MetadataWriterEntrypoint handles the bound request inside the confined writer.
 func MetadataWriterEntrypoint() (returnErr error) {
 	committed := false
 	defer func() { returnErr = metadataCommittedError(returnErr, committed) }()
-	input, output := os.NewFile(3, "metadata-request"), os.NewFile(4, "metadata-response")
-	defer func() { returnErr = errors.Join(returnErr, input.Close(), output.Close()) }()
 	deadline := time.Now().Add(25 * time.Second)
-	if err := input.SetReadDeadline(deadline); err != nil {
+	input, output, err := metadataWriterPipes(deadline)
+	if err != nil {
 		return err
 	}
-	if err := output.SetWriteDeadline(deadline); err != nil {
-		return err
-	}
+	defer func() { returnErr = errors.Join(returnErr, input.Close(), output.Close()) }()
 	var request metadataRequest
 	if err := metadataDecode(input, &request); err != nil {
 		return err
