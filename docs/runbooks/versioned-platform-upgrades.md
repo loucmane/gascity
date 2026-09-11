@@ -330,6 +330,16 @@ allowlist is not sufficient. Keep new transaction backups/evidence in separate
 declared parents. This layout requires its own independently reviewed synthetic
 preservation proof before live use; the earlier R7 positive does not cover it.
 
+Mount inventory parsing distinguishes canonical filesystem roots from Linux
+`nsfs` labels such as `net:[4026532242]`. Recognized labels are retained, never
+skipped, and cannot supply writable-parent or protected-directory authority.
+Mountpoints remain canonical absolute paths; nested, stacked, propagated and
+effective-mount identity checks remain enforced. Root/mountpoint parsing errors
+identify the mount ID and affected field. Validation errors distinguish initial host,
+post-begin host, host grant checkpoint, writer boundary, writer prepare and
+writer publication checks. Those stage labels locate a refusal; they do not
+prove rollback, process absence or permission to replay an unknown transaction.
+
 The legacy general install/adopt paths described elsewhere in this runbook retain
 their own metadata rollback and verified replay semantics. Historical legacy
 metadata-only helpers provided application-level no-repair checks, not this OS

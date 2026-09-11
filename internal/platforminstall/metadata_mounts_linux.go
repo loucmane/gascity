@@ -18,6 +18,7 @@ type metadataMount struct {
 	device               uint64
 	root, point          string
 	readonly, propagated bool
+	namespaceRoot        bool
 }
 
 func metadataMountPath(encoded string) (string, error) {
@@ -49,6 +50,32 @@ func metadataMountPath(encoded string) (string, error) {
 		return "", fmt.Errorf("noncanonical mount path")
 	}
 	return path, nil
+}
+
+func metadataMountRoot(encoded, filesystem string) (string, bool, error) {
+	if filepath.IsAbs(encoded) {
+		root, err := metadataMountPath(encoded)
+		return root, false, err
+	}
+	// nsfs's kernel d_dname is <namespace>:[<inode>], not a pathname.
+	// Admit only these typed labels, without decoding or normalizing them;
+	// mountpoints still use the strict canonical-path parser. Labels never
+	// establish writable-parent or protected-directory authority.
+	name, number, ok := strings.Cut(encoded, ":[")
+	if filesystem != "nsfs" || !ok || !strings.HasSuffix(number, "]") {
+		return "", false, fmt.Errorf("noncanonical mount root")
+	}
+	switch name {
+	case "net", "mnt", "uts", "ipc", "pid", "user", "cgroup", "time":
+	default:
+		return "", false, fmt.Errorf("unsupported namespace mount root")
+	}
+	number = strings.TrimSuffix(number, "]")
+	inode, err := strconv.ParseUint(number, 10, 64)
+	if err != nil || inode == 0 || strconv.FormatUint(inode, 10) != number {
+		return "", false, fmt.Errorf("invalid namespace mount root inode")
+	}
+	return encoded, true, nil
 }
 
 func metadataParseMounts(input io.Reader) ([]metadataMount, error) {
@@ -89,13 +116,13 @@ func metadataParseMounts(input io.Reader) ([]metadataMount, error) {
 		if majorErr != nil || minorErr != nil {
 			return nil, fmt.Errorf("invalid mount device")
 		}
-		root, err := metadataMountPath(fields[3])
+		root, namespaceRoot, err := metadataMountRoot(fields[3], fields[separator+1])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("mount %d root: %w", id, err)
 		}
 		point, err := metadataMountPath(fields[4])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("mount %d mountpoint: %w", id, err)
 		}
 		ro, rw := false, false
 		for _, option := range strings.Split(fields[5], ",") {
@@ -109,7 +136,7 @@ func metadataParseMounts(input io.Reader) ([]metadataMount, error) {
 		for _, option := range fields[6:separator] {
 			propagated = propagated || strings.HasPrefix(option, "shared:") || strings.HasPrefix(option, "master:") || strings.HasPrefix(option, "propagate_from:")
 		}
-		mounts = append(mounts, metadataMount{id: id, parent: parent, device: unix.Mkdev(uint32(major), uint32(minor)), root: root, point: point, readonly: ro, propagated: propagated})
+		mounts = append(mounts, metadataMount{id: id, parent: parent, device: unix.Mkdev(uint32(major), uint32(minor)), root: root, point: point, readonly: ro, propagated: propagated, namespaceRoot: namespaceRoot})
 		seen[id] = true
 	}
 	if err := scanner.Err(); err != nil {
@@ -147,6 +174,10 @@ func metadataProtectedMountPolicy(manifest Manifest, mounts []metadataMount, wri
 	// descendant mounts at all, on the host or in W.
 	for _, parent := range manifest.Metadata.Parents {
 		for _, mount := range mounts {
+			_, protected := children[mount.point]
+			if mount.namespaceRoot && (mount.point == parent.Path || protected) {
+				return fmt.Errorf("namespace mount cannot supply metadata directory authority")
+			}
 			if metadataContains(parent.Path, mount.point) && mount.point != parent.Path {
 				if _, allowed := children[mount.point]; !allowed {
 					return fmt.Errorf("undeclared mount beneath writable metadata parent")
@@ -210,7 +241,7 @@ func metadataProtectedMountPolicy(manifest Manifest, mounts []metadataMount, wri
 			for _, mount := range mounts {
 				if mount.id == actual {
 					found = true
-					if mount.propagated || mount.device != tree.Device {
+					if mount.namespaceRoot || mount.propagated || mount.device != tree.Device {
 						return fmt.Errorf("host protected mount differs or propagates")
 					}
 				}
