@@ -508,6 +508,42 @@ func (input metadataInputFS) ReadDir(path string) ([]os.DirEntry, error) {
 	return entries, nil
 }
 
+func metadataWriterWorkingDirectory() (string, error) {
+	// Read the kernel's cwd, not os.Getwd's potentially environment-derived PWD.
+	return os.Readlink("/proc/self/cwd")
+}
+
+func metadataWriterEnvironment(launch *MetadataLaunch, environment []string, readCWD func() (string, error)) error {
+	// Bubblewrap adds PWD after --clearenv/--setenv and --chdir. Nothing else
+	// may enter the writer environment, including duplicate names.
+	expected := map[string]string{
+		"GODEBUG": "containermaxprocs=0",
+		"GC_HOME": launch.GCHome,
+		"HOME":    "/nonexistent",
+		"PATH":    "/usr/bin:/bin",
+		"PWD":     launch.Evidence,
+	}
+	if len(environment) != len(expected) {
+		return fmt.Errorf("unexpected writer environment")
+	}
+	for _, entry := range environment {
+		key, value, valid := strings.Cut(entry, "=")
+		want, exists := expected[key]
+		if !valid || !exists || value != want {
+			return fmt.Errorf("unexpected writer environment")
+		}
+		delete(expected, key)
+	}
+	cwd, err := readCWD()
+	if err != nil {
+		return fmt.Errorf("reading writer working directory: %w", err)
+	}
+	if cwd != launch.Evidence {
+		return fmt.Errorf("writer working directory differs from evidence directory")
+	}
+	return nil
+}
+
 func metadataWriterBoundary(manifest Manifest) error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return err
@@ -515,11 +551,11 @@ func metadataWriterBoundary(manifest Manifest) error {
 	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
 		return err
 	}
-	if os.Getpid() != 1 || os.Geteuid() == 0 || os.Getenv("GODEBUG") != "containermaxprocs=0" || os.Getenv("GC_HOME") != manifest.Metadata.GCHome {
+	if os.Getpid() != 1 || os.Geteuid() == 0 {
 		return fmt.Errorf("confined writer identity/environment refused")
 	}
-	if len(os.Environ()) != 4 || os.Getenv("HOME") != "/nonexistent" || os.Getenv("PATH") != "/usr/bin:/bin" {
-		return fmt.Errorf("unexpected writer environment")
+	if err := metadataWriterEnvironment(manifest.Metadata, os.Environ(), metadataWriterWorkingDirectory); err != nil {
+		return err
 	}
 	for space, host := range manifest.Metadata.Namespaces {
 		actual, err := os.Readlink("/proc/self/ns/" + space)
