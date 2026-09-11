@@ -223,7 +223,7 @@ func metadataSandboxArgv(manifest Manifest) ([]string, error) {
 	if launch.Runtime[0].SHA256 != metadataBwrapSHA {
 		return nil, fmt.Errorf("bwrap identity differs")
 	}
-	args := []string{metadataRuntimePaths[1], "--inhibit-cache", "--glibc-hwcaps-mask", "", "--library-path", "/usr/lib/x86_64-linux-gnu", "/usr/bin/bwrap", "--unshare-user", "--unshare-pid", "--as-pid-1", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--preserve-fds", "2", "--clearenv", "--setenv", "GODEBUG", "containermaxprocs=0", "--setenv", "GC_HOME", launch.GCHome, "--setenv", "HOME", "/nonexistent", "--setenv", "PATH", "/usr/bin:/bin", "--ro-bind", launch.Writer.Path, "/metadata-writer"}
+	args := []string{metadataRuntimePaths[1], "--inhibit-cache", "--glibc-hwcaps-mask", "", "--library-path", "/usr/lib/x86_64-linux-gnu", "/usr/bin/bwrap", "--unshare-user", "--unshare-pid", "--as-pid-1", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--clearenv", "--setenv", "GODEBUG", "containermaxprocs=0", "--setenv", "GC_HOME", launch.GCHome, "--setenv", "HOME", "/nonexistent", "--setenv", "PATH", "/usr/bin:/bin", "--ro-bind", launch.Writer.Path, "/metadata-writer"}
 	seen := map[string]bool{}
 	for _, pin := range append(append([]FilePin{}, launch.Inputs...), launch.Trees...) {
 		for _, forbidden := range []string{"/proc", "/sys", "/dev", "/run"} {

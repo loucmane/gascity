@@ -41,14 +41,14 @@ func TestMetadataSandboxExactNamespacesEnvironmentAndChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(args, "\x00")
-	for _, required := range []string{"--unshare-user", "--unshare-pid", "--as-pid-1", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--cap-drop\x00ALL", "--clearenv", "--setenv\x00GODEBUG\x00containermaxprocs=0", "--preserve-fds\x002", "--proc\x00/proc", "--remount-ro\x00/proc", "--remount-ro\x00/", "__metadata-writer-v1"} {
-		if !strings.Contains(joined, required) {
+	joined := "\x00" + strings.Join(args, "\x00") + "\x00"
+	for _, required := range []string{"--unshare-user", "--unshare-pid", "--as-pid-1", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--cap-drop\x00ALL", "--clearenv", "--setenv\x00GODEBUG\x00containermaxprocs=0", "--proc\x00/proc", "--remount-ro\x00/proc", "--remount-ro\x00/", "__metadata-writer-v1"} {
+		if !strings.Contains(joined, "\x00"+required+"\x00") {
 			t.Fatalf("missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{"--unshare-user-try", "--unshare-time", "--ro-bind\x00/\x00/", "--share-net"} {
-		if strings.Contains(joined, forbidden) {
+	for _, forbidden := range []string{"--preserve-fds", "--sync-fd", "--args", "--unshare-user-try", "--unshare-time", "--ro-bind\x00/\x00/", "--share-net"} {
+		if strings.Contains(joined, "\x00"+forbidden+"\x00") {
 			t.Fatalf("unexpected %q", forbidden)
 		}
 	}
