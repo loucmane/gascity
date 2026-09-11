@@ -296,7 +296,7 @@ func shouldSurfaceUnhandledCommandError(err error) bool {
 	if err == nil || errors.Is(err, errExit) {
 		return false
 	}
-	var exitErr interface{ ExitCode() int }
+	var exitErr *commandExitError
 	return !errors.As(err, &exitErr)
 }
 
