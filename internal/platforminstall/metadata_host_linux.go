@@ -306,7 +306,17 @@ func (session *metadataHostSession) check(ctx context.Context) error {
 	if after >= session.binding.Deadline {
 		return fmt.Errorf("metadata grant expired during check")
 	}
-	return validateMetadataLeaseReply(proof, session.leaseRequest(), session.binding.Instance, before, after)
+	if err := validateMetadataLeaseReply(proof, session.leaseRequest(), session.binding.Instance, before, after); err != nil {
+		return err
+	}
+	// Recheck the protected host layout at every existing grant checkpoint.
+	if err := metadataProtectedHostCheckpoint(session.manifest); err != nil {
+		return err
+	}
+	if session.manifest.Metadata != nil && len(session.manifest.Metadata.ProtectedTrees) > 0 {
+		return metadataNowBefore(session.binding)
+	}
+	return nil
 }
 
 func openMetadataHost(ctx context.Context, manifest Manifest) (_ *metadataHostSession, returnErr error) {

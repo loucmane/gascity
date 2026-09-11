@@ -178,7 +178,7 @@ func TestMetadataParentsRefuseUnrelatedEntriesAndHardLinks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = metadataCheckParents(manifest, true)
+			err = metadataCheckParents(manifest)
 			if (err == nil) != (kind == "valid") {
 				t.Fatalf("%s: %v", kind, err)
 			}

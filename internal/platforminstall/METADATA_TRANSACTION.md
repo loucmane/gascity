@@ -42,10 +42,42 @@ unbound input closure, missing cache lock, changed preimages or unsupported leas
   regular lock opened read-only for shared flock. No repair, clone or lock creation.
   Host inventory/import reads use O_NOATIME and refuse unsupported permissions.
 - Output/evidence parents must already exist with pinned device/inode/owner/mode.
-  Group/world-writable parents, unrelated entries, directories, symlinks or
-  multiply linked files inside writable parents are refused. This deliberately
+  Group/world-writable parents, unrelated entries, undeclared directories,
+  symlinks or multiply linked files inside writable parents are refused. This
   limits supported layouts rather than exposing arbitrary siblings or cache aliases.
   Each authorized output and retained staging/rollback/evidence name is fixed.
+
+### Preserved siblings of canonical metadata
+
+The optional `protected_trees` inventory allows at most 16 preserved directories,
+each a canonical direct child of the canonical manifest parent. Each record binds
+a `pin` (path, existing tree-content digest, full permission mode), device, inode,
+UID and GID. The root owner/group must match the bound parent, special and
+group/world-writable root modes refuse, and duplicate identities or overlaps with
+outputs, stages, rollback, evidence, other writable parents, inputs or symlinks
+refuse. These records add no paths to the import filesystem's read authority.
+
+W mounts all writable parents first, then these children read-only. No writable
+bind follows them. Before helpers or publication, W compares the actual statx
+mount IDs with bounded kernel mountinfo: each parent must have one private RW
+mount and each protected child a distinct immediate private RO mount on its pinned
+device. Missing, stacked, propagated, writable or nested protected mounts refuse;
+undeclared mounts beneath any output parent also refuse. The parser limits the
+inventory to 4 MiB, 16,384 entries and 128 KiB per line, with kernel path escaping.
+
+No-atime traversal and content checks preserve the original digest contract and
+check root identity before and after inventory. Symbolic/special files,
+regular-file hardlinks, duplicate object identities and any directory identity
+also bound as writable refuse. V rechecks this host inventory and mount policy at
+each existing grant checkpoint, within the original nonrenewing deadline.
+This remains a cooperating-host contract; it does not defend against an unrelated
+host process maliciously rewriting files between observations.
+
+New backup/evidence writes must use separately declared parents, never a protected
+tree. No directory is moved, deleted, repaired or chmodded into compliance.
+The historical R7 synthetic did not exercise this layout: independent source
+review and a fresh canonical-shaped W/descendant write-denial and preservation
+proof are required before any live adoption using `protected_trees`.
 
 ## Confinement and bounds
 

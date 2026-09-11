@@ -321,6 +321,15 @@ runtime/source pins, launch environment, namespace and process-terminal checks
 remain required. See [the versioned transaction contract](https://github.com/loucmane/gascity/blob/main/internal/platforminstall/METADATA_TRANSACTION.md)
 for custody assumptions, bounds, completion and failure classification.
 
+When the canonical metadata directory already contains preserved directories
+such as `assets/` or `backups/`, bind each through the optional `protected_trees`
+inventory. They remain in place and become separate read-only mounts inside W
+after its writable parent mounts. Root identity, ownership, mode, tree digest,
+mount identity and alias checks are mandatory; an arbitrary directory-name
+allowlist is not sufficient. Keep new transaction backups/evidence in separate
+declared parents. This layout requires its own independently reviewed synthetic
+preservation proof before live use; the earlier R7 positive does not cover it.
+
 The legacy general install/adopt paths described elsewhere in this runbook retain
 their own metadata rollback and verified replay semantics. Historical legacy
 metadata-only helpers provided application-level no-repair checks, not this OS

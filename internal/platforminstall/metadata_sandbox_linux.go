@@ -211,6 +211,9 @@ func metadataSandboxArgv(manifest Manifest) ([]string, error) {
 	if err := validateMetadataLaunch(manifest); err != nil {
 		return nil, err
 	}
+	if _, err := metadataProtectedChildren(manifest); err != nil {
+		return nil, err
+	}
 	launch := manifest.Metadata
 	if len(launch.Runtime) != len(metadataRuntimePaths) {
 		return nil, fmt.Errorf("runtime closure differs")
@@ -268,6 +271,11 @@ func metadataSandboxArgv(manifest Manifest) ([]string, error) {
 		}
 		args = append(args, "--bind", parent, parent)
 	}
+	// The only allowed overlap is this declared preservation overlay. No
+	// writable bind may follow it or expose another path to these objects.
+	for _, tree := range launch.ProtectedTrees {
+		args = append(args, "--ro-bind", tree.Pin.Path, tree.Pin.Path)
+	}
 	args = append(args, "--proc", "/proc", "--remount-ro", "/proc", "--remount-ro", "/", "--chdir", launch.Evidence, "--", "/metadata-writer", "__metadata-writer-v1")
 	return args, nil
 }
@@ -277,7 +285,10 @@ func validateMetadataInputs(manifest Manifest, host bool) (returnErr error) {
 	if launch == nil {
 		return fmt.Errorf("missing metadata launch")
 	}
-	if err := metadataCheckParents(manifest, true); err != nil {
+	if err := metadataCheckParents(manifest); err != nil {
+		return err
+	}
+	if err := metadataCheckProtectedMounts(manifest, !host); err != nil {
 		return err
 	}
 	for _, pin := range launch.Inputs {
@@ -352,7 +363,16 @@ func validateMetadataInputs(manifest Manifest, host bool) (returnErr error) {
 	return nil
 }
 
-func metadataCheckParents(manifest Manifest, contents bool) error {
+func metadataCheckParents(manifest Manifest) error {
+	protected, err := metadataProtectedChildren(manifest)
+	if err != nil {
+		return err
+	}
+	for _, tree := range protected {
+		if err := metadataCheckProtectedTree(tree, manifest.Metadata.Parents); err != nil {
+			return err
+		}
+	}
 	wanted := map[string]bool{manifest.Metadata.Evidence: true}
 	for _, path := range metadataOutputs(manifest) {
 		wanted[filepath.Dir(path)] = true
@@ -376,43 +396,45 @@ func metadataCheckParents(manifest Manifest, contents bool) error {
 		if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Dev != parent.Device || stat.Ino != parent.Inode || stat.Uid != parent.UID || stat.Gid != parent.GID || stat.Mode&0o7777 != parent.Mode || stat.Uid != uint32(os.Geteuid()) || parent.Mode&0o022 != 0 {
 			return fmt.Errorf("metadata parent identity/owner/mode changed")
 		}
-		if contents {
-			entries, err := os.ReadDir(parent.Path)
-			if err != nil {
+		entries, err := os.ReadDir(parent.Path)
+		if err != nil {
+			return err
+		}
+		allowed := map[string]bool{}
+		for _, path := range metadataOutputs(manifest) {
+			if filepath.Dir(path) == parent.Path {
+				allowed[filepath.Base(path)] = true
+				allowed[filepath.Base(metadataStage(manifest, path))] = true
+				allowed[filepath.Base(metadataStage(manifest, path))+".rollback"] = true
+			}
+		}
+		if parent.Path == manifest.Metadata.Evidence {
+			for _, name := range []string{"intent.json", "final.json"} {
+				allowed[name] = true
+				allowed[filepath.Base(metadataStage(manifest, filepath.Join(parent.Path, name)))] = true
+			}
+		}
+		present := map[string]bool{}
+		for _, entry := range entries {
+			if _, exists := protected[filepath.Join(parent.Path, entry.Name())]; exists {
+				present[entry.Name()] = true
+				continue
+			}
+			if !allowed[entry.Name()] {
+				return fmt.Errorf("unexpected metadata parent entry")
+			}
+			var entryStat unix.Stat_t
+			if err := unix.Lstat(filepath.Join(parent.Path, entry.Name()), &entryStat); err != nil {
 				return err
 			}
-			allowed := map[string]bool{}
-			for _, path := range metadataOutputs(manifest) {
-				if filepath.Dir(path) == parent.Path {
-					allowed[filepath.Base(path)] = true
-					allowed[filepath.Base(metadataStage(manifest, path))] = true
-					allowed[filepath.Base(metadataStage(manifest, path))+".rollback"] = true
-				}
+			if entryStat.Mode&unix.S_IFMT != unix.S_IFREG || entryStat.Nlink != 1 || entryStat.Uid != uint32(os.Geteuid()) {
+				return fmt.Errorf("metadata output alias/type/owner refused")
 			}
-			if parent.Path == manifest.Metadata.Evidence {
-				for _, name := range []string{"intent.json", "final.json"} {
-					allowed[name] = true
-					allowed[filepath.Base(metadataStage(manifest, filepath.Join(parent.Path, name)))] = true
-				}
-			}
-			present := map[string]bool{}
-			for _, entry := range entries {
-				if !allowed[entry.Name()] {
-					return fmt.Errorf("unexpected metadata parent entry")
-				}
-				var entryStat unix.Stat_t
-				if err := unix.Lstat(filepath.Join(parent.Path, entry.Name()), &entryStat); err != nil {
-					return err
-				}
-				if entryStat.Mode&unix.S_IFMT != unix.S_IFREG || entryStat.Nlink != 1 || entryStat.Uid != uint32(os.Geteuid()) {
-					return fmt.Errorf("metadata output alias/type/owner refused")
-				}
-				present[entry.Name()] = true
-			}
-			for _, name := range parent.Entries {
-				if !present[name] {
-					return fmt.Errorf("frozen metadata parent entry disappeared")
-				}
+			present[entry.Name()] = true
+		}
+		for _, name := range parent.Entries {
+			if !present[name] {
+				return fmt.Errorf("frozen metadata parent entry disappeared")
 			}
 		}
 	}
@@ -580,7 +602,7 @@ func metadataWriterBoundary(manifest Manifest) error {
 	if sha256Hex(image) != manifest.Metadata.Writer.SHA256 {
 		return fmt.Errorf("actual writer executable differs")
 	}
-	if err := metadataCheckParents(manifest, true); err != nil {
+	if err := metadataCheckParents(manifest); err != nil {
 		return err
 	}
 	for _, descriptor := range []int{3, 4} {

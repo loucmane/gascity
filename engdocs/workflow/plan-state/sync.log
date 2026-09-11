@@ -640,5 +640,11 @@
     "plan_hash": "cfea202b7adccfaca8af3c46d08f28377aa9567ccdb55d0b225fba3671148775",
     "tracker_hash": "2f2f4678bebc0d7b7c6a5d67d308674a1dd700d3eb576799767b87d1469ad020",
     "synced_at": "2026-09-11T16:26:39.192057+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "cfea202b7adccfaca8af3c46d08f28377aa9567ccdb55d0b225fba3671148775",
+    "tracker_hash": "f7a64861cebdb69a95fd268c508ff74e96f05b641428e46c873dfec47e2b9745",
+    "synced_at": "2026-09-11T17:14:46.346957+02:00"
   }
 ]

@@ -52,24 +52,35 @@ type MetadataParent struct {
 	Entries []string `json:"entries"`
 }
 
+// MetadataProtectedTree pins a preserved, read-only sibling of metadata outputs.
+// Pin binds content and mode; object identity prevents same-content replacement.
+type MetadataProtectedTree struct {
+	Pin    FilePin `json:"pin"`
+	Device uint64  `json:"device"`
+	Inode  uint64  `json:"inode"`
+	UID    uint32  `json:"uid"`
+	GID    uint32  `json:"gid"`
+}
+
 // MetadataLaunch is the reviewed, immutable production mount and input contract.
 type MetadataLaunch struct {
-	Transaction   string             `json:"transaction"`
-	Attempt       string             `json:"attempt"`
-	Host          MetadataHost       `json:"host"`
-	Namespaces    map[string]string  `json:"namespaces"`
-	Writer        FilePin            `json:"writer"`
-	Runtime       []FilePin          `json:"runtime"`
-	Inputs        []FilePin          `json:"inputs"`
-	Trees         []FilePin          `json:"trees"`
-	Absent        []string           `json:"absent"`
-	Links         []MetadataLink     `json:"links"`
-	Parents       []MetadataParent   `json:"parents"`
-	GCHome        string             `json:"gc_home"`
-	CacheSHA256   string             `json:"cache_sha256"`
-	ImportsSHA256 string             `json:"imports_sha256"`
-	Preimages     []MetadataPreimage `json:"preimages"`
-	Evidence      string             `json:"evidence"`
+	Transaction    string                  `json:"transaction"`
+	Attempt        string                  `json:"attempt"`
+	Host           MetadataHost            `json:"host"`
+	Namespaces     map[string]string       `json:"namespaces"`
+	Writer         FilePin                 `json:"writer"`
+	Runtime        []FilePin               `json:"runtime"`
+	Inputs         []FilePin               `json:"inputs"`
+	Trees          []FilePin               `json:"trees"`
+	Absent         []string                `json:"absent"`
+	Links          []MetadataLink          `json:"links"`
+	Parents        []MetadataParent        `json:"parents"`
+	ProtectedTrees []MetadataProtectedTree `json:"protected_trees,omitempty"`
+	GCHome         string                  `json:"gc_home"`
+	CacheSHA256    string                  `json:"cache_sha256"`
+	ImportsSHA256  string                  `json:"imports_sha256"`
+	Preimages      []MetadataPreimage      `json:"preimages"`
+	Evidence       string                  `json:"evidence"`
 }
 
 // MetadataBinding binds a live inherited channel and its immutable deadline.
