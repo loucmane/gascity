@@ -59,6 +59,9 @@ func Apply(ctx context.Context, manifest Manifest, lifecycle Lifecycle) (Receipt
 // and receipt; a first managed release removes its candidate metadata. Backups
 // are retained as evidence and independently verifiable recovery inputs.
 func Rollback(manifest Manifest) error {
+	if manifest.Metadata != nil {
+		return fmt.Errorf("versioned metadata receipt commit is irreversible; rollback refused")
+	}
 	state, err := preflightManifest(manifest)
 	if err != nil {
 		return fmt.Errorf("preflight rollback: %w", err)
@@ -107,6 +110,9 @@ func Revert(ctx context.Context, manifest Manifest, lifecycle Lifecycle) (Runtim
 
 // RollbackPlan returns the ordered rollback without mutating the filesystem.
 func RollbackPlan(manifest Manifest) ([]PlanStep, error) {
+	if manifest.Metadata != nil {
+		return nil, fmt.Errorf("versioned metadata receipt commit is irreversible; rollback plan refused")
+	}
 	state, err := preflightManifest(manifest)
 	if err != nil {
 		return nil, fmt.Errorf("preflight rollback plan: %w", err)

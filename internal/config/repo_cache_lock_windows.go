@@ -32,7 +32,10 @@ func withRepoCacheLock(root string, mode int, createRoot bool, fn func() error) 
 		return fmt.Errorf("opening repo cache lock: %w", err)
 	}
 	defer lockFile.Close() //nolint:errcheck
+	return withRepoCacheLockedFile(lockFile, mode, fn)
+}
 
+func withRepoCacheLockedFile(lockFile *os.File, mode int, fn func() error) error {
 	var flags uint32
 	if mode == repoCacheLockExclusive {
 		flags = windows.LOCKFILE_EXCLUSIVE_LOCK

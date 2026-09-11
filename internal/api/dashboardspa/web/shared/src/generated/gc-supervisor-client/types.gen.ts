@@ -1881,6 +1881,25 @@ export type Message = {
     to: string;
 };
 
+export type MetadataLeaseCheck = {
+    instance: string;
+    request: MetadataLeaseRequest;
+};
+
+export type MetadataLeaseProof = {
+    instance: string;
+    observed: number;
+    request: MetadataLeaseRequest;
+};
+
+export type MetadataLeaseRequest = {
+    deadline: number;
+    nonce: string;
+    observation?: boolean;
+    request_sha256: string;
+    transaction: string;
+};
+
 export type MoleculeResolvedPayload = {
     /**
      * Identity that triggered the close (eventActor).
@@ -14904,6 +14923,120 @@ export type GetV0CityByCityNamePendingResponses = {
 };
 
 export type GetV0CityByCityNamePendingResponse = GetV0CityByCityNamePendingResponses[keyof GetV0CityByCityNamePendingResponses];
+
+export type PostV0CityByCityNamePlatformMetadataLeaseBeginData = {
+    body: MetadataLeaseRequest;
+    headers: {
+        /**
+         * Anti-CSRF header required on mutation requests. Any non-empty value is accepted; the header's presence is what the server checks.
+         */
+        'X-GC-Request': string;
+    };
+    path: {
+        cityName: string;
+    };
+    query?: never;
+    url: '/v0/city/{cityName}/platform/metadata-lease/begin';
+};
+
+export type PostV0CityByCityNamePlatformMetadataLeaseBeginErrors = {
+    /**
+     * Bad Request
+     */
+    400: ErrorModel;
+    /**
+     * Unauthorized
+     */
+    401: ErrorModel;
+    /**
+     * Forbidden
+     */
+    403: ErrorModel;
+    /**
+     * Conflict
+     */
+    409: ErrorModel;
+    /**
+     * Unprocessable Entity
+     */
+    422: ErrorModel;
+    /**
+     * Internal Server Error
+     */
+    500: ErrorModel;
+    /**
+     * Service Unavailable
+     */
+    503: ErrorModel;
+};
+
+export type PostV0CityByCityNamePlatformMetadataLeaseBeginError = PostV0CityByCityNamePlatformMetadataLeaseBeginErrors[keyof PostV0CityByCityNamePlatformMetadataLeaseBeginErrors];
+
+export type PostV0CityByCityNamePlatformMetadataLeaseBeginResponses = {
+    /**
+     * OK
+     */
+    200: MetadataLeaseProof;
+};
+
+export type PostV0CityByCityNamePlatformMetadataLeaseBeginResponse = PostV0CityByCityNamePlatformMetadataLeaseBeginResponses[keyof PostV0CityByCityNamePlatformMetadataLeaseBeginResponses];
+
+export type PostV0CityByCityNamePlatformMetadataLeaseCheckData = {
+    body: MetadataLeaseCheck;
+    headers: {
+        /**
+         * Anti-CSRF header required on mutation requests. Any non-empty value is accepted; the header's presence is what the server checks.
+         */
+        'X-GC-Request': string;
+    };
+    path: {
+        cityName: string;
+    };
+    query?: never;
+    url: '/v0/city/{cityName}/platform/metadata-lease/check';
+};
+
+export type PostV0CityByCityNamePlatformMetadataLeaseCheckErrors = {
+    /**
+     * Bad Request
+     */
+    400: ErrorModel;
+    /**
+     * Unauthorized
+     */
+    401: ErrorModel;
+    /**
+     * Forbidden
+     */
+    403: ErrorModel;
+    /**
+     * Conflict
+     */
+    409: ErrorModel;
+    /**
+     * Unprocessable Entity
+     */
+    422: ErrorModel;
+    /**
+     * Internal Server Error
+     */
+    500: ErrorModel;
+    /**
+     * Service Unavailable
+     */
+    503: ErrorModel;
+};
+
+export type PostV0CityByCityNamePlatformMetadataLeaseCheckError = PostV0CityByCityNamePlatformMetadataLeaseCheckErrors[keyof PostV0CityByCityNamePlatformMetadataLeaseCheckErrors];
+
+export type PostV0CityByCityNamePlatformMetadataLeaseCheckResponses = {
+    /**
+     * OK
+     */
+    200: MetadataLeaseProof;
+};
+
+export type PostV0CityByCityNamePlatformMetadataLeaseCheckResponse = PostV0CityByCityNamePlatformMetadataLeaseCheckResponses[keyof PostV0CityByCityNamePlatformMetadataLeaseCheckResponses];
 
 export type GetV0CityByCityNameProviderReadinessData = {
     body?: never;

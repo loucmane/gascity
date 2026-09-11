@@ -45,6 +45,9 @@ type managedFilePreflight struct {
 }
 
 func (i *installer) install(manifest Manifest) (Receipt, error) {
+	if manifest.Metadata != nil {
+		return Receipt{}, fmt.Errorf("confined metadata manifests cannot use general installation")
+	}
 	state, err := preflightManifest(manifest)
 	if err != nil {
 		return Receipt{}, err
@@ -256,7 +259,7 @@ func preflightManifest(manifest Manifest) (*preflight, error) {
 		if !state.receiptAlreadyInstalled {
 			return state, nil
 		}
-		receipt, loadErr := loadReceipt(manifest.ReceiptPath)
+		_, receipt, loadErr := ReadCommittedPair(manifest)
 		if loadErr != nil {
 			return nil, fmt.Errorf("installed artifacts match candidate but receipt is not valid: %w", loadErr)
 		}
@@ -283,11 +286,7 @@ func preflightManifest(manifest Manifest) (*preflight, error) {
 
 func preflightPlatformMetadata(manifest Manifest, candidateManifest []byte) (bool, bool, *previousMetadataPreflight, error) {
 	manifestPath := DefaultManifestPath(manifest.CityPath)
-	currentManifest, manifestExists, err := readOptionalRegularFile(manifestPath, "canonical manifest")
-	if err != nil {
-		return false, false, nil, err
-	}
-	currentReceipt, receiptExists, err := readOptionalRegularFile(manifest.ReceiptPath, "install receipt")
+	currentManifest, currentReceipt, manifestExists, receiptExists, err := captureMetadataPair(manifestPath, manifest.ReceiptPath, readOptionalRegularFile)
 	if err != nil {
 		return false, false, nil, err
 	}
@@ -530,6 +529,13 @@ func receiptManagedFiles(files []ManagedFile) []ReceiptManagedFile {
 }
 
 func receiptMatchesManifest(receipt Receipt, manifest Manifest) bool {
+	if manifest.Metadata != nil {
+		if receipt.Schema != metadataReceiptSchema || receipt.Metadata == nil || receipt.Activation == nil || receipt.Metadata.Binding.Observation || receipt.Metadata.Binding.Request != manifest.ManifestSHA256 || receipt.Metadata.Binding.Transaction != manifest.Metadata.Transaction || receipt.Metadata.Binding.Attempt != manifest.Metadata.Attempt || receipt.Metadata.Host != manifest.Metadata.Host {
+			return false
+		}
+	} else if receipt.Metadata != nil || receipt.Schema != receiptSchemaV1 {
+		return false
+	}
 	if receipt.ManifestSHA256 != manifest.ManifestSHA256 || receipt.ArtifactSHA256 != manifest.Core.SHA256 || receipt.PreviousSHA256 != manifest.PreviousSHA256 || receipt.ReleaseID != manifest.ReleaseID {
 		return false
 	}
@@ -835,6 +841,9 @@ func loadReceipt(path string) (Receipt, error) {
 }
 
 func decodeReceipt(data []byte) (Receipt, error) {
+	if err := rejectDuplicateMetadataFields(data, Receipt{}); err != nil {
+		return Receipt{}, fmt.Errorf("decode receipt: %w", err)
+	}
 	var receipt Receipt
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -844,8 +853,18 @@ func decodeReceipt(data []byte) (Receipt, error) {
 	if err := requireJSONEOF(decoder); err != nil {
 		return Receipt{}, err
 	}
-	if receipt.Schema != receiptSchemaV1 {
+	if receipt.Schema != receiptSchemaV1 && receipt.Schema != metadataReceiptSchema {
 		return Receipt{}, fmt.Errorf("receipt schema %q is unsupported", receipt.Schema)
+	}
+	if receipt.Schema == metadataReceiptSchema {
+		if receipt.Metadata == nil || receipt.Activation == nil || receipt.Metadata.Binding.Observation {
+			return Receipt{}, fmt.Errorf("committed metadata receipt lacks runtime/channel evidence")
+		}
+		if err := validateMetadataBinding(receipt.Metadata.Binding); err != nil {
+			return Receipt{}, err
+		}
+	} else if receipt.Metadata != nil {
+		return Receipt{}, fmt.Errorf("legacy receipt cannot carry metadata transaction evidence")
 	}
 	want, err := receiptDigest(receipt)
 	if err != nil {

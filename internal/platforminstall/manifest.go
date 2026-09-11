@@ -55,6 +55,7 @@ type ManagedFile struct {
 
 // Manifest is the digest-pinned input to one platform installation.
 type Manifest struct {
+	Metadata         *MetadataLaunch       `json:"metadata,omitempty"`
 	Schema           string                `json:"schema"`
 	ReleaseID        string                `json:"release_id"`
 	CityPath         string                `json:"city_path"`
@@ -81,6 +82,7 @@ type PreviousMetadataSpec struct {
 // Receipt is the durable result of an installation attempt that reached a
 // terminal installed or no-op state.
 type Receipt struct {
+	Metadata       *MetadataCommit      `json:"metadata,omitempty"`
 	Schema         string               `json:"schema"`
 	ReleaseID      string               `json:"release_id"`
 	ManifestSHA256 string               `json:"manifest_sha256"`
@@ -177,6 +179,9 @@ func LoadManifest(data []byte) (Manifest, error) {
 }
 
 func decodeManifest(data []byte) (Manifest, error) {
+	if err := rejectDuplicateMetadataFields(data); err != nil {
+		return Manifest{}, fmt.Errorf("decode platform install manifest: %w", err)
+	}
 	var manifest Manifest
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -208,8 +213,15 @@ func validateManifest(manifest Manifest) error {
 }
 
 func validateManifestContent(manifest Manifest) error {
-	if manifest.Schema != ManifestSchemaV1 {
+	if manifest.Schema != ManifestSchemaV1 && manifest.Schema != MetadataManifestSchema {
 		return fmt.Errorf("manifest schema %q is unsupported", manifest.Schema)
+	}
+	if manifest.Schema == MetadataManifestSchema {
+		if err := validateMetadataLaunch(manifest); err != nil {
+			return err
+		}
+	} else if manifest.Metadata != nil {
+		return fmt.Errorf("legacy manifest cannot carry metadata transaction authority")
 	}
 	if strings.TrimSpace(manifest.ReleaseID) == "" {
 		return errors.New("manifest release_id is required")

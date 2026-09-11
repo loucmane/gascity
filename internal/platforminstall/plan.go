@@ -16,6 +16,9 @@ type PlanStep struct {
 
 // Plan validates a manifest and returns the exact ordered install plan without mutation.
 func Plan(manifest Manifest) ([]PlanStep, error) {
+	if manifest.Metadata != nil {
+		return nil, fmt.Errorf("versioned metadata plans require the confined writer")
+	}
 	state, err := preflightManifest(manifest)
 	if err != nil {
 		return nil, err

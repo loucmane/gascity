@@ -30,6 +30,10 @@ func withRepoCacheLock(root string, mode int, createRoot bool, fn func() error) 
 		return fmt.Errorf("opening repo cache lock file: %w", err)
 	}
 	defer lockFile.Close() //nolint:errcheck
+	return withRepoCacheLockedFile(lockFile, mode, fn)
+}
+
+func withRepoCacheLockedFile(lockFile *os.File, mode int, fn func() error) error {
 	if err := syscall.Flock(int(lockFile.Fd()), mode); err != nil {
 		return fmt.Errorf("locking repo cache: %w", err)
 	}

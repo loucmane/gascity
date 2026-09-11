@@ -46,6 +46,11 @@ var pendingIdempotency = map[string]bool{
 // be classified, so a new create at ANY status (201, 202, …) that is neither
 // wired nor triaged fails the test.
 var exemptFromIdempotency = map[string]bool{
+	// Metadata leases are fresh security handshakes, not replayable creates.
+	// Begin conflicts with an occupied nonrenewing slot; Check revalidates
+	// the exact instance/request and expiry. Cached replies bypass those guards.
+	"post-v0-city-by-city-name-platform-metadata-lease-begin": true,
+	"post-v0-city-by-city-name-platform-metadata-lease-check": true,
 	// ensure-extmsg-group is identity-idempotent by design: the ensure
 	// semantics (same group in → same group out) make a retry safe without a
 	// key, so wiring one would be dead weight (owner decision, 2026-07-11).

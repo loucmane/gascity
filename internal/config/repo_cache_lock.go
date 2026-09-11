@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,46 @@ func openRepoCacheLockFile(path string, exclusive bool) (*os.File, error) {
 // are always opened read-only.
 func WithRepoCacheReadLock(root string, fn func() error) error {
 	return withRepoCacheLock(root, repoCacheLockShared, false, fn)
+}
+
+// WithExistingRepoCacheReadLock requires an existing regular coordination lock
+// and never creates the cache root, lock, or content.
+func WithExistingRepoCacheReadLock(root string, fn func() error) error {
+	rootInfo, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("inspect existing repo cache root: %w", err)
+	}
+	if !rootInfo.IsDir() {
+		return fmt.Errorf("existing repo cache root is not a directory")
+	}
+	lockPath := filepath.Join(root, repoCacheLockName)
+	lockInfo, err := os.Lstat(lockPath)
+	if err != nil {
+		return fmt.Errorf("inspect existing repo cache lock: %w", err)
+	}
+	if !lockInfo.Mode().IsRegular() {
+		return fmt.Errorf("existing repo cache lock is not a regular file")
+	}
+	lockFile, err := os.Open(lockPath)
+	if err != nil {
+		return fmt.Errorf("open existing repo cache lock read-only: %w", err)
+	}
+	defer func() { _ = lockFile.Close() }()
+	opened, err := lockFile.Stat()
+	if err != nil || !os.SameFile(lockInfo, opened) {
+		return fmt.Errorf("existing repo cache lock changed before acquisition")
+	}
+	return withRepoCacheLockedFile(lockFile, repoCacheLockShared, func() error {
+		currentRoot, err := os.Lstat(root)
+		if err != nil || !currentRoot.IsDir() || !os.SameFile(rootInfo, currentRoot) {
+			return fmt.Errorf("existing repo cache root changed during acquisition")
+		}
+		currentLock, err := os.Lstat(lockPath)
+		if err != nil || !currentLock.Mode().IsRegular() || !os.SameFile(opened, currentLock) {
+			return fmt.Errorf("existing repo cache lock changed during acquisition")
+		}
+		return fn()
+	})
 }
 
 // WithRepoCacheWriteLock runs fn while holding the exclusive repo-cache lock.

@@ -17,20 +17,21 @@
 # Local build-layer image produced by Dockerfile.base, not a registry pull.
 ARG BASE_IMAGE=gc-agent-base:latest
 
-FROM golang:1.26.6-bookworm@sha256:433f9dc4f8ea3a1ce4e28f9f15d0f7c056b10475307f886d6f1ac1ccc4abd976 AS bd-builder
+FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS bd-builder
 
 ARG BD_VERSION=v1.2.2
 ARG BD_SOURCE_REF=6c124203e771433a3550c348771a5b5e27fd3c21
 ARG BD_SOURCE_SHA256=99bd5f50226590b5ce4978d117f481c7d4d5718bd3152568a983d2683f62779f
 ARG BD_BUILD=6c124203e
 ARG BD_BRANCH=HEAD
-ARG GRPC_VERSION=1.82.1
+ARG GRPC_VERSION=1.83.2
 ARG XCRYPTO_VERSION=0.55.0
 ARG XNET_VERSION=0.58.0
 ARG XTEXT_VERSION=0.41.0
+ARG THRIFT_VERSION=0.24.0
 
 # The published bd binary and the pinned v1.2.2 source embed vulnerable grpc-go
-# and golang.org/x modules. Rebuild the exact source with its production
+# and golang.org/x modules plus Thrift. Rebuild the exact source with its production
 # CGO/pure-Go-regex configuration and release identity, forcing only the patched
 # dependency versions forward.
 RUN mkdir -p /src/bd /out \
@@ -49,6 +50,7 @@ RUN bd_version="${BD_VERSION#v}" \
        "golang.org/x/crypto@v${XCRYPTO_VERSION}" \
        "golang.org/x/net@v${XNET_VERSION}" \
        "golang.org/x/text@v${XTEXT_VERSION}" \
+       "github.com/apache/thrift@v${THRIFT_VERSION}" \
     && CGO_ENABLED=1 go build \
        -tags="gms_pure_go" \
        -trimpath \
@@ -59,7 +61,8 @@ RUN bd_version="${BD_VERSION#v}" \
     && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep google.golang.org/grpc v${GRPC_VERSION} " \
     && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/crypto v${XCRYPTO_VERSION} " \
     && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/net v${XNET_VERSION} " \
-    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/text v${XTEXT_VERSION} "
+    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/text v${XTEXT_VERSION} " \
+    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep github.com/apache/thrift v${THRIFT_VERSION} "
 
 FROM ${BASE_IMAGE}
 

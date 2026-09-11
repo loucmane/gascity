@@ -2499,6 +2499,28 @@ type Message struct {
 	To        string    `json:"to"`
 }
 
+// MetadataLeaseCheck defines model for MetadataLeaseCheck.
+type MetadataLeaseCheck struct {
+	Instance string               `json:"instance"`
+	Request  MetadataLeaseRequest `json:"request"`
+}
+
+// MetadataLeaseProof defines model for MetadataLeaseProof.
+type MetadataLeaseProof struct {
+	Instance string               `json:"instance"`
+	Observed int64                `json:"observed"`
+	Request  MetadataLeaseRequest `json:"request"`
+}
+
+// MetadataLeaseRequest defines model for MetadataLeaseRequest.
+type MetadataLeaseRequest struct {
+	Deadline      int64  `json:"deadline"`
+	Nonce         string `json:"nonce"`
+	Observation   *bool  `json:"observation,omitempty"`
+	RequestSha256 string `json:"request_sha256"`
+	Transaction   string `json:"transaction"`
+}
+
 // MoleculeResolvedPayload defines model for MoleculeResolvedPayload.
 type MoleculeResolvedPayload struct {
 	// Actor Identity that triggered the close (eventActor).
@@ -8709,6 +8731,18 @@ type PutV0CityByCityNamePatchesRigsParams struct {
 	XGCRequest string `json:"X-GC-Request"`
 }
 
+// PostV0CityByCityNamePlatformMetadataLeaseBeginParams defines parameters for PostV0CityByCityNamePlatformMetadataLeaseBegin.
+type PostV0CityByCityNamePlatformMetadataLeaseBeginParams struct {
+	// XGCRequest Anti-CSRF header required on mutation requests. Any non-empty value is accepted; the header's presence is what the server checks.
+	XGCRequest string `json:"X-GC-Request"`
+}
+
+// PostV0CityByCityNamePlatformMetadataLeaseCheckParams defines parameters for PostV0CityByCityNamePlatformMetadataLeaseCheck.
+type PostV0CityByCityNamePlatformMetadataLeaseCheckParams struct {
+	// XGCRequest Anti-CSRF header required on mutation requests. Any non-empty value is accepted; the header's presence is what the server checks.
+	XGCRequest string `json:"X-GC-Request"`
+}
+
 // GetV0CityByCityNameProviderReadinessParams defines parameters for GetV0CityByCityNameProviderReadiness.
 type GetV0CityByCityNameProviderReadinessParams struct {
 	// Providers Comma-separated provider names to check (default: claude,codex,gemini).
@@ -9152,6 +9186,12 @@ type PutV0CityByCityNamePatchesProvidersJSONRequestBody = ProviderPatchSetInputB
 
 // PutV0CityByCityNamePatchesRigsJSONRequestBody defines body for PutV0CityByCityNamePatchesRigs for application/json ContentType.
 type PutV0CityByCityNamePatchesRigsJSONRequestBody = RigPatchSetInputBody
+
+// PostV0CityByCityNamePlatformMetadataLeaseBeginJSONRequestBody defines body for PostV0CityByCityNamePlatformMetadataLeaseBegin for application/json ContentType.
+type PostV0CityByCityNamePlatformMetadataLeaseBeginJSONRequestBody = MetadataLeaseRequest
+
+// PostV0CityByCityNamePlatformMetadataLeaseCheckJSONRequestBody defines body for PostV0CityByCityNamePlatformMetadataLeaseCheck for application/json ContentType.
+type PostV0CityByCityNamePlatformMetadataLeaseCheckJSONRequestBody = MetadataLeaseCheck
 
 // PatchV0CityByCityNameProviderByNameJSONRequestBody defines body for PatchV0CityByCityNameProviderByName for application/json ContentType.
 type PatchV0CityByCityNameProviderByNameJSONRequestBody = ProviderUpdateInputBody
@@ -17240,6 +17280,16 @@ type ClientInterface interface {
 	// GetV0CityByCityNamePending request
 	GetV0CityByCityNamePending(ctx context.Context, cityName string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// PostV0CityByCityNamePlatformMetadataLeaseBeginWithBody request with any body
+	PostV0CityByCityNamePlatformMetadataLeaseBeginWithBody(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostV0CityByCityNamePlatformMetadataLeaseBegin(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, body PostV0CityByCityNamePlatformMetadataLeaseBeginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostV0CityByCityNamePlatformMetadataLeaseCheckWithBody request with any body
+	PostV0CityByCityNamePlatformMetadataLeaseCheckWithBody(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostV0CityByCityNamePlatformMetadataLeaseCheck(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, body PostV0CityByCityNamePlatformMetadataLeaseCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetV0CityByCityNameProviderReadiness request
 	GetV0CityByCityNameProviderReadiness(ctx context.Context, cityName string, params *GetV0CityByCityNameProviderReadinessParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -19118,6 +19168,54 @@ func (c *Client) PutV0CityByCityNamePatchesRigs(ctx context.Context, cityName st
 
 func (c *Client) GetV0CityByCityNamePending(ctx context.Context, cityName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetV0CityByCityNamePendingRequest(c.Server, cityName)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV0CityByCityNamePlatformMetadataLeaseBeginWithBody(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV0CityByCityNamePlatformMetadataLeaseBeginRequestWithBody(c.Server, cityName, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV0CityByCityNamePlatformMetadataLeaseBegin(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, body PostV0CityByCityNamePlatformMetadataLeaseBeginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV0CityByCityNamePlatformMetadataLeaseBeginRequest(c.Server, cityName, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV0CityByCityNamePlatformMetadataLeaseCheckWithBody(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV0CityByCityNamePlatformMetadataLeaseCheckRequestWithBody(c.Server, cityName, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostV0CityByCityNamePlatformMetadataLeaseCheck(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, body PostV0CityByCityNamePlatformMetadataLeaseCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostV0CityByCityNamePlatformMetadataLeaseCheckRequest(c.Server, cityName, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -26970,6 +27068,126 @@ func NewGetV0CityByCityNamePendingRequest(server string, cityName string) (*http
 	return req, nil
 }
 
+// NewPostV0CityByCityNamePlatformMetadataLeaseBeginRequest calls the generic PostV0CityByCityNamePlatformMetadataLeaseBegin builder with application/json body
+func NewPostV0CityByCityNamePlatformMetadataLeaseBeginRequest(server string, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, body PostV0CityByCityNamePlatformMetadataLeaseBeginJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostV0CityByCityNamePlatformMetadataLeaseBeginRequestWithBody(server, cityName, params, "application/json", bodyReader)
+}
+
+// NewPostV0CityByCityNamePlatformMetadataLeaseBeginRequestWithBody generates requests for PostV0CityByCityNamePlatformMetadataLeaseBegin with any type of body
+func NewPostV0CityByCityNamePlatformMetadataLeaseBeginRequestWithBody(server string, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "cityName", cityName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/city/%s/platform/metadata-lease/begin", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-GC-Request", params.XGCRequest, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("X-GC-Request", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewPostV0CityByCityNamePlatformMetadataLeaseCheckRequest calls the generic PostV0CityByCityNamePlatformMetadataLeaseCheck builder with application/json body
+func NewPostV0CityByCityNamePlatformMetadataLeaseCheckRequest(server string, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, body PostV0CityByCityNamePlatformMetadataLeaseCheckJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostV0CityByCityNamePlatformMetadataLeaseCheckRequestWithBody(server, cityName, params, "application/json", bodyReader)
+}
+
+// NewPostV0CityByCityNamePlatformMetadataLeaseCheckRequestWithBody generates requests for PostV0CityByCityNamePlatformMetadataLeaseCheck with any type of body
+func NewPostV0CityByCityNamePlatformMetadataLeaseCheckRequestWithBody(server string, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "cityName", cityName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/city/%s/platform/metadata-lease/check", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-GC-Request", params.XGCRequest, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("X-GC-Request", headerParam0)
+
+	}
+
+	return req, nil
+}
+
 // NewGetV0CityByCityNameProviderReadinessRequest generates requests for GetV0CityByCityNameProviderReadiness
 func NewGetV0CityByCityNameProviderReadinessRequest(server string, cityName string, params *GetV0CityByCityNameProviderReadinessParams) (*http.Request, error) {
 	var err error
@@ -30774,6 +30992,16 @@ type ClientWithResponsesInterface interface {
 	// GetV0CityByCityNamePendingWithResponse request
 	GetV0CityByCityNamePendingWithResponse(ctx context.Context, cityName string, reqEditors ...RequestEditorFn) (*GetV0CityByCityNamePendingResponse, error)
 
+	// PostV0CityByCityNamePlatformMetadataLeaseBeginWithBodyWithResponse request with any body
+	PostV0CityByCityNamePlatformMetadataLeaseBeginWithBodyWithResponse(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV0CityByCityNamePlatformMetadataLeaseBeginResponse, error)
+
+	PostV0CityByCityNamePlatformMetadataLeaseBeginWithResponse(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, body PostV0CityByCityNamePlatformMetadataLeaseBeginJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV0CityByCityNamePlatformMetadataLeaseBeginResponse, error)
+
+	// PostV0CityByCityNamePlatformMetadataLeaseCheckWithBodyWithResponse request with any body
+	PostV0CityByCityNamePlatformMetadataLeaseCheckWithBodyWithResponse(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV0CityByCityNamePlatformMetadataLeaseCheckResponse, error)
+
+	PostV0CityByCityNamePlatformMetadataLeaseCheckWithResponse(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, body PostV0CityByCityNamePlatformMetadataLeaseCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV0CityByCityNamePlatformMetadataLeaseCheckResponse, error)
+
 	// GetV0CityByCityNameProviderReadinessWithResponse request
 	GetV0CityByCityNameProviderReadinessWithResponse(ctx context.Context, cityName string, params *GetV0CityByCityNameProviderReadinessParams, reqEditors ...RequestEditorFn) (*GetV0CityByCityNameProviderReadinessResponse, error)
 
@@ -33969,6 +34197,64 @@ func (r GetV0CityByCityNamePendingResponse) StatusCode() int {
 	return 0
 }
 
+type PostV0CityByCityNamePlatformMetadataLeaseBeginResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *MetadataLeaseProof
+	ApplicationproblemJSON400 *ErrorModel
+	ApplicationproblemJSON401 *ErrorModel
+	ApplicationproblemJSON403 *ErrorModel
+	ApplicationproblemJSON409 *ErrorModel
+	ApplicationproblemJSON422 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r PostV0CityByCityNamePlatformMetadataLeaseBeginResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostV0CityByCityNamePlatformMetadataLeaseBeginResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PostV0CityByCityNamePlatformMetadataLeaseCheckResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *MetadataLeaseProof
+	ApplicationproblemJSON400 *ErrorModel
+	ApplicationproblemJSON401 *ErrorModel
+	ApplicationproblemJSON403 *ErrorModel
+	ApplicationproblemJSON409 *ErrorModel
+	ApplicationproblemJSON422 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r PostV0CityByCityNamePlatformMetadataLeaseCheckResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostV0CityByCityNamePlatformMetadataLeaseCheckResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetV0CityByCityNameProviderReadinessResponse struct {
 	Body                      []byte
 	HTTPResponse              *http.Response
@@ -36639,6 +36925,40 @@ func (c *ClientWithResponses) GetV0CityByCityNamePendingWithResponse(ctx context
 		return nil, err
 	}
 	return ParseGetV0CityByCityNamePendingResponse(rsp)
+}
+
+// PostV0CityByCityNamePlatformMetadataLeaseBeginWithBodyWithResponse request with arbitrary body returning *PostV0CityByCityNamePlatformMetadataLeaseBeginResponse
+func (c *ClientWithResponses) PostV0CityByCityNamePlatformMetadataLeaseBeginWithBodyWithResponse(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV0CityByCityNamePlatformMetadataLeaseBeginResponse, error) {
+	rsp, err := c.PostV0CityByCityNamePlatformMetadataLeaseBeginWithBody(ctx, cityName, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV0CityByCityNamePlatformMetadataLeaseBeginResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostV0CityByCityNamePlatformMetadataLeaseBeginWithResponse(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseBeginParams, body PostV0CityByCityNamePlatformMetadataLeaseBeginJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV0CityByCityNamePlatformMetadataLeaseBeginResponse, error) {
+	rsp, err := c.PostV0CityByCityNamePlatformMetadataLeaseBegin(ctx, cityName, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV0CityByCityNamePlatformMetadataLeaseBeginResponse(rsp)
+}
+
+// PostV0CityByCityNamePlatformMetadataLeaseCheckWithBodyWithResponse request with arbitrary body returning *PostV0CityByCityNamePlatformMetadataLeaseCheckResponse
+func (c *ClientWithResponses) PostV0CityByCityNamePlatformMetadataLeaseCheckWithBodyWithResponse(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostV0CityByCityNamePlatformMetadataLeaseCheckResponse, error) {
+	rsp, err := c.PostV0CityByCityNamePlatformMetadataLeaseCheckWithBody(ctx, cityName, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV0CityByCityNamePlatformMetadataLeaseCheckResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostV0CityByCityNamePlatformMetadataLeaseCheckWithResponse(ctx context.Context, cityName string, params *PostV0CityByCityNamePlatformMetadataLeaseCheckParams, body PostV0CityByCityNamePlatformMetadataLeaseCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*PostV0CityByCityNamePlatformMetadataLeaseCheckResponse, error) {
+	rsp, err := c.PostV0CityByCityNamePlatformMetadataLeaseCheck(ctx, cityName, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostV0CityByCityNamePlatformMetadataLeaseCheckResponse(rsp)
 }
 
 // GetV0CityByCityNameProviderReadinessWithResponse request returning *GetV0CityByCityNameProviderReadinessResponse
@@ -44056,6 +44376,156 @@ func ParseGetV0CityByCityNamePendingResponse(rsp *http.Response) (*GetV0CityByCi
 			return nil, err
 		}
 		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostV0CityByCityNamePlatformMetadataLeaseBeginResponse parses an HTTP response from a PostV0CityByCityNamePlatformMetadataLeaseBeginWithResponse call
+func ParsePostV0CityByCityNamePlatformMetadataLeaseBeginResponse(rsp *http.Response) (*PostV0CityByCityNamePlatformMetadataLeaseBeginResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostV0CityByCityNamePlatformMetadataLeaseBeginResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MetadataLeaseProof
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostV0CityByCityNamePlatformMetadataLeaseCheckResponse parses an HTTP response from a PostV0CityByCityNamePlatformMetadataLeaseCheckWithResponse call
+func ParsePostV0CityByCityNamePlatformMetadataLeaseCheckResponse(rsp *http.Response) (*PostV0CityByCityNamePlatformMetadataLeaseCheckResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostV0CityByCityNamePlatformMetadataLeaseCheckResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MetadataLeaseProof
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest ErrorModel

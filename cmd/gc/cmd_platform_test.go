@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gastownhall/gascity/internal/packman"
 	"github.com/gastownhall/gascity/internal/platforminstall"
 )
 
@@ -139,6 +140,54 @@ func TestPlatformAdoptPublishesBrokerActivatedMetadataWithoutRestart(t *testing.
 	}
 	if !strings.Contains(stdout.String(), "platform adopt result=installed") {
 		t.Fatalf("stdout = %q, want adoption result", stdout.String())
+	}
+}
+
+func TestPlatformMetadataOnlyAdoptRefusesLegacyLifecycleInBothModes(t *testing.T) {
+	t.Setenv("GC_HOME", t.TempDir())
+	cacheRoot, err := packman.RepoCacheRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheRoot, ".packman-cache.lock"), nil, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath, manifest := platformCommandFixture(t)
+	if err := os.MkdirAll(filepath.Dir(manifest.BackupPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.BackupPath, []byte("previous"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.Core.Destination, mustPlatformCommandRead(t, manifest.Core.Source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &platformCommandLifecycle{proof: platforminstall.RuntimeProof{
+		ExecutableSHA256: manifest.Core.SHA256,
+		Commit:           manifest.Activation.ExpectedCommit,
+		Version:          manifest.Activation.ExpectedVersion,
+	}}
+	previousFactory := platformLifecycleFactory
+	platformLifecycleFactory = func() platforminstall.Lifecycle { return lifecycle }
+	t.Cleanup(func() { platformLifecycleFactory = previousFactory })
+	for _, mode := range []string{"--dry-run", "--apply"} {
+		var stdout, stderr bytes.Buffer
+		command := newPlatformCmd(&stdout, &stderr)
+		command.SetArgs([]string{"adopt", "--manifest", manifestPath, "--metadata-only", mode})
+		if err := command.Execute(); err == nil {
+			t.Fatalf("%s accepted a legacy lifecycle instead of the confined transaction", mode)
+		}
+		if mode == "--dry-run" {
+			if _, err := os.Stat(manifest.ReceiptPath); !os.IsNotExist(err) {
+				t.Fatalf("dry-run wrote receipt: %v", err)
+			}
+		}
+	}
+	if lifecycle.restarts != 0 || lifecycle.verifies != 0 {
+		t.Fatalf("metadata-only lifecycle restart=%d verify=%d, want0/0", lifecycle.restarts, lifecycle.verifies)
 	}
 }
 

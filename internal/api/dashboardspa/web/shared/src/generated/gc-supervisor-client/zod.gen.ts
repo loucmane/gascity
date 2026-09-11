@@ -785,6 +785,25 @@ export const zMailListBody = z.object({
     total: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
 });
 
+export const zMetadataLeaseRequest = z.object({
+    deadline: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    nonce: z.string().length(64).regex(/^[0-9a-f]{64}$/),
+    observation: z.boolean().optional(),
+    request_sha256: z.string().length(64).regex(/^[0-9a-f]{64}$/),
+    transaction: z.string().length(64).regex(/^[0-9a-f]{64}$/)
+});
+
+export const zMetadataLeaseCheck = z.object({
+    instance: z.string().length(64).regex(/^[0-9a-f]{64}$/),
+    request: zMetadataLeaseRequest
+});
+
+export const zMetadataLeaseProof = z.object({
+    instance: z.string(),
+    observed: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    request: zMetadataLeaseRequest
+});
+
 export const zMoleculeResolvedPayload = z.object({
     actor: z.string(),
     close_reason: z.string().optional(),
@@ -7865,6 +7884,36 @@ export const zGetV0CityByCityNamePendingPath = z.object({
  * OK
  */
 export const zGetV0CityByCityNamePendingResponse = zListBodyCityPendingEntry;
+
+export const zPostV0CityByCityNamePlatformMetadataLeaseBeginBody = zMetadataLeaseRequest;
+
+export const zPostV0CityByCityNamePlatformMetadataLeaseBeginHeaders = z.object({
+    'X-GC-Request': z.string().min(1)
+});
+
+export const zPostV0CityByCityNamePlatformMetadataLeaseBeginPath = z.object({
+    cityName: z.string()
+});
+
+/**
+ * OK
+ */
+export const zPostV0CityByCityNamePlatformMetadataLeaseBeginResponse = zMetadataLeaseProof;
+
+export const zPostV0CityByCityNamePlatformMetadataLeaseCheckBody = zMetadataLeaseCheck;
+
+export const zPostV0CityByCityNamePlatformMetadataLeaseCheckHeaders = z.object({
+    'X-GC-Request': z.string().min(1)
+});
+
+export const zPostV0CityByCityNamePlatformMetadataLeaseCheckPath = z.object({
+    cityName: z.string()
+});
+
+/**
+ * OK
+ */
+export const zPostV0CityByCityNamePlatformMetadataLeaseCheckResponse = zMetadataLeaseProof;
 
 export const zGetV0CityByCityNameProviderReadinessPath = z.object({
     cityName: z.string().min(1).regex(/\S/)

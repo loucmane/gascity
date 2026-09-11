@@ -285,6 +285,58 @@ exactly, while preserving the broker-installed core. Adoption never writes the
 core executable and never restarts the supervisor. This is the normal
 post-bootstrap upgrade lane.
 
+### Strict metadata-only adoption
+
+`platform adopt --metadata-only` uses the v2 confined-writer transaction for an
+already exact installed platform. Both `--dry-run` and `--apply` require genuine
+verification of the running supervisor's executable digest, version and API
+build ID. Neither mode accepts a substituted runtime proof or restarts the
+supervisor. This entrypoint requires the reviewed v2 manifest and launch closure;
+it does not fall back to the legacy lifecycle-based metadata implementation.
+
+The existing repo-cache root and regular coordination lock must be present,
+including when the city has no remote imports. The command opens that lock
+read-only and holds the shared lock through verification and publication. It
+checks the complete installed import graph, including imports without named
+pack artifacts in the manifest. Missing, dirty or mismatched caches and locks
+are refused; no import installation, materialization or repair is invoked.
+Git inspection disables optional index writes, hooks and filesystem monitors
+and excludes inherited repository/configuration overrides.
+
+Every core/managed artifact and required rollback backup must already match
+its digest and mode. Only the canonical platform manifest, activation receipt
+and any exact previous-metadata backups may be published. Metadata outputs
+resolving inside the repo cache are refused. Managed-file publication and
+rollback are not entered. Before the final receipt rename, failure restores only
+the exact known manifest postimage. The final receipt rename is irreversible:
+a later error, EOF, expiry or fsync failure is committed evidence incomplete,
+not permission to undo or repeat the transaction. Automatic v2 replay/no-op is
+refused, including dry-run against an already committed pair. Preserve the pair,
+intent, FINAL and outer process evidence for read-only diagnosis.
+
+V verifies the actual host supervisor; W and its helper descendants run in the
+reviewed OS sandbox with read-only cache/input mounts and only declared metadata
+parents writable. The shared cache lock alone is not that protection. Exact
+runtime/source pins, launch environment, namespace and process-terminal checks
+remain required. See [the versioned transaction contract](https://github.com/loucmane/gascity/blob/main/internal/platforminstall/METADATA_TRANSACTION.md)
+for custody assumptions, bounds, completion and failure classification.
+
+When the canonical metadata directory already contains preserved directories
+such as `assets/` or `backups/`, bind each through the optional `protected_trees`
+inventory. They remain in place and become separate read-only mounts inside W
+after its writable parent mounts. Root identity, ownership, mode, tree digest,
+mount identity and alias checks are mandatory; an arbitrary directory-name
+allowlist is not sufficient. Keep new transaction backups/evidence in separate
+declared parents. This layout requires its own independently reviewed synthetic
+preservation proof before live use; the earlier R7 positive does not cover it.
+
+The legacy general install/adopt paths described elsewhere in this runbook retain
+their own metadata rollback and verified replay semantics. Historical legacy
+metadata-only helpers provided application-level no-repair checks, not this OS
+confinement contract; their behavior must not be applied to v2. Synthetic runtime
+acceptance does not authorize live adoption, cache repair, root capability or
+worker launch. Live execution still requires its exact reviewed input/state gate.
+
 ### Direct platform installer
 
 The authorization must name the exact manifest digest and permit the one

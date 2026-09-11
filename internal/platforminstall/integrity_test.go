@@ -13,6 +13,8 @@ import (
 func TestInspectIntegrityAcceptsExactFingerprint(t *testing.T) {
 	dir := t.TempDir()
 	manifest := integrityManifest(t, dir)
+	t.Setenv("GIT_DIR", filepath.Join(dir, "unrelated-repository"))
+	t.Setenv("GIT_WORK_TREE", filepath.Join(dir, "unrelated-worktree"))
 	if _, err := Install(manifest); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
