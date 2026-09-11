@@ -287,11 +287,12 @@ post-bootstrap upgrade lane.
 
 ### Strict metadata-only adoption
 
-`platform adopt --metadata-only` is the narrower source-supported mode for an
+`platform adopt --metadata-only` uses the v2 confined-writer transaction for an
 already exact installed platform. Both `--dry-run` and `--apply` require genuine
 verification of the running supervisor's executable digest, version and API
 build ID. Neither mode accepts a substituted runtime proof or restarts the
-supervisor.
+supervisor. This entrypoint requires the reviewed v2 manifest and launch closure;
+it does not fall back to the legacy lifecycle-based metadata implementation.
 
 The existing repo-cache root and regular coordination lock must be present,
 including when the city has no remote imports. The command opens that lock
@@ -306,19 +307,26 @@ Every core/managed artifact and required rollback backup must already match
 its digest and mode. Only the canonical platform manifest, activation receipt
 and any exact previous-metadata backups may be published. Metadata outputs
 resolving inside the repo cache are refused. Managed-file publication and
-rollback are not entered. A replay rechecks runtime, artifacts and cache before
-returning a no-op; a metadata publication failure uses the existing metadata
-rollback transaction.
+rollback are not entered. Before the final receipt rename, failure restores only
+the exact known manifest postimage. The final receipt rename is irreversible:
+a later error, EOF, expiry or fsync failure is committed evidence incomplete,
+not permission to undo or repeat the transaction. Automatic v2 replay/no-op is
+refused, including dry-run against an already committed pair. Preserve the pair,
+intent, FINAL and outer process evidence for read-only diagnosis.
 
-This is an application-level no-repair contract, **not an OS sandbox**. A shared
-coordination lock does not prohibit arbitrary writes by the same process,
-provider version commands, or non-cooperating writers. Before proposing live
-execution where cache writes are forbidden, independently review the exact
-candidate and prove genuine host verification together with enforced cache
-write protection in the exact launch environment. Read-only permissions,
-optional-lock suppression, fixture lifecycle proofs, or a single constrained
-Go thread do not satisfy that gate. Source tests alone grant no live adoption,
-cache repair, root capability or worker-launch authority.
+V verifies the actual host supervisor; W and its helper descendants run in the
+reviewed OS sandbox with read-only cache/input mounts and only declared metadata
+parents writable. The shared cache lock alone is not that protection. Exact
+runtime/source pins, launch environment, namespace and process-terminal checks
+remain required. See [the versioned transaction contract](https://github.com/loucmane/gascity/blob/main/internal/platforminstall/METADATA_TRANSACTION.md)
+for custody assumptions, bounds, completion and failure classification.
+
+The legacy general install/adopt paths described elsewhere in this runbook retain
+their own metadata rollback and verified replay semantics. Historical legacy
+metadata-only helpers provided application-level no-repair checks, not this OS
+confinement contract; their behavior must not be applied to v2. Synthetic runtime
+acceptance does not authorize live adoption, cache repair, root capability or
+worker launch. Live execution still requires its exact reviewed input/state gate.
 
 ### Direct platform installer
 

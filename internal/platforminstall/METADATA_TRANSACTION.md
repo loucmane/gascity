@@ -1,7 +1,13 @@
 # Versioned metadata-only transaction
 
-Source candidate only. Neither this production writer nor its helper closure has
-runtime acceptance. The earlier R6 synthetic result does not validate this binary.
+Runtime status, 2026-09-11: the exact signed source candidate
+`c271c7a4ec0dfb8f7c326842f39a94552bfc2468` passed one independently reviewed
+actual-host V/confined-W synthetic positive (full-positive R7). The receipt,
+FINAL9, unchanged-cache and bounded teardown evidence is recorded in
+[the R7 result](../../engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/20260911-writer-environment-r7-pass.md).
+This is not live adoption, exhaustive failure-matrix coverage or provider parity.
+Earlier helper-only R6 evidence and consumed failed full-positive attempts remain
+historical, not retroactive runtime acceptance of a different image.
 
 ## Callable path
 
@@ -56,8 +62,10 @@ helper descendant trees share confinement. Protocol fds are CLOEXEC and W is
 non-dumpable before helpers execute. No host socket/pidfd/credential is transferred.
 
 Outer loader environment is only `GODEBUG=containermaxprocs=0`; W additionally
-gets the exact GC_HOME, HOME=/nonexistent and PATH=/usr/bin:/bin. No inherited
-override is admitted. A calling Go runtime retaining an unrelated cgroup fd is
+gets the exact GC_HOME, HOME=/nonexistent, PATH=/usr/bin:/bin and bubblewrap's
+PWD equal to the manifest evidence directory. Exactly those five distinct
+names/values are required, and `/proc/self/cwd` must independently equal that
+directory. No inherited override is admitted. A calling Go runtime retaining an unrelated cgroup fd is
 refused; a reviewed launch must select its runtime setting before Go initialization.
 
 Transaction context is 30s; channel deadlines 25s; nonrenewing mutation lease 28s with
@@ -164,7 +172,16 @@ proof flag or sidecar. Complete dependency/compiler input hashes and the resulti
 binary hash remain release-review evidence: the guard is not a cryptographic
 attestation against malicious rebuilds or a substitute for source-to-binary review.
 
-## Acceptance still required
+## Historical source-stage acceptance inventory
+
+The following inventory records the continuation6 source-stage obligations,
+before the compositional review and R7 positive. It is preserved to distinguish
+what was originally unproved from the later evidence; its old source-only and
+pending-fixture statements are not the current result. The approved composition
+uses separate kernel-component evidence for the relevant negative mechanisms
+and the exact unchanged-image positive path. It does not turn helper-only
+failure matrices into production end-to-end proofs. Final full-suite/CI and
+delivery gates, exact live-adoption validation and provider acceptance remain.
 
 The continuation5 replay delta independently passed source review; conservative
 automatic-v2-replay refusal, M1 and observation separation are unchanged.
