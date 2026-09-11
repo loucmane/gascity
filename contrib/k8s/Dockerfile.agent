@@ -28,9 +28,10 @@ ARG GRPC_VERSION=1.83.2
 ARG XCRYPTO_VERSION=0.55.0
 ARG XNET_VERSION=0.58.0
 ARG XTEXT_VERSION=0.41.0
+ARG THRIFT_VERSION=0.24.0
 
 # The published bd binary and the pinned v1.2.2 source embed vulnerable grpc-go
-# and golang.org/x modules. Rebuild the exact source with its production
+# and golang.org/x modules plus Thrift. Rebuild the exact source with its production
 # CGO/pure-Go-regex configuration and release identity, forcing only the patched
 # dependency versions forward.
 RUN mkdir -p /src/bd /out \
@@ -49,6 +50,7 @@ RUN bd_version="${BD_VERSION#v}" \
        "golang.org/x/crypto@v${XCRYPTO_VERSION}" \
        "golang.org/x/net@v${XNET_VERSION}" \
        "golang.org/x/text@v${XTEXT_VERSION}" \
+       "github.com/apache/thrift@v${THRIFT_VERSION}" \
     && CGO_ENABLED=1 go build \
        -tags="gms_pure_go" \
        -trimpath \
@@ -59,7 +61,8 @@ RUN bd_version="${BD_VERSION#v}" \
     && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep google.golang.org/grpc v${GRPC_VERSION} " \
     && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/crypto v${XCRYPTO_VERSION} " \
     && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/net v${XNET_VERSION} " \
-    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/text v${XTEXT_VERSION} "
+    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep golang.org/x/text v${XTEXT_VERSION} " \
+    && go version -m /out/bd | tr '\t' ' ' | grep -Fq "dep github.com/apache/thrift v${THRIFT_VERSION} "
 
 FROM ${BASE_IMAGE}
 
