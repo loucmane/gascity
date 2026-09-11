@@ -412,11 +412,19 @@ func openMetadataHost(ctx context.Context, manifest Manifest) (_ *metadataHostSe
 	return session, nil
 }
 
-func (session *metadataHostSession) begin(ctx context.Context, observation bool) error {
+func (session *metadataHostSession) begin(ctx context.Context, observation bool, epoch int64) error {
 	if session.binding.Protocol != "" {
 		return fmt.Errorf("lease cannot be renewed")
 	}
 	start, err := metadataMonotonicNow()
+	if err != nil {
+		return err
+	}
+	contextDeadline, ok := ctx.Deadline()
+	if !ok {
+		return fmt.Errorf("metadata lease requires a bounded context")
+	}
+	deadline, leaseEnd, err := metadataLeaseWindow(epoch, start, time.Until(contextDeadline), observation)
 	if err != nil {
 		return err
 	}
@@ -428,7 +436,7 @@ func (session *metadataHostSession) begin(ctx context.Context, observation bool)
 	if err != nil {
 		return err
 	}
-	session.binding = MetadataBinding{Protocol: metadataProtocol, Transaction: session.manifest.Metadata.Transaction, Attempt: session.manifest.Metadata.Attempt, Nonce: nonce, Channel: channel, Request: session.manifest.ManifestSHA256, Deadline: start + 25_000_000_000, LeaseEnd: start + 28_000_000_000, Observation: observation}
+	session.binding = MetadataBinding{Protocol: metadataProtocol, Transaction: session.manifest.Metadata.Transaction, Attempt: session.manifest.Metadata.Attempt, Nonce: nonce, Channel: channel, Request: session.manifest.ManifestSHA256, Deadline: deadline, LeaseEnd: leaseEnd, Observation: observation}
 	var proof MetadataLeaseProof
 	if err := session.exchange(ctx, "begin", session.leaseRequest(), &proof); err != nil {
 		return err
@@ -453,7 +461,7 @@ func VerifyMetadataRuntime(ctx context.Context, manifest Manifest) (_ RuntimePro
 		return RuntimeProof{}, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, session.close()) }()
-	if err := session.begin(ctx, true); err != nil {
+	if err := session.begin(ctx, true, 0); err != nil {
 		return RuntimeProof{}, err
 	}
 	if err := session.check(ctx); err != nil {

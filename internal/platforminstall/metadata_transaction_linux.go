@@ -379,6 +379,10 @@ func RunMetadataTransaction(ctx context.Context, manifest Manifest, planOnly boo
 		}
 		returnErr = metadataCommittedError(returnErr, committed)
 	}()
+	epoch, err := metadataMonotonicNow()
+	if err != nil {
+		return Receipt{}, nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := metadataCheckFDs(false); err != nil {
@@ -396,7 +400,7 @@ func RunMetadataTransaction(ctx context.Context, manifest Manifest, planOnly boo
 		return Receipt{}, nil, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, session.close()) }()
-	if err := session.begin(ctx, planOnly); err != nil {
+	if err := session.begin(ctx, planOnly, epoch); err != nil {
 		return Receipt{}, nil, err
 	}
 	if err := validateMetadataInputs(manifest, true); err != nil {
