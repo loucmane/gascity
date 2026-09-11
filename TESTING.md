@@ -1383,7 +1383,7 @@ Both T3 registry paths bind this same integration-tagged proof. Run it with
 `integration-shards` core-package lanes discover this package through
 `scripts/test-integration-shard`. The source ledger alone does not prove that
 CI executed the lane. `go.mod` and the shared Ubuntu CI setup both pin Go
-1.26.6, covering the `testing/synctest` dependency in the two local simulated
+1.26.7, covering the `testing/synctest` dependency in the two local simulated
 connection-refusal tests. Those cases prove error-marker classification and
 retry behavior, not actual host-port failures. This is protocol/constructor
 conformance, not live T3 inference or Claude/Codex handover acceptance.

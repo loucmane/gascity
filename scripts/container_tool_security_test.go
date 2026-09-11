@@ -12,7 +12,7 @@ import (
 // reports as fixing the stdlib findings in the rebuilt gh, Dolt, bd, and gc
 // binaries. Both builder stages and the module directive must move together.
 func TestContainerBuildsUsePatchedGoToolchain(t *testing.T) {
-	const patchedGo = "1.26.6"
+	const patchedGo = "1.26.7"
 	root := repoRoot(t)
 
 	goMod := readFile(t, root, "go.mod")
