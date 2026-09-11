@@ -16,6 +16,7 @@ import (
 	"github.com/gastownhall/gascity/internal/cityinit"
 	"github.com/gastownhall/gascity/internal/citywriteauth"
 	"github.com/gastownhall/gascity/internal/events"
+	"github.com/gastownhall/gascity/internal/platforminstall"
 )
 
 // CityInfo describes a managed city for the /v0/cities endpoint.
@@ -113,6 +114,7 @@ type cityCacheLock struct {
 // dashboard is attached — the embedded SPA at "/" and the host-side dashboard
 // plane at "/api/". Everything else is a typed Huma operation.
 type SupervisorMux struct {
+	metadataLease   *platforminstall.MetadataLease
 	resolver        CityResolver
 	initializer     cityInitializer
 	readOnly        bool
@@ -162,18 +164,19 @@ type SupervisorMux struct {
 func NewSupervisorMux(resolver CityResolver, initializer cityInitializer, readOnly bool, version, buildID string, startedAt time.Time) *SupervisorMux {
 	humaMux := http.NewServeMux()
 	sm := &SupervisorMux{
-		resolver:    resolver,
-		initializer: initializer,
-		readOnly:    readOnly,
-		version:     version,
-		buildID:     buildID,
-		startedAt:   startedAt,
-		humaMux:     humaMux,
-		humaAPI:     newSupervisorHumaAPI(humaMux, readOnly),
-		cache:       make(map[string]cachedCityServer),
-		servers:     make(map[*Server]struct{}),
-		cityMu:      make(map[string]*cityCacheLock),
-		idem:        newIdempotencyCache(30 * time.Minute),
+		metadataLease: platforminstall.NewMetadataLease(),
+		resolver:      resolver,
+		initializer:   initializer,
+		readOnly:      readOnly,
+		version:       version,
+		buildID:       buildID,
+		startedAt:     startedAt,
+		humaMux:       humaMux,
+		humaAPI:       newSupervisorHumaAPI(humaMux, readOnly),
+		cache:         make(map[string]cachedCityServer),
+		servers:       make(map[*Server]struct{}),
+		cityMu:        make(map[string]*cityCacheLock),
+		idem:          newIdempotencyCache(30 * time.Minute),
 	}
 	sm.registerSupervisorRoutes()
 	sm.registerCityRoutes()

@@ -40,6 +40,7 @@ func newPlatformAdoptCmd(stdout, _ io.Writer) *cobra.Command {
 	var manifestPath string
 	var dryRun bool
 	var apply bool
+	var metadataOnly bool
 	cmd := &cobra.Command{
 		Use:   "adopt",
 		Short: "Publish metadata for a broker-activated platform without another restart",
@@ -53,7 +54,12 @@ func newPlatformAdoptCmd(stdout, _ io.Writer) *cobra.Command {
 				return err
 			}
 			if dryRun {
-				steps, err := platforminstall.AdoptPlan(manifest)
+				var steps []platforminstall.PlanStep
+				if metadataOnly {
+					steps, err = platforminstall.AdoptMetadataOnlyPlan(cmd.Context(), manifest, platformLifecycleFactory())
+				} else {
+					steps, err = platforminstall.AdoptPlan(manifest)
+				}
 				if err != nil {
 					return fmt.Errorf("plan platform adoption: %w", err)
 				}
@@ -74,7 +80,12 @@ func newPlatformAdoptCmd(stdout, _ io.Writer) *cobra.Command {
 				}
 				return nil
 			}
-			receipt, err := platforminstall.Adopt(cmd.Context(), manifest, platformLifecycleFactory())
+			var receipt platforminstall.Receipt
+			if metadataOnly {
+				receipt, err = platforminstall.AdoptMetadataOnly(cmd.Context(), manifest, platformLifecycleFactory())
+			} else {
+				receipt, err = platforminstall.Adopt(cmd.Context(), manifest, platformLifecycleFactory())
+			}
 			if err != nil {
 				return fmt.Errorf("adopt broker-activated platform: %w", err)
 			}
@@ -85,6 +96,7 @@ func newPlatformAdoptCmd(stdout, _ io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "absolute path to the digest-pinned platform manifest")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate the already-installed candidate and print the metadata-only plan")
 	cmd.Flags().BoolVar(&apply, "apply", false, "publish metadata for the already-running candidate without restart")
+	cmd.Flags().BoolVar(&metadataOnly, "metadata-only", false, "require installed artifacts and validate existing caches without repair or lock creation")
 	_ = cmd.MarkFlagRequired("manifest")
 	return cmd
 }

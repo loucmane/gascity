@@ -3111,6 +3111,7 @@ gc platform adopt [flags]
 | `--apply` | bool |  | publish metadata for the already-running candidate without restart |
 | `--dry-run` | bool |  | validate the already-installed candidate and print the metadata-only plan |
 | `--manifest` | string |  | absolute path to the digest-pinned platform manifest |
+| `--metadata-only` | bool |  | require installed artifacts and validate existing caches without repair or lock creation |
 
 ## gc platform canary
 

@@ -206,6 +206,7 @@ func humaReadOnlyMiddleware(api huma.API) func(ctx huma.Context, next func(huma.
 
 // registerSupervisorRoutes registers all supervisor-scope Huma operations.
 func (sm *SupervisorMux) registerSupervisorRoutes() {
+	sm.registerMetadataLeaseRoutes()
 	huma.Get(sm.humaAPI, "/v0/cities", sm.humaHandleCities)
 	huma.Get(sm.humaAPI, "/health", sm.humaHandleHealth)
 	huma.Get(sm.humaAPI, "/v0/readiness", sm.humaHandleReadiness)

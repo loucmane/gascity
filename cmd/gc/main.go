@@ -23,6 +23,7 @@ import (
 	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/pathutil"
+	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/gastownhall/gascity/internal/rollout/gate"
 	"github.com/gastownhall/gascity/internal/supervisor"
 	"github.com/gastownhall/gascity/internal/telemetry"
@@ -34,6 +35,18 @@ func main() {
 }
 
 func mainExitCode(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "__metadata-writer-v1" {
+		if len(args) != 1 {
+			return 1
+		}
+		if err := platforminstall.MetadataWriterEntrypoint(); err != nil {
+			if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+				return 1
+			}
+			return 1
+		}
+		return 0
+	}
 	if handled, code := privateProductMetricsEntrypoint(args); handled {
 		return code
 	}

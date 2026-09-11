@@ -166,6 +166,11 @@ func (gate *managedProductDispatchGate) observeLiveEnvironment(ctx context.Conte
 	if manifest.Activation == nil {
 		return managedworker.CanaryEnvironment{}, managedworker.RefuseDispatch("gc_binary.commit", "activation-pinned", "missing")
 	}
+	if manifest.Metadata != nil {
+		if _, err := platforminstall.VerifyMetadataRuntime(ctx, manifest); err != nil {
+			return managedworker.CanaryEnvironment{}, managedworker.RefuseDispatch("gc_binary.runtime", "fresh host-verifier evidence", err.Error())
+		}
+	}
 
 	provisioningData, err := gate.readFile(managedworker.ProvisioningReceiptPath(cityPath))
 	if err != nil {

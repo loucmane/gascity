@@ -285,6 +285,41 @@ exactly, while preserving the broker-installed core. Adoption never writes the
 core executable and never restarts the supervisor. This is the normal
 post-bootstrap upgrade lane.
 
+### Strict metadata-only adoption
+
+`platform adopt --metadata-only` is the narrower source-supported mode for an
+already exact installed platform. Both `--dry-run` and `--apply` require genuine
+verification of the running supervisor's executable digest, version and API
+build ID. Neither mode accepts a substituted runtime proof or restarts the
+supervisor.
+
+The existing repo-cache root and regular coordination lock must be present,
+including when the city has no remote imports. The command opens that lock
+read-only and holds the shared lock through verification and publication. It
+checks the complete installed import graph, including imports without named
+pack artifacts in the manifest. Missing, dirty or mismatched caches and locks
+are refused; no import installation, materialization or repair is invoked.
+Git inspection disables optional index writes, hooks and filesystem monitors
+and excludes inherited repository/configuration overrides.
+
+Every core/managed artifact and required rollback backup must already match
+its digest and mode. Only the canonical platform manifest, activation receipt
+and any exact previous-metadata backups may be published. Metadata outputs
+resolving inside the repo cache are refused. Managed-file publication and
+rollback are not entered. A replay rechecks runtime, artifacts and cache before
+returning a no-op; a metadata publication failure uses the existing metadata
+rollback transaction.
+
+This is an application-level no-repair contract, **not an OS sandbox**. A shared
+coordination lock does not prohibit arbitrary writes by the same process,
+provider version commands, or non-cooperating writers. Before proposing live
+execution where cache writes are forbidden, independently review the exact
+candidate and prove genuine host verification together with enforced cache
+write protection in the exact launch environment. Read-only permissions,
+optional-lock suppression, fixture lifecycle proofs, or a single constrained
+Go thread do not satisfy that gate. Source tests alone grant no live adoption,
+cache repair, root capability or worker-launch authority.
+
 ### Direct platform installer
 
 The authorization must name the exact manifest digest and permit the one

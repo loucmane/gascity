@@ -10,6 +10,13 @@ import (
 // AdoptPlan validates that the complete candidate filesystem is already in
 // place and returns the metadata-only adoption plan without mutation.
 func AdoptPlan(manifest Manifest) ([]PlanStep, error) {
+	return adoptPlan(context.Background(), manifest, false)
+}
+
+func adoptPlan(ctx context.Context, manifest Manifest, metadataOnly bool) ([]PlanStep, error) {
+	if manifest.Metadata != nil && !metadataOnly {
+		return nil, fmt.Errorf("versioned metadata plans require the confined writer")
+	}
 	state, err := preflightManifest(manifest)
 	if err != nil {
 		return nil, err
@@ -17,7 +24,15 @@ func AdoptPlan(manifest Manifest) ([]PlanStep, error) {
 	if !state.coreAlreadyInstalled {
 		return nil, fmt.Errorf("platform adoption requires the broker-installed candidate core")
 	}
-	if report := inspectPinnedIntegrity(context.Background(), manifest); len(report.Drifts) != 0 {
+	if metadataOnly {
+		if err := preflightMetadataOnlyArtifacts(manifest, state); err != nil {
+			return nil, err
+		}
+		if err := checkCandidatePackCacheReadOnly(manifest, state); err != nil {
+			return nil, err
+		}
+	}
+	if report := inspectPinnedIntegrity(ctx, manifest); len(report.Drifts) != 0 {
 		return nil, fmt.Errorf("preflight platform integrity drift: %+v", report.Drifts)
 	}
 	steps := []PlanStep{
@@ -30,11 +45,15 @@ func AdoptPlan(manifest Manifest) ([]PlanStep, error) {
 		return nil, err
 	}
 	if pair != nil {
+		action := "ensure-pack-cache"
+		if metadataOnly {
+			action = "verify-pack-cache"
+		}
 		steps = append(steps, PlanStep{
-			Action:  "ensure-pack-cache",
+			Action:  action,
 			Path:    pair.lockFile.Source,
 			SHA256:  pair.lockFile.SHA256,
-			Mutates: state.noopReceipt == nil,
+			Mutates: !metadataOnly && state.noopReceipt == nil,
 		})
 	}
 	if state.previousMetadata != nil {
@@ -82,6 +101,26 @@ func Adopt(ctx context.Context, manifest Manifest, lifecycle Lifecycle) (Receipt
 }
 
 func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Lifecycle) (Receipt, error) {
+	return i.adoptWithMode(ctx, manifest, lifecycle, false)
+}
+
+func (i *installer) adoptWithMode(ctx context.Context, manifest Manifest, lifecycle Lifecycle, metadataOnly bool) (Receipt, error) {
+	if !metadataOnly {
+		return i.adoptPrepared(ctx, manifest, lifecycle, false)
+	}
+	var receipt Receipt
+	err := withMetadataOnlyCacheLock(func() error {
+		var err error
+		receipt, err = i.adoptPrepared(ctx, manifest, lifecycle, true)
+		return err
+	})
+	return receipt, err
+}
+
+func (i *installer) adoptPrepared(ctx context.Context, manifest Manifest, lifecycle Lifecycle, metadataOnly bool) (Receipt, error) {
+	if manifest.Metadata != nil {
+		return Receipt{}, fmt.Errorf("versioned metadata adoption requires the confined writer protocol")
+	}
 	if lifecycle == nil {
 		return Receipt{}, fmt.Errorf("platform activation lifecycle is required")
 	}
@@ -95,6 +134,11 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 	if !state.coreAlreadyInstalled {
 		return Receipt{}, fmt.Errorf("platform adoption requires the broker-installed candidate core")
 	}
+	if metadataOnly {
+		if err := preflightMetadataOnlyArtifacts(manifest, state); err != nil {
+			return Receipt{}, err
+		}
+	}
 	if report := inspectPinnedIntegrity(ctx, manifest); len(report.Drifts) != 0 {
 		return Receipt{}, fmt.Errorf("preflight platform integrity drift: %+v", report.Drifts)
 	}
@@ -105,6 +149,11 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 	if err := validateRuntimeProof(manifest, proof); err != nil {
 		return Receipt{}, err
 	}
+	if metadataOnly {
+		if err := checkCandidatePackCacheReadOnly(manifest, state); err != nil {
+			return Receipt{}, fmt.Errorf("read-only candidate pack cache: %w", err)
+		}
+	}
 	if state.noopReceipt != nil && state.noopReceipt.Activation != nil {
 		result := *state.noopReceipt
 		result.Result = ResultNoop
@@ -113,8 +162,10 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 		}
 		return result, nil
 	}
-	if err := i.ensurePackCache(manifest, state); err != nil {
-		return Receipt{}, fmt.Errorf("preflight candidate pack cache: %w", err)
+	if !metadataOnly {
+		if err := i.ensurePackCache(manifest, state); err != nil {
+			return Receipt{}, fmt.Errorf("preflight candidate pack cache: %w", err)
+		}
 	}
 
 	directories := []string{
@@ -127,10 +178,12 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 			filepath.Dir(manifest.PreviousMetadata.ReceiptBackupPath),
 		)
 	}
-	for _, file := range state.managedFiles {
-		directories = append(directories, filepath.Dir(file.file.Destination))
-		if file.previousPresent {
-			directories = append(directories, filepath.Dir(file.file.BackupPath))
+	if !metadataOnly {
+		for _, file := range state.managedFiles {
+			directories = append(directories, filepath.Dir(file.file.Destination))
+			if file.previousPresent {
+				directories = append(directories, filepath.Dir(file.file.BackupPath))
+			}
 		}
 	}
 	for _, directory := range directories {
@@ -141,13 +194,15 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 	if err := i.preservePreviousMetadata(manifest, state); err != nil {
 		return Receipt{}, err
 	}
-	if err := i.preserveManagedFileBackups(state); err != nil {
-		return Receipt{}, err
-	}
-	if err := i.publishManagedFiles(state, func() error {
-		return i.rollbackManagedFiles(state, false)
-	}); err != nil {
-		return Receipt{}, err
+	if !metadataOnly {
+		if err := i.preserveManagedFileBackups(state); err != nil {
+			return Receipt{}, err
+		}
+		if err := i.publishManagedFiles(state, func() error {
+			return i.rollbackManagedFiles(state, false)
+		}); err != nil {
+			return Receipt{}, err
+		}
 	}
 
 	receipt := Receipt{
@@ -166,8 +221,10 @@ func (i *installer) adopt(ctx context.Context, manifest Manifest, lifecycle Life
 
 	metadataMutated := false
 	restore := func(cause error) error {
-		if err := i.rollbackManagedFiles(state, false); err != nil {
-			return fmt.Errorf("%w; managed-file rollback also failed: %w", cause, err)
+		if !metadataOnly {
+			if err := i.rollbackManagedFiles(state, false); err != nil {
+				return fmt.Errorf("%w; managed-file rollback also failed: %w", cause, err)
+			}
 		}
 		if metadataMutated {
 			if restoreErr := i.restorePlatformMetadata(manifest, state); restoreErr != nil {

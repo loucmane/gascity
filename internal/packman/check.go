@@ -62,9 +62,45 @@ func (r *CheckReport) HasIssues() bool {
 
 // CheckInstalled validates that declared remote imports are represented by
 // packs.lock and by already-materialized local cache entries. It does not
-// resolve versions, clone repositories, fetch, or mutate disk state.
+// resolve versions, clone repositories, fetch, or repair cache content. Its
+// shared coordination lock may be lazily initialized in a writable cache.
 func CheckInstalled(cityRoot string, imports map[string]config.Import) (*CheckReport, error) {
 	return checkInstalledFromRoots(cityRoot, cityRoot, imports)
+}
+
+// CheckInstalledReadOnly validates installed imports without creating a cache
+// coordination lock or allowing Git's optional index-refresh writes.
+func CheckInstalledReadOnly(cityRoot string, imports map[string]config.Import) (*CheckReport, error) {
+	return checkInstalledReadOnly(cityRoot, imports, false)
+}
+
+// CheckInstalledReadOnlyStrict verifies the complete installed import closure without repair.
+func CheckInstalledReadOnlyStrict(cityRoot string, imports map[string]config.Import, readGit func(string, ...string) (string, error)) (*CheckReport, error) {
+	if readGit == nil {
+		return nil, fmt.Errorf("strict cache check requires bounded read-only Git")
+	}
+	readLock := func(check func() error) error {
+		root, err := RepoCacheRoot()
+		if err != nil {
+			return err
+		}
+		return config.WithExistingRepoCacheReadLock(root, check)
+	}
+	return checkInstalledWithReaders(cityRoot, cityRoot, imports, readLock, readGit, true)
+}
+
+func checkInstalledReadOnly(cityRoot string, imports map[string]config.Import, strictLocal bool) (*CheckReport, error) {
+	readLock := func(check func() error) error {
+		root, err := RepoCacheRoot()
+		if err != nil {
+			return err
+		}
+		return config.WithExistingRepoCacheReadLock(root, check)
+	}
+	readGit := func(directory string, arguments ...string) (string, error) {
+		return runGit(directory, append([]string{"--no-optional-locks"}, arguments...)...)
+	}
+	return checkInstalledWithReaders(cityRoot, cityRoot, imports, readLock, readGit, strictLocal)
 }
 
 // checkInstalledFromRoots validates a lockfile staged under lockRoot while
@@ -73,6 +109,10 @@ func CheckInstalled(cityRoot string, imports map[string]config.Import) (*CheckRe
 // stage pack.toml and packs.lock outside the live city, so their lock authority
 // and import-resolution authority are distinct.
 func checkInstalledFromRoots(lockRoot, importRoot string, imports map[string]config.Import) (*CheckReport, error) {
+	return checkInstalledWithReaders(lockRoot, importRoot, imports, withRepoCacheReadLock, runGit)
+}
+
+func checkInstalledWithReaders(lockRoot, importRoot string, imports map[string]config.Import, readLock func(func() error) error, readGit func(string, ...string) (string, error), strictLocal ...bool) (*CheckReport, error) {
 	report := &CheckReport{}
 
 	lockExists, err := lockfileExists(lockRoot)
@@ -95,20 +135,22 @@ func checkInstalledFromRoots(lockRoot, importRoot string, imports map[string]con
 	}
 
 	if countRemoteImports(imports) > 0 || len(lock.Packs) > 0 {
-		if err := withRepoCacheReadLock(func() error {
-			checkLockedImports(report, lock, imports, importRoot)
+		if err := readLock(func() error {
+			checkLockedImports(report, lock, imports, importRoot, readGit, strictLocal...)
 			return nil
 		}); err != nil {
 			return nil, err
 		}
 	} else {
-		checkLockedImports(report, lock, imports, importRoot)
+		checkLockedImports(report, lock, imports, importRoot, readGit, strictLocal...)
 	}
 	return report, nil
 }
 
-func checkLockedImports(report *CheckReport, lock *Lockfile, imports map[string]config.Import, cityRoot string) {
+func checkLockedImports(report *CheckReport, lock *Lockfile, imports map[string]config.Import, cityRoot string, readGit func(string, ...string) (string, error), strictLocal ...bool) {
 	state := &importCheckState{
+		strictLocal:       len(strictLocal) == 1 && strictLocal[0],
+		readGit:           readGit,
 		lock:              lock,
 		report:            report,
 		cityRoot:          cityRoot,
@@ -127,6 +169,8 @@ func checkLockedImports(report *CheckReport, lock *Lockfile, imports map[string]
 }
 
 type importCheckState struct {
+	strictLocal       bool
+	readGit           func(string, ...string) (string, error)
 	lock              *Lockfile
 	report            *CheckReport
 	cityRoot          string
@@ -255,7 +299,7 @@ func (s *importCheckState) walkLocalImport(name string, imp config.Import, declD
 		// A local path source that isn't materialized on disk yet has no
 		// transitive imports to discover -- not a hard error. Only a
 		// pack.toml that exists but fails to parse is a genuine problem.
-		if errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, fs.ErrNotExist) && !s.strictLocal {
 			return
 		}
 		s.closureIncomplete = true
@@ -399,7 +443,7 @@ func (s *importCheckState) validateCachedGitCheckout(name, source, commit, cache
 		return false
 	}
 
-	head, err := runGit(cachePath, "rev-parse", "HEAD")
+	head, err := s.readGit(cachePath, "rev-parse", "HEAD")
 	if err != nil {
 		s.closureIncomplete = true
 		s.addIssue(CheckIssue{
@@ -426,7 +470,7 @@ func (s *importCheckState) validateCachedGitCheckout(name, source, commit, cache
 		})
 		return false
 	}
-	dirty, err := cachedRepoDirty(cachePath)
+	status, err := s.readGit(cachePath, "status", "--porcelain")
 	if err != nil {
 		s.closureIncomplete = true
 		s.addIssue(CheckIssue{
@@ -440,7 +484,7 @@ func (s *importCheckState) validateCachedGitCheckout(name, source, commit, cache
 		})
 		return false
 	}
-	if dirty {
+	if strings.TrimSpace(status) != "" {
 		s.closureIncomplete = true
 		s.addIssue(CheckIssue{
 			Code:       "cache-worktree-dirty",

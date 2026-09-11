@@ -1,6 +1,7 @@
 package platforminstall
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -11,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	gitutil "github.com/gastownhall/gascity/internal/git"
 )
 
 // FilePin identifies a managed file whose exact bytes and mode are authority.
@@ -227,7 +230,7 @@ func inspectRegularFile(report *IntegrityReport, field, path, wantSHA string, wa
 }
 
 func inspectReceipt(report *IntegrityReport, manifest Manifest) {
-	receipt, err := loadReceipt(manifest.ReceiptPath)
+	_, receipt, err := ReadCommittedPair(manifest)
 	if err != nil {
 		report.add("receipt.self_digest", "valid", "error: "+err.Error())
 		return
@@ -365,7 +368,28 @@ func VerifyProviderPin(ctx context.Context, pin ProviderPin) error {
 func runInspectionCommand(ctx context.Context, name string, args ...string) (string, error) {
 	commandCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(commandCtx, name, args...).Output()
+	if name == "git" {
+		args = append([]string{"--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + os.DevNull, "-c", "core.untrackedCache=false"}, args...)
+	}
+	command := exec.CommandContext(commandCtx, name, args...)
+	if name == "git" {
+		command.Env = gitutil.HermeticEnv()
+	}
+	var output []byte
+	var err error
+	if bounded, _ := ctx.Value(metadataInspectionKey{}).(bool); bounded {
+		var stdout, stderr metadataInspectionOutput
+		command.Stdin = bytes.NewReader(nil)
+		command.Stdout, command.Stderr = &stdout, &stderr
+		command.WaitDelay = time.Second
+		err = command.Run()
+		output = stdout.Bytes()
+		if err != nil {
+			err = fmt.Errorf("%w: %s", err, stderr.String())
+		}
+	} else {
+		output, err = command.Output()
+	}
 	text := strings.TrimSpace(string(output))
 	if err != nil {
 		if commandCtx.Err() != nil {
@@ -387,6 +411,21 @@ func runInspectionCommand(ctx context.Context, name string, args ...string) (str
 		return "", err
 	}
 	return text, nil
+}
+
+type (
+	metadataInspectionKey    struct{}
+	metadataInspectionOutput struct{ buffer bytes.Buffer }
+)
+
+func (output *metadataInspectionOutput) Len() int       { return output.buffer.Len() }
+func (output *metadataInspectionOutput) Bytes() []byte  { return output.buffer.Bytes() }
+func (output *metadataInspectionOutput) String() string { return output.buffer.String() }
+func (output *metadataInspectionOutput) Write(data []byte) (int, error) {
+	if output.Len()+len(data) > 1024*1024 {
+		return 0, fmt.Errorf("metadata inspection output exceeds 1 MiB")
+	}
+	return output.buffer.Write(data)
 }
 
 func describePathError(err error) string {
