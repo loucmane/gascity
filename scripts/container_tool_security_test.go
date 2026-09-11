@@ -46,7 +46,7 @@ func TestContainerCLIToolsRebuildWithPatchedGRPC(t *testing.T) {
 		ghVersion                 = "2.96.0"
 		ghSourceRef               = "b300f2ec7ec9dc9addc39b2ad88c54097ded7ca0"
 		doltSourceRef             = "781cbb730221ea7df4fc7995255bb336df9c3864"
-		grpcVersion               = "1.82.1"
+		grpcVersion               = "1.83.2"
 		ghSourceSHA256            = "a0c18c98c73f7333f73e19b3a0bf5bd18673f3dc226193ab6478b3ea1ea18f03"
 		doltSourceSHA256          = "0b0c9bce8baef26baa7e0e5825cd2d7d6101daf6fc9673f38dac9670afb66847"
 		doltToolchainRelease      = "20260611_0.0.5_trixie"
@@ -102,7 +102,7 @@ func TestAgentImageRebuildsBDAndGCWithPatchedGRPC(t *testing.T) {
 		bdSourceSHA256 = "99bd5f50226590b5ce4978d117f481c7d4d5718bd3152568a983d2683f62779f"
 		bdBuild        = "6c124203e"
 		bdBranch       = "HEAD"
-		grpcVersion    = "1.82.1"
+		grpcVersion    = "1.83.2"
 	)
 
 	root := repoRoot(t)
@@ -257,7 +257,7 @@ func TestRebuiltToolsForcePatchedXModules(t *testing.T) {
 		"ARG XNET_VERSION=0.58.0",
 		"ARG XTEXT_VERSION=0.41.0",
 		"ARG XMOD_VERSION=0.40.0",
-		"ARG THRIFT_VERSION=0.23.0",
+		"ARG THRIFT_VERSION=0.24.0",
 	} {
 		if !strings.Contains(base, arg) {
 			t.Errorf("contrib/k8s/Dockerfile.base missing %q", arg)
