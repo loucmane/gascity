@@ -227,3 +227,30 @@ Combined R1 source checkpoint: `engdocs/workflow/work-tracking/active/20260908-g
 
 - New approved source-only ga-tmgr repair removes only unsupported --preserve-fds 2, preserving anonymous FDs3/4 and every confinement/transaction check. Existing exact-token argv owner RED then GREEN; owning package115 tests/137 subtests and vet PASS. No runtime/build/delivery; R3/R4 remain consumed failures.
 - /tmp/ga-tmgr-bwrap-fd-compatibility-20260911/executor/REPORT.md and source.sha256 bind two-file candidate, preservation and independent-review boundary. Source manifest SHA256 a4b84ae6491727c6a2ee7e360346835e8ed77f4c7a95b9d2db826990d7de41eb. Full objective unchanged; ga-oz9e deferred.
+
+## Protected R4 Observer Source Repair — 2026-09-11
+
+- Later delivery and consumed protected-R4 disposition are preserved in the active handoff and reports; PR38 is already merged. R4 remains FAILED / committed_evidence_incomplete, result 4f2e0110dc1d95049c1d07c225443b19177234d25d652f4029c5f5f2131a920e. No prior attempt is replayed or reclassified.
+- Approved observer-only correction: same retained pidfd terminal proof and exact-Popen reap after an enrolled process exits. Initial identity, ownership, transaction, cache/protected, transcript and cleanup checks remain. Source605be0d2dab5dc8e296a4a039c083c5387174dbfcf0b2ff0031bbbe55504e207; deterministic RED preserved, focused19 and full48 PASS, independent Astra full48 SOURCE PASS with no must-fix.
+- Checkpoint: engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE/reports/20260911-observer-terminal-source-repair.md, SHA256 2de04d35564976a5f3fefa93e5f96ff7028183b78a3a33c973a76b0eeee217e6. Candidate at /tmp/ga-tmgr-observer-terminal-repair-20260911 is source-only, not a runnable successor package.
+- Next: fresh bound/reviewed synthetic validation package and separately authorized execution, not another Core source rebuild. Live adoption, useful Claude execution and bidirectional handover acceptance still remain. No runtime, worker or service transition here; ga-tmgr remains open, ga-oz9e deferred, original full objective/history unchanged.
+
+## Protected R5 Package Preparation — 2026-09-11
+
+- Fresh package d5e7458afbb346716e90e50268b6b79e676a39f3d2fce109342509b095d1cac9 independently PACKAGE PASS; controller13987056a0cb10c40c546bc8cf8cce5a7ac2e59db894943fd4d908806875eb15 is byte-equivalent to the reviewed observer repair after the exact closed path/label rebinding. Unchanged R4 build/runtime pins; inherited29 pure tests PASS and observer evidence reused honestly.
+- Checkpoint reports/20260911-protected-r5-package-preparation.md in the ACTIVE tracker, SHA25687f19a3acec38769b35bcd1b8e5f32a2ab00618a2813cd67a9363efc0e5fa1d4. R5 runroot absent; production readback PID1769/restarts0/start210566291 and four rigs suspended. R3/R4 consumed outcomes preserved unchanged.
+- Exact execution authority remains absent. Next is one separately authorized R5 synthetic validation after immediate preflight; no live adoption, hostile-kernel acceptance, provider-parity or original-goal completion is implied by package review.
+
+## Standing Autonomous Completion Grant — 2026-09-11
+
+- The later explicit operator grant supersedes the prior per-attempt/source-only/separate-execution-approval restrictions within the full existing goal. Historical package and plan text above remains preserved; it no longer requires another operator confirmation for an in-scope reviewed successor or successful checkpoint.
+- Verbatim grant: reports/20260911-standing-completion-authorization.md in this ACTIVE tracker, mirrored at /tmp/ga-tmgr-standing-completion-authorization-20260911.md. R5 package d5e7458afbb346716e90e50268b6b79e676a39f3d2fce109342509b095d1cac9 may execute once after immediate preflight. Independent review, exact bindings and every technical/containment gate remain.
+- Continue outcome order: actual protected positive and necessary negative proofs; reviewed merge-bound metadata reconciliation; preserved gct-13ku/gct-10pg interoperability; useful Claude worker execution; bidirectional handover and original terminal acceptance. Reuse PR37/38 and valid source evidence; ga-oz9e remains deferred/nonblocking.
+- Failed synthetic attempts remain consumed and may only have fresh successors after proven isolated containment, terminated owned processes and unchanged production/security state. Live retry requires pre-mutation proof or verified rollback. All excluded boundaries in the grant remain stops. No new goal, task database or execution context.
+
+## R5 Corrective Source Acceptance — 2026-09-12
+
+- R5 remains consumed FAILED / committed_evidence_incomplete; later separate containment passed, without rewriting the result. R3/R4/R5 roots and evidence remain preserved.
+- Independent Astra SOURCE PASS binds the common-epoch mutation-budget correction and bounded same-pidfd observer completion. Exact source hashes, semantic RED/GREEN, owning-package evidence and 54 independent observer tests are recorded in reports/20260912-budget-observer-source-pass.md under this ACTIVE tracker.
+- Supported daily continuation moved evidence to September12 while retaining September11 history. Normal signed delivery and required hosted gates precede a fresh independently reviewed source/image-bound synthetic package under the standing grant; no repeated micro-authorization or replay of a consumed root.
+- Hostile-negative proof, reviewed live adoption, worker capabilities/useful delivery, bidirectional handover and original terminal acceptance remain owed. ga-oz9e stays deferred; protected projects and unrelated rigs/services remain untouched.
