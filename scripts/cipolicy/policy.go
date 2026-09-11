@@ -23,7 +23,7 @@ const (
 	expectedCIExecutionHash      = "901ee4e069dde79ca5fb36f2916198a29f4aa29b5bfab9831b83b26bddb5d225" // reviewed delta: provision the pinned Herdr conformance dependency
 	expectedNightlyTriggersHash  = "0a4400a09ac567e90adf8be1232eef1f14e36efd8dba3e143aa6e36f5b7a36f5"
 	expectedNightlyExecutionHash = "4b17e6d5c9c6c13c0935051aff0c50ddbbc6b6c5aa10947ed4447d25c29a2a23" // reviewed delta: BD_VERSION v1.1.0 -> v1.2.2 (beads pin hotfix)
-	expectedSetupActionHash      = "6a7fa725afa5cdf18cc459ea401a74bbd83cef757bf4e5d0dcd131a010df6ac0"
+	expectedSetupActionHash      = "0c3d55d12e64d807ee9dbf2320f89542e0231f3e4965b2ca0ebdadcb65663a29" // reviewed delta: Go 1.26.6 -> 1.26.7 custody toolchain
 )
 
 var requiredFilterPaths = map[string][]string{
