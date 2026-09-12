@@ -28,6 +28,10 @@ func metadataContains(root, path string) bool {
 }
 
 func metadataTreeDigest(root string) (string, error) {
+	return metadataTreeDigestWithCacheLinks(root, false)
+}
+
+func metadataTreeDigestWithCacheLinks(root string, cacheLinks bool) (string, error) {
 	hash := sha256.New()
 	count := 0
 	var visit func(string) error
@@ -38,6 +42,27 @@ func metadataTreeDigest(root string) (string, error) {
 		}
 		info, err := os.Lstat(path)
 		if err != nil {
+			return err
+		}
+		if cacheLinks && info.Mode()&os.ModeSymlink != 0 {
+			target, err := metadataCacheLeafLink(root, path, info)
+			if err != nil {
+				return err
+			}
+			relative, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			encoded, err := json.Marshal(struct {
+				Path   string
+				Mode   uint32
+				Size   int64
+				Target string
+			}{relative, uint32(info.Mode()), info.Size(), target})
+			if err != nil {
+				return err
+			}
+			_, err = hash.Write(encoded)
 			return err
 		}
 		if !info.IsDir() && !info.Mode().IsRegular() {
@@ -106,6 +131,10 @@ func metadataTreeDigest(root string) (string, error) {
 }
 
 func metadataCheckPin(pin FilePin, tree bool) error {
+	return metadataCheckPinWithTreeDigest(pin, tree, metadataTreeDigest)
+}
+
+func metadataCheckPinWithTreeDigest(pin FilePin, tree bool, treeDigest func(string) (string, error)) error {
 	if !filepath.IsAbs(pin.Path) || filepath.Clean(pin.Path) != pin.Path || pin.Path == "/" {
 		return fmt.Errorf("noncanonical metadata input")
 	}
@@ -128,7 +157,7 @@ func metadataCheckPin(pin FilePin, tree bool) error {
 		if !info.IsDir() {
 			return fmt.Errorf("input tree is not directory")
 		}
-		actual, err = metadataTreeDigest(pin.Path)
+		actual, err = treeDigest(pin.Path)
 	} else {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("input is not regular")
@@ -297,7 +326,7 @@ func validateMetadataInputs(manifest Manifest, host bool) (returnErr error) {
 		}
 	}
 	for _, pin := range launch.Trees {
-		if err := metadataCheckPin(pin, true); err != nil {
+		if err := metadataCheckInputTree(pin, launch); err != nil {
 			return err
 		}
 	}

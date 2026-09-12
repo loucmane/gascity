@@ -35,12 +35,22 @@ unbound input closure, missing cache lock, changed preimages or unsupported leas
   import/Git/provider closure. `ImportsSHA256` binds the JSON encoding of the
   complete `CollectAllImports` result, compared independently by V and W.
   Undeclared paths are errors, never silently treated as absent imports.
-- Trees contain only regular files/directories. Git worktree/common-dir/object
+- Trees other than the exact cache contain only regular files/directories. Git worktree/common-dir/object
   dependencies and provider interpreters/libraries must be explicitly included.
   No whole home/city/root or host proc/sys/dev/run tree can be mounted.
 - `GC_HOME/cache/repos` is the exact pinned read-only cache, with its existing
   regular lock opened read-only for shared flock. No repair, clone or lock creation.
   Host inventory/import reads use O_NOATIME and refuse unsupported permissions.
+  Only this exact cache tree may contain immutable relative symlink leaves to
+  regular files within the same tree. The digest binds exact link text, path,
+  type and size, while ordinary traversal separately hashes target content.
+  Links are not traversed during enumeration or recreated inside the RO mount.
+  Absolute links, link chains, directory/dangling targets and any escape followed
+  by re-entry refuse. Host and W use the same checks, with link identity checked
+  around the descriptor-bound read. Linux may update a symlink's access time
+  while reading its text; atime is not link authority. Owner, inode, mode, size,
+  mtime and ctime remain unchanged. Link-free digest encoding is unchanged, and
+  protected siblings retain their stricter no-link/no-alias contract.
 - Output/evidence parents must already exist with pinned device/inode/owner/mode.
   Group/world-writable parents, unrelated entries, undeclared directories,
   symlinks or multiply linked files inside writable parents are refused. This
