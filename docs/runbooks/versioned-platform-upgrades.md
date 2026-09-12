@@ -85,6 +85,57 @@ failure.
 
 ## 2. Build the candidate reproducibly
 
+### Read-only Git observations during a broker cutover
+
+Git status may refresh an index through an optional `index.lock`, even when the
+caller only requests an observation. A fresh supervisor validates cached pack
+checkouts before serving work. Suspending dispatch alone does not prevent these
+startup writes or drain commands that already entered an order tick.
+
+For a reviewed user-supervisor cutover, the optional artifact
+`contrib/systemd/gascity-cache-readonly.conf` sets only
+`GIT_OPTIONAL_LOCKS=0`. Install its exact merged bytes as a regular, user-owned
+mode `0644` file at
+`$HOME/.config/systemd/user/<exact-supervisor-unit>.d/90-gas-city-cache-readonly.conf`
+only under the applicable configuration-transition authorization. The artifact
+does not install itself or select a unit. Preserve the exact preimage and
+unrelated settings, refuse symlinks or conflicting effective configuration, and
+bind the exact unit, artifact commit/digest, target, backup and rollback in the
+execution package. Never print unrelated environment values as evidence.
+
+This is **not a cache-write sandbox**: it suppresses optional Git refresh writes,
+not mandatory writes, access-time changes, or missing-cache materialization.
+HEAD and dirty-tree checks remain enabled. Retain independent cache-write
+containment and strict content/metadata postchecks wherever required by the
+operation. Run executor-side Git observations with the same setting.
+
+Adopt this configuration as a separate accepted phase, for both the old and new
+Core binary. One user-manager daemon reload makes the setting available at the
+already-planned broker restart; it does not change the old running process or
+authorize an additional restart. Validate exact effective configuration after
+reload and the selected environment value in the new process after restart.
+Keep all project rigs suspended, stop only the identified background reader's
+activation timer when authorized, and prove bounded natural completion of its
+current invocation and already-entered order commands before the strict cache
+baseline. Restore that timer's recorded semantic state at the reviewed safe
+checkpoint; no automatic city resume is implied.
+
+If configuration adoption fails before a broker restart, restore its exact
+preimage (including prior absence) and reload; the running process must remain
+unchanged. Once accepted, retain this configuration even if the broker restores
+the old binary: record **binary rollback with adopted configuration retained**,
+not restoration of the previous process environment. After a restart,
+removing the drop-in and reloading does not change an already-running process.
+Reverting that running environment requires a separately bounded, authorized
+service transition; never perform one implicitly. Preserve both the original
+configuration backup and the adopted configuration's acceptance evidence.
+
+This configuration-only artifact does not require rebuilding an already-reviewed
+Core binary when its complete executable build inputs are unchanged. Keep the
+binary's original signed source binding and runtime evidence distinct from the
+drop-in's signed source binding. Configuration-loader validation alone is not
+full supervisor-startup, live-adoption or worker-capability acceptance.
+
 Use a clean checkout at the reviewed commit. The standard build derives its
 timestamp from the commit and uses `-trimpath`:
 
