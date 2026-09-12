@@ -19,9 +19,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const metadataBwrapSHA = "52231e1caf55bcbc667b269f49c63599a6f7db4767ae6a039580d0ff853db712"
+const metadataBwrapSHA = "3672bf482fdf65ac5451528bde14c93a369da279f255209410695ca5f99b20dd"
 
-var metadataRuntimePaths = []string{"/usr/bin/bwrap", "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", "/usr/lib/x86_64-linux-gnu/libcap.so.2", "/usr/lib/x86_64-linux-gnu/libc.so.6", "/usr/lib/x86_64-linux-gnu/libselinux.so.1", "/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0"}
+var metadataRuntimePaths = []string{"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", "/usr/lib/x86_64-linux-gnu/libcap.so.2", "/usr/lib/x86_64-linux-gnu/libc.so.6", "/usr/lib/x86_64-linux-gnu/libselinux.so.1", "/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0"}
 
 func metadataContains(root, path string) bool {
 	return path == root || strings.HasPrefix(path, root+"/")
@@ -243,19 +243,32 @@ func metadataSandboxArgv(manifest Manifest) ([]string, error) {
 	if _, err := metadataProtectedChildren(manifest); err != nil {
 		return nil, err
 	}
+	if err := metadataValidateLinks(manifest); err != nil {
+		return nil, err
+	}
 	launch := manifest.Metadata
-	if len(launch.Runtime) != len(metadataRuntimePaths) {
+	if len(launch.Runtime) != len(metadataRuntimePaths)+1 {
 		return nil, fmt.Errorf("runtime closure differs")
 	}
-	for index, pin := range launch.Runtime {
+	for index, pin := range launch.Runtime[1:] {
 		if pin.Path != metadataRuntimePaths[index] {
 			return nil, fmt.Errorf("runtime path differs")
 		}
 	}
-	if launch.Runtime[0].SHA256 != metadataBwrapSHA {
+	setup := launch.Runtime[0]
+	if setup.SHA256 != metadataBwrapSHA || setup.Mode != 0o755 || !filepath.IsAbs(setup.Path) || filepath.Clean(setup.Path) != setup.Path {
 		return nil, fmt.Errorf("bwrap identity differs")
 	}
-	args := []string{metadataRuntimePaths[1], "--inhibit-cache", "--glibc-hwcaps-mask", "", "--library-path", "/usr/lib/x86_64-linux-gnu", "/usr/bin/bwrap", "--unshare-user", "--unshare-pid", "--as-pid-1", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--clearenv", "--setenv", "GODEBUG", "containermaxprocs=0", "--setenv", "GC_HOME", launch.GCHome, "--setenv", "HOME", "/nonexistent", "--setenv", "PATH", "/usr/bin:/bin", "--ro-bind", launch.Writer.Path, "/metadata-writer"}
+	setupBound := false
+	for _, pin := range launch.Inputs {
+		if pin == setup {
+			setupBound = true
+		}
+	}
+	if !setupBound {
+		return nil, fmt.Errorf("bwrap missing from exact readonly input closure")
+	}
+	args := []string{metadataRuntimePaths[0], "--inhibit-cache", "--glibc-hwcaps-mask", "", "--library-path", "/usr/lib/x86_64-linux-gnu", setup.Path, "--unshare-user", "--unshare-pid", "--as-pid-1", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--clearenv", "--setenv", "GODEBUG", "containermaxprocs=0", "--setenv", "GC_HOME", launch.GCHome, "--setenv", "HOME", "/nonexistent", "--setenv", "PATH", "/usr/bin:/bin", "--ro-bind", launch.Writer.Path, "/metadata-writer"}
 	seen := map[string]bool{}
 	for _, pin := range append(append([]FilePin{}, launch.Inputs...), launch.Trees...) {
 		for _, forbidden := range []string{"/proc", "/sys", "/dev", "/run"} {
@@ -305,7 +318,7 @@ func metadataSandboxArgv(manifest Manifest) ([]string, error) {
 	for _, tree := range launch.ProtectedTrees {
 		args = append(args, "--ro-bind", tree.Pin.Path, tree.Pin.Path)
 	}
-	args = append(args, "--proc", "/proc", "--remount-ro", "/proc", "--remount-ro", "/", "--chdir", launch.Evidence, "--", "/metadata-writer", "__metadata-writer-v1")
+	args = append(args, "--ro-bind-null", "--ro-bind-urandom", "--proc", "/proc", "--remount-ro", "/proc", "--remount-ro", "/", "--chdir", launch.Evidence, "--", "/metadata-writer", "__metadata-writer-v1")
 	return args, nil
 }
 
@@ -313,6 +326,9 @@ func validateMetadataInputs(manifest Manifest, host bool) (returnErr error) {
 	launch := manifest.Metadata
 	if launch == nil {
 		return fmt.Errorf("missing metadata launch")
+	}
+	if err := metadataCheckNullDevice(host); err != nil {
+		return err
 	}
 	if err := metadataCheckParents(manifest); err != nil {
 		return err
@@ -335,15 +351,8 @@ func validateMetadataInputs(manifest Manifest, host bool) (returnErr error) {
 			return fmt.Errorf("frozen absence changed: %s", path)
 		}
 	}
-	for _, link := range launch.Links {
-		target, err := os.Readlink(link.Path)
-		if err != nil || target != link.Target {
-			return fmt.Errorf("metadata symlink drift")
-		}
-		resolved, err := filepath.EvalSymlinks(link.Path)
-		if err != nil || !metadataReadCovered(launch, resolved) {
-			return fmt.Errorf("metadata symlink escapes input closure")
-		}
+	if err := metadataValidateLinks(manifest); err != nil {
+		return err
 	}
 	cache := filepath.Join(launch.GCHome, "cache", "repos")
 	found := false
@@ -367,6 +376,12 @@ func validateMetadataInputs(manifest Manifest, host bool) (returnErr error) {
 		return fmt.Errorf("host/writer import graph digest differs")
 	}
 	if host {
+		if len(launch.Runtime) != len(metadataRuntimePaths)+1 {
+			return fmt.Errorf("runtime closure differs")
+		}
+		if err := metadataCheckSetupFile(launch.Runtime[0]); err != nil {
+			return err
+		}
 		for _, pin := range launch.Runtime {
 			if err := metadataCheckRuntimePin(pin, launch); err != nil {
 				return err
@@ -496,7 +511,13 @@ func (input metadataInputFS) allowed(path string) error {
 	}
 	for _, link := range input.launch.Links {
 		if link.Path == path {
-			return nil
+			resolved, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return err
+			}
+			if metadataReadCovered(input.launch, resolved) {
+				return nil
+			}
 		}
 	}
 	for _, absent := range input.launch.Absent {

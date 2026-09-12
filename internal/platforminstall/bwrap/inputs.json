@@ -1,0 +1,148 @@
+{
+  "schema": "gc.metadata-bwrap-build.v1",
+  "upstream_version": "0.9.0",
+  "ubuntu_version": "0.9.0-1ubuntu0.1",
+  "patched_source_sha256": "d00133e35d6b8d576ba8fb7551273cfa66d994f93f1f40f7b9f87a111e370e05",
+  "artifact_sha256": "3672bf482fdf65ac5451528bde14c93a369da279f255209410695ca5f99b20dd",
+  "source_archives": [
+    {
+      "filename": "bubblewrap_0.9.0.orig.tar.xz",
+      "sha256": "c6347eaced49ac0141996f46bba3b089e5e6ea4408bc1c43bab9f2d05dd094e1"
+    },
+    {
+      "filename": "bubblewrap_0.9.0-1ubuntu0.1.debian.tar.xz",
+      "sha256": "d253eccba8f6a8d636dd3df241c2d4d722785341c665c7817040aafa7ed3495e"
+    }
+  ],
+  "packages": [
+    {
+      "depends": "python3:any (>= 3.7~), ninja-build (>= 1.6), python3-pkg-resources, python3-setuptools",
+      "filename": "meson_1.3.2-1ubuntu1_all.deb",
+      "package": "meson",
+      "sha256": "5a9ab497255cc51f97866c359fc5cc75a1be4890ad376e471ca45d76bbea4803",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/universe/m/meson/meson_1.3.2-1ubuntu1_all.deb",
+      "version": "1.3.2-1ubuntu1"
+    },
+    {
+      "depends": "libc6 (>= 2.38), libstdc++6 (>= 13.1)",
+      "filename": "ninja-build_1.11.1-2_amd64.deb",
+      "package": "ninja-build",
+      "sha256": "6a17f76a0f75586f1292f6c61a9b07fd0dec963baf6a102b17673f601c6b323a",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/universe/n/ninja-build/ninja-build_1.11.1-2_amd64.deb",
+      "version": "1.11.1-2"
+    },
+    {
+      "depends": "pkgconf-bin",
+      "filename": "pkgconf_1.8.1-2build1_amd64.deb",
+      "package": "pkgconf",
+      "sha256": "834a58031069d97d7cfb8b2f5bfd5effc69cecf7f30cc362071875f1f8dc1828",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/p/pkgconf/pkgconf_1.8.1-2build1_amd64.deb",
+      "version": "1.8.1-2build1"
+    },
+    {
+      "depends": "libc6 (>= 2.34), libpkgconf3 (>= 1.8.0)",
+      "filename": "pkgconf-bin_1.8.1-2build1_amd64.deb",
+      "package": "pkgconf-bin",
+      "sha256": "7a812f05ee1610154b433e2ad54f6e4163fcbb306b9fb31afe959afb2e5e1545",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/p/pkgconf/pkgconf-bin_1.8.1-2build1_amd64.deb",
+      "version": "1.8.1-2build1"
+    },
+    {
+      "depends": "libc6 (>= 2.38)",
+      "filename": "libpkgconf3_1.8.1-2build1_amd64.deb",
+      "package": "libpkgconf3",
+      "sha256": "fc3a57e8f931ec06cb7c51acc56878f1fec247ff02a7adcab26905c2faeb2792",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/p/pkgconf/libpkgconf3_1.8.1-2build1_amd64.deb",
+      "version": "1.8.1-2build1"
+    },
+    {
+      "depends": "libcap2 (= 1:2.66-5ubuntu2.4), libc6 (>= 2.34)",
+      "filename": "libcap-dev_2.66-5ubuntu2.4_amd64.deb",
+      "package": "libcap-dev",
+      "sha256": "07f2462867569a2119a2ad0f1593232663f2d1612b791c230d22a8d73a15abee",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libc/libcap2/libcap-dev_2.66-5ubuntu2.4_amd64.deb",
+      "version": "1:2.66-5ubuntu2.4"
+    },
+    {
+      "depends": "libc6 (>= 2.38)",
+      "filename": "libcap2_2.66-5ubuntu2.4_amd64.deb",
+      "package": "libcap2",
+      "sha256": "23c627c77c66552a658e62852f244f4946dc543898e0ec5428d5dc6bffde2d6a",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libc/libcap2/libcap2_2.66-5ubuntu2.4_amd64.deb",
+      "version": "1:2.66-5ubuntu2.4"
+    },
+    {
+      "depends": "libselinux1 (= 3.5-2ubuntu2.1), libsepol-dev (>= 3.5), libpcre2-dev",
+      "filename": "libselinux1-dev_3.5-2ubuntu2.1_amd64.deb",
+      "package": "libselinux1-dev",
+      "sha256": "2cc37cb9251f49a11f9c34bc8605c2aace8ded76f50b951ad28ded42d6ab3f68",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libs/libselinux/libselinux1-dev_3.5-2ubuntu2.1_amd64.deb",
+      "version": "3.5-2ubuntu2.1"
+    },
+    {
+      "depends": "libc6 (>= 2.38), libpcre2-8-0 (>= 10.22)",
+      "filename": "libselinux1_3.5-2ubuntu2.1_amd64.deb",
+      "package": "libselinux1",
+      "sha256": "6abaa6c26f46ef17764c4a753e0e84de1cdadde5634fd2987621fdc617988d19",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libs/libselinux/libselinux1_3.5-2ubuntu2.1_amd64.deb",
+      "version": "3.5-2ubuntu2.1"
+    },
+    {
+      "depends": "libsepol2 (= 3.5-2build1)",
+      "filename": "libsepol-dev_3.5-2build1_amd64.deb",
+      "package": "libsepol-dev",
+      "sha256": "85e47c1d7bcccbc059ea99d4c379659236f63b1716af8d796072875d418402bf",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libs/libsepol/libsepol-dev_3.5-2build1_amd64.deb",
+      "version": "3.5-2build1"
+    },
+    {
+      "depends": "libc6 (>= 2.38)",
+      "filename": "libsepol2_3.5-2build1_amd64.deb",
+      "package": "libsepol2",
+      "sha256": "47272bab0c2fcc350431f9a8ae63afc49ce6d7e71e63c914639fbda6b1ca9f6a",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libs/libsepol/libsepol2_3.5-2build1_amd64.deb",
+      "version": "3.5-2build1"
+    },
+    {
+      "depends": "libc-dev, libpcre2-8-0 (= 10.42-4ubuntu2.1), libpcre2-16-0 (= 10.42-4ubuntu2.1), libpcre2-32-0 (= 10.42-4ubuntu2.1), libpcre2-posix3 (= 10.42-4ubuntu2.1)",
+      "filename": "libpcre2-dev_10.42-4ubuntu2.1_amd64.deb",
+      "package": "libpcre2-dev",
+      "sha256": "933ac2723142126b6e01b588803dc6fa15a26205468524548e14af3cd48027e9",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/p/pcre2/libpcre2-dev_10.42-4ubuntu2.1_amd64.deb",
+      "version": "10.42-4ubuntu2.1"
+    },
+    {
+      "depends": "libc6 (>= 2.34)",
+      "filename": "libpcre2-8-0_10.42-4ubuntu2.1_amd64.deb",
+      "package": "libpcre2-8-0",
+      "sha256": "110a797a57673d3ee497a141cf988199258058c57525799c63194d81822529a0",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/p/pcre2/libpcre2-8-0_10.42-4ubuntu2.1_amd64.deb",
+      "version": "10.42-4ubuntu2.1"
+    },
+    {
+      "depends": "libc6 (>= 2.34)",
+      "filename": "libpcre2-16-0_10.42-4ubuntu2.1_amd64.deb",
+      "package": "libpcre2-16-0",
+      "sha256": "06bba768fd16e6ea6f744114a0c500d9f5d98ee82630edf0d8a54f2175d3921b",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/p/pcre2/libpcre2-16-0_10.42-4ubuntu2.1_amd64.deb",
+      "version": "10.42-4ubuntu2.1"
+    },
+    {
+      "depends": "libc6 (>= 2.34)",
+      "filename": "libpcre2-32-0_10.42-4ubuntu2.1_amd64.deb",
+      "package": "libpcre2-32-0",
+      "sha256": "30f899441a422ae478426cc29871223cc9e37ef10b758acf807df52b417bfc5f",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/p/pcre2/libpcre2-32-0_10.42-4ubuntu2.1_amd64.deb",
+      "version": "10.42-4ubuntu2.1"
+    },
+    {
+      "depends": "libc6 (>= 2.4), libpcre2-8-0 (>= 10.22)",
+      "filename": "libpcre2-posix3_10.42-4ubuntu2.1_amd64.deb",
+      "package": "libpcre2-posix3",
+      "sha256": "8660cea205a97cf6a97a5b7a0d601c2549f6d44d5083417eb2bbfcb9f137ee5f",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/p/pcre2/libpcre2-posix3_10.42-4ubuntu2.1_amd64.deb",
+      "version": "10.42-4ubuntu2.1"
+    }
+  ],
+  "compiler": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26"
+}

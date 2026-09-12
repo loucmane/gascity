@@ -22,11 +22,11 @@ func metadataContractFixture(t *testing.T) Manifest {
 	manifest.Schema = MetadataManifestSchema
 	manifest.Activation = &ActivationSpec{ExpectedCommit: strings.Repeat("a", 40), ExpectedVersion: "version", PreviousCommit: strings.Repeat("b", 40), PreviousVersion: "old"}
 	manifest.Metadata = &MetadataLaunch{Transaction: strings.Repeat("a", 64), Attempt: strings.Repeat("b", 64), Host: MetadataHost{PID: 42, Boot: "boot", Start: "123", Executable: "/fixture/gc", Address: "127.0.0.1:4400", Listener: "123", City: "fixture"}, Namespaces: map[string]string{"user": "u", "pid": "p", "mnt": "m", "net": "n", "ipc": "i", "time": "t"}, Writer: FilePin{Path: "/fixture/writer", SHA256: strings.Repeat("c", 64)}, GCHome: "/fixture/home", CacheSHA256: strings.Repeat("d", 64), ImportsSHA256: sha256Hex([]byte("{}")), Evidence: "/fixture/evidence", Parents: []MetadataParent{{Path: "/fixture/evidence"}}, Inputs: []FilePin{{Path: "/fixture/config", SHA256: strings.Repeat("e", 64)}}, Trees: []FilePin{{Path: "/fixture/home/cache/repos", SHA256: strings.Repeat("d", 64)}}}
-	for index, path := range metadataRuntimePaths {
+	setup := FilePin{Path: "/fixture/bwrap", Mode: 0o755, SHA256: metadataBwrapSHA}
+	manifest.Metadata.Runtime = append(manifest.Metadata.Runtime, setup)
+	manifest.Metadata.Inputs = append(manifest.Metadata.Inputs, setup)
+	for _, path := range metadataRuntimePaths {
 		pin := FilePin{Path: path, SHA256: strings.Repeat("f", 64)}
-		if index == 0 {
-			pin.SHA256 = metadataBwrapSHA
-		}
 		manifest.Metadata.Runtime = append(manifest.Metadata.Runtime, pin)
 	}
 	for _, path := range metadataOutputs(manifest) {

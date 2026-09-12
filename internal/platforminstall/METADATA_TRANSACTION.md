@@ -110,6 +110,16 @@ names/values are required, and `/proc/self/cwd` must independently equal that
 directory. No inherited override is admitted. A calling Go runtime retaining an unrelated cgroup fd is
 refused; a reviewed launch must select its runtime setting before Go initialization.
 
+Exact directory aliases needed by dynamic helpers (for example `/lib -> usr/lib`
+or a provider's `current` symlink) may refer to synthetic projection directories
+containing explicit, canonical read-only file pins. This adds **no host directory
+mount** and grants no general import-directory reads: `metadataInputFS` still
+requires a covered resolved file/tree. Every link's exact text and component-wise
+projected resolution must match both the real host and W. Undeclared intermediate
+aliases, nested link materialization, mount shadowing, cycles, and overlap with
+writable parents, protected siblings or host authority paths refuse. Existing
+file/tree pins, closed loader environment, confinement and deadlines are unchanged.
+
 Transaction context is 30s; channel deadlines 25s; nonrenewing mutation lease 28s with
 at least a 2s commit margin. Version output is bounded to 8192 bytes, integrity
 helper streams to 1MiB each and helper execution to 5s. Protocol frames and import
@@ -215,6 +225,45 @@ binary hash remain release-review evidence: the guard is not a cryptographic
 attestation against malicious rebuilds or a substitute for source-to-binary review.
 
 ## Historical source-stage acceptance inventory
+
+### Fixed helper null device
+
+Git's unchanged inspection helper requires `/dev/null` (including its hermetic
+configuration and hooks arguments). Claude's pinned Bun runtime also requires
+read access to `/dev/urandom` even for `--version`. W exposes those two fixed
+devices using zero-argument `--ro-bind-null` and `--ro-bind-urandom` before sealing
+its root. Null I/O is allowed; entropy write opens and inode changes are not.
+
+The `bwrap/` recipe and patch retain ordinary mount behavior; the fixed operation
+combines readonly and device-enabled flags without clearing inherited restrictions.
+The setup artifact may reside at a reviewed canonical owned path, but its SHA is
+compiled into Core and its exact 0755, non-aliased regular-file pin must appear in
+the readonly input closure. File capabilities are refused. Runtime[0] supplies the
+actual pinned-loader argument; the other five runtime paths remain exact. There is
+no system bwrap replacement or arbitrary executable/path fallback.
+No host `/dev` tree is mounted; generic `/dev` inputs, trees and links remain
+forbidden. Host validation requires a canonical non-symlink root-owned character
+device 1:3 with exact0666 mode and one link. W rechecks type/rdev/mode/link count,
+non-caller ownership, readonly device-enabled mount and readonly synthetic parent
+containing exactly `null` and `urandom`. Entropy has the same ownership/mode/link
+contract with character device1:9. W does not infer host root identity from an overflow UID:
+the host check and exact pinned launch projection supply that binding. All existing
+namespace, capabilities, no-new-privileges and cache protections are unchanged.
+
+The entropy option requires Landlock ABI>=3 in the single-threaded C setup,
+after final mounts and before exec. WRITE_FILE/TRUNCATE grants cover only exact
+canonical final writable binds and null. MAKE_CHAR/MAKE_BLOCK remain denied;
+all syscall failures stop execution and no policy FD leaks into the workload.
+Readonly mounts remain essential: Landlock's write-open control alone does not
+cover arbitrary inode metadata or device ioctls. Privileged random ioctls must
+refuse under the all-zero capability contract. No new capability or root is used.
+
+The real-helper fixture must prove null O_RDWR/EOF/discarded-write behavior,
+metadata-mutation refusal, unrelated-device absence and the literal Git/provider
+inspections. It also proves entropy reads and denied write opens in parent and
+exec descendant, exact EACCES/EPERM for device-creation refusal, and same-parent
+publication/rename-back. That is not full transactional rollback acceptance.
+Source tests alone do not establish this kernel behavior.
 
 The following inventory records the continuation6 source-stage obligations,
 before the compositional review and R7 positive. It is preserved to distinguish

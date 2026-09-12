@@ -1,0 +1,218 @@
+--- a/bubblewrap.c
++++ b/bubblewrap.c
+@@ -33,7 +33,9 @@
+ #include <sys/capability.h>
+ #include <sys/prctl.h>
+ #include <sys/sysmacros.h>
++#include <sys/syscall.h>
+ #include <linux/sched.h>
++#include <linux/landlock.h>
+ #include <linux/seccomp.h>
+ #include <linux/filter.h>
+
+@@ -86,6 +88,7 @@
+ static bool opt_unshare_cgroup = FALSE;
+ static bool opt_unshare_cgroup_try = FALSE;
+ static bool opt_needs_devpts = FALSE;
++static bool opt_readonly_entropy = FALSE;
+ static bool opt_new_session = FALSE;
+ static bool opt_die_with_parent = FALSE;
+ static uid_t opt_sandbox_uid = -1;
+@@ -133,6 +136,7 @@
+   SETUP_RO_BIND_MOUNT,
+   SETUP_DEV_BIND_MOUNT,
+   SETUP_RO_BIND_NULL,
++  SETUP_RO_BIND_ENTROPY,
+   SETUP_MOUNT_PROC,
+   SETUP_MOUNT_DEV,
+   SETUP_MOUNT_TMPFS,
+@@ -228,6 +232,116 @@
+
+ DEFINE_LINKED_LIST (SetupOp, op)
+
++/* Host identity and namespace non-ownership are distinct checks. Host root
++ * is normally unmapped in our private user namespace; never hardcode the
++ * kernel's overflow IDs as if they were host ownership. */
++static bool
++entropy_identity_matches (const struct stat *st, bool host,
++                          uid_t caller_uid, gid_t caller_gid)
++{
++  if (!S_ISCHR (st->st_mode) || st->st_rdev != makedev (1, 9) ||
++      (st->st_mode & 07777) != 0666 || st->st_nlink != 1)
++    return FALSE;
++  if (host)
++    return st->st_uid == 0 && st->st_gid == 0;
++  return st->st_uid != caller_uid && st->st_gid != caller_gid;
++}
++
++static void
++verify_host_entropy (void)
++{
++  struct stat st;
++  char *canonical;
++  if (!opt_readonly_entropy)
++    return;
++  canonical = realpath ("/dev/urandom", NULL);
++  if (canonical == NULL || strcmp (canonical, "/dev/urandom") != 0)
++    die ("Fixed host entropy path is not canonical");
++  free (canonical);
++  if (lstat ("/dev/urandom", &st) != 0)
++    die_with_error ("Can't stat fixed host entropy source");
++  if (!entropy_identity_matches (&st, TRUE, real_uid, real_gid))
++    die ("Fixed host entropy source identity differs");
++}
++
++
++/* This is an additional write-open guard, not a replacement for readonly
++ * mount/inode protection. It runs after final mount topology, single-threaded,
++ * before any workload exec. No writable entropy descriptor is ever opened.
++ */
++static void
++entropy_allow_write (int ruleset, const char *path, bool null_device)
++{
++  struct landlock_path_beneath_attr rule = {
++    .allowed_access = LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_TRUNCATE,
++  };
++  struct stat st;
++  char *canonical = realpath (path, NULL);
++  if (canonical == NULL || strcmp (canonical, path) != 0)
++    die ("Noncanonical entropy write grant");
++  free (canonical);
++  if (!null_device && (strcmp (path, "/") == 0 || strcmp (path, "/dev") == 0 ||
++                       strncmp (path, "/dev/", 5) == 0))
++    die ("Entropy write grant overlaps device authority");
++  rule.parent_fd = open (path, O_PATH | O_NOFOLLOW | O_CLOEXEC);
++  if (rule.parent_fd < 0 || fstat (rule.parent_fd, &st) != 0)
++    die_with_error ("Can't bind entropy write grant");
++  if (null_device)
++    {
++      if (!S_ISCHR (st.st_mode) || st.st_rdev != makedev (1, 3))
++        die ("Entropy null grant identity differs");
++    }
++  else if (!S_ISDIR (st.st_mode) && !S_ISREG (st.st_mode))
++    die ("Entropy output grant is not a file or directory");
++  if (syscall (__NR_landlock_add_rule, ruleset, LANDLOCK_RULE_PATH_BENEATH, &rule, 0) != 0)
++    die_with_error ("Can't add mandatory entropy write rule");
++  if (close (rule.parent_fd) != 0)
++    die_with_error ("Can't close entropy rule descriptor");
++}
++
++static void
++restrict_entropy_writes (void)
++{
++  struct landlock_ruleset_attr attr = {
++    .handled_access_fs = LANDLOCK_ACCESS_FS_WRITE_FILE |
++                         LANDLOCK_ACCESS_FS_TRUNCATE |
++                         LANDLOCK_ACCESS_FS_MAKE_CHAR |
++                         LANDLOCK_ACCESS_FS_MAKE_BLOCK,
++  };
++  SetupOp *op;
++  int ruleset;
++
++  if (!opt_readonly_entropy)
++    return;
++  if (prctl (PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) != 1)
++    die ("Entropy write confinement requires no_new_privs");
++  if (syscall (__NR_landlock_create_ruleset, NULL, 0, LANDLOCK_CREATE_RULESET_VERSION) < 3)
++    die ("Entropy write confinement requires Landlock ABI >= 3");
++  ruleset = syscall (__NR_landlock_create_ruleset, &attr, sizeof (attr), 0);
++  if (ruleset < 0)
++    die_with_error ("Can't create mandatory entropy write ruleset");
++  for (op = ops; op != NULL; op = op->next)
++    {
++      if (op->type == SETUP_BIND_MOUNT)
++        {
++          if (op->flags != 0)
++            die ("Conditional entropy write grant refused");
++          entropy_allow_write (ruleset, op->dest, FALSE);
++        }
++      else if (op->type == SETUP_DEV_BIND_MOUNT ||
++               op->type == SETUP_MOUNT_DEV ||
++               op->type == SETUP_MOUNT_TMPFS ||
++               op->type == SETUP_MOUNT_MQUEUE ||
++               op->type == SETUP_MAKE_BIND_FILE)
++        die ("Unexpected writable entropy topology");
++    }
++  entropy_allow_write (ruleset, "/dev/null", TRUE);
++  if (syscall (__NR_landlock_restrict_self, ruleset, 0) != 0)
++    die_with_error ("Can't enforce mandatory entropy write confinement");
++  if (close (ruleset) != 0)
++    die_with_error ("Can't close entropy ruleset descriptor");
++}
++
+ static SetupOp *
+ setup_op_new (SetupOpType type)
+ {
+@@ -342,6 +456,7 @@
+            "    --dev-bind SRC DEST          Bind mount the host path SRC on DEST, allowing device access\n"
+            "    --dev-bind-try SRC DEST      Equal to --dev-bind but ignores non-existent SRC\n"
+            "    --ro-bind-null               Bind only /dev/null readonly with device access\n"
++           "    --ro-bind-urandom            Fixed /dev/urandom with mandatory write confinement\n"
+            "    --ro-bind SRC DEST           Bind mount the host path SRC readonly on DEST\n"
+            "    --ro-bind-try SRC DEST       Equal to --ro-bind but ignores non-existent SRC\n"
+            "    --bind-fd FD DEST            Bind open directory or path fd on DEST\n"
+@@ -1253,6 +1368,21 @@
+           }
+           break;
+
++        case SETUP_RO_BIND_ENTROPY:
++          {
++            struct stat st;
++
++            if (lstat (source, &st) != 0)
++              die_with_error ("Can't stat fixed /dev/urandom source");
++            if (!entropy_identity_matches (&st, FALSE, opt_sandbox_uid, opt_sandbox_gid))
++              die ("Fixed /dev/urandom source identity differs");
++            if (ensure_file (dest, 0444) != 0)
++              die_with_error ("Can't create fixed /dev/urandom target");
++            privileged_op (privileged_op_socket, PRIV_SEP_OP_BIND_MOUNT,
++                           BIND_READONLY | BIND_DEVICES, 0, 0, source, dest);
++          }
++          break;
++
+         case SETUP_REMOUNT_RO_NO_RECURSIVE:
+           privileged_op (privileged_op_socket,
+                          PRIV_SEP_OP_REMOUNT_RO_NO_RECURSIVE, 0, 0, 0, NULL, dest);
+@@ -1570,6 +1700,7 @@
+           break;
+
+         case SETUP_RO_BIND_NULL:
++        case SETUP_RO_BIND_ENTROPY:
+         case SETUP_MOUNT_PROC:
+         case SETUP_MOUNT_DEV:
+         case SETUP_MOUNT_TMPFS:
+@@ -1891,6 +2022,15 @@
+           op->source = "/dev/null";
+           op->dest = "/dev/null";
+         }
++      else if (strcmp (arg, "--ro-bind-urandom") == 0)
++        {
++          if (opt_readonly_entropy || (argc > 1 && argv[1][0] != '-'))
++            die ("--ro-bind-urandom requires exactly one zero-argument occurrence");
++          opt_readonly_entropy = TRUE;
++          op = setup_op_new (SETUP_RO_BIND_ENTROPY);
++          op->source = "/dev/urandom";
++          op->dest = "/dev/urandom";
++        }
+       else if (strcmp (arg, "--dev-bind") == 0 ||
+                strcmp (arg, "--dev-bind-try") == 0)
+         {
+@@ -2756,6 +2896,9 @@
+
+   parse_args (&argc, (const char ***) &argv);
+
++  /* Before setns/unshare: this is the actual host ownership assertion. */
++  verify_host_entropy ();
++
+   /* suck the args into a cleanup_free variable to control their lifecycle */
+   args_data = opt_args_data;
+   opt_args_data = NULL;
+@@ -3417,6 +3560,8 @@
+   if (!is_privileged)
+     set_ambient_capabilities ();
+
++  restrict_entropy_writes ();
++
+   /* Should be the last thing before execve() so that filters don't
+    * need to handle anything above */
+   seccomp_programs_apply ();
