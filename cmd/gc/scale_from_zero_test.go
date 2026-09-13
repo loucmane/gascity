@@ -27,6 +27,7 @@ func TestBuildDesiredState_ScaleFromZero_CrossRig(t *testing.T) {
 	maxSess := 5
 	minSess := 0
 	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
 		Agents: []config.Agent{
 			{
 				Name:              "planner",
@@ -47,7 +48,7 @@ func TestBuildDesiredState_ScaleFromZero_CrossRig(t *testing.T) {
 		},
 	}
 
-	cityStore := beads.NewMemStore()
+	cityStore := newConfiguredAttemptTestStore(t, tmpDir, tmpDir)
 	rigAStore := beads.NewMemStore()
 	rigStores := map[string]beads.Store{
 		"rig-A": rigAStore,
@@ -107,6 +108,7 @@ func TestBuildDesiredState_ScaleFromZero_ClampsWakeDemandToOne(t *testing.T) {
 	maxSess := 5
 	minSess := 0
 	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
 		Agents: []config.Agent{
 			{
 				Name:              "planner",
@@ -127,7 +129,7 @@ func TestBuildDesiredState_ScaleFromZero_ClampsWakeDemandToOne(t *testing.T) {
 		},
 	}
 
-	cityStore := beads.NewMemStore()
+	cityStore := newConfiguredAttemptTestStore(t, tmpDir, tmpDir)
 	rigAStore := beads.NewMemStore()
 	rigStores := map[string]beads.Store{
 		"rig-A": rigAStore,

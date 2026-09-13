@@ -189,6 +189,7 @@ func TestReconcileSessionBeads_DrainAckNoWorkFreesSlotAndReallocates(t *testing.
 				maxSess := 5
 				minSess := 0
 				cfg := &config.City{
+					Workspace: config.Workspace{Name: "test-city"},
 					Agents: []config.Agent{{
 						Name:              "worker",
 						MaxActiveSessions: &maxSess,
@@ -200,7 +201,7 @@ func TestReconcileSessionBeads_DrainAckNoWorkFreesSlotAndReallocates(t *testing.
 					Rigs:      []config.Rig{{Name: "rig-A", Path: rigPath}},
 					Providers: map[string]config.ProviderSpec{"mock": {Command: "true"}},
 				}
-				cityStore := beads.NewMemStore()
+				cityStore := newConfiguredAttemptTestStore(t, tmpDir, tmpDir)
 				rigStore := beads.NewMemStore()
 				rigStores := map[string]beads.Store{"rig-A": rigStore}
 				qualifiedName := "rig-A/worker"

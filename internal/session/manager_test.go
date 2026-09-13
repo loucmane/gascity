@@ -778,9 +778,10 @@ func TestRuntimeStartCallSitesCleanOrphansAndFenceIdentityFirst(t *testing.T) {
 	tests := []struct {
 		file   string
 		idExpr string
+		count  int
 	}{
-		{file: "manager.go", idExpr: "b.ID"},
-		{file: "chat.go", idExpr: "id"},
+		{file: "manager.go", idExpr: "b.ID", count: 1},
+		{file: "chat.go", idExpr: "id", count: 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -791,7 +792,10 @@ func TestRuntimeStartCallSitesCleanOrphansAndFenceIdentityFirst(t *testing.T) {
 			lines := strings.Split(string(data), "\n")
 			starts := 0
 			for i, line := range lines {
-				if !strings.Contains(line, "m.sp.Start(ctx, sessName, cfg)") {
+				if strings.Contains(line, "m.sp.Start(") {
+					t.Errorf("%s:%d bypasses native task-attempt boundary", tt.file, i+1)
+				}
+				if !strings.Contains(line, "m.startRuntime(ctx, "+tt.idExpr+", sessName, cfg)") {
 					continue
 				}
 				starts++
@@ -806,8 +810,8 @@ func TestRuntimeStartCallSitesCleanOrphansAndFenceIdentityFirst(t *testing.T) {
 					t.Errorf("%s:%d Start is not preceded by durable identity readiness using %s", tt.file, i+1, tt.idExpr)
 				}
 			}
-			if starts == 0 {
-				t.Fatalf("%s contains no m.sp.Start(ctx, sessName, cfg) call sites", tt.file)
+			if starts != tt.count {
+				t.Fatalf("%s contains %d guarded start sites, want %d", tt.file, starts, tt.count)
 			}
 		})
 	}

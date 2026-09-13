@@ -70,7 +70,7 @@ func TestBuildDesiredState_GenericRigScopedPoolRecoversRoutedUnassigned(t *testi
 		Providers: map[string]config.ProviderSpec{"mock": {Command: "true"}},
 	}
 	cityStore := beads.NewMemStore()
-	blogStore := beads.NewMemStore()
+	blogStore := newConfiguredAttemptTestStore(t, cityPath, blogPath)
 	gasCityStore := beads.NewMemStore()
 	if _, err := blogStore.Create(beads.Bead{
 		ID:       "blog-zcz",
@@ -143,7 +143,7 @@ func TestGenericRigScopedPool_RemainsAwakeFromRoutedDemandThroughClaim(t *testin
 		Providers: map[string]config.ProviderSpec{"mock": {Command: "true"}},
 	}
 	cityStore := beads.NewMemStore()
-	blogStore := beads.NewMemStore()
+	blogStore := newConfiguredAttemptTestStore(t, cityPath, blogPath)
 	work, err := blogStore.Create(beads.Bead{
 		ID:       "blog-zcz",
 		Title:    "Fullbleed implementation",

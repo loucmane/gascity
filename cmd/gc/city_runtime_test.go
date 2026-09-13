@@ -3952,7 +3952,8 @@ func TestControlDispatcherTickRepairsRigRouteAndRestartsRuntimeMissingDispatcher
 	t.Setenv(fsPressureThresholdEnv, "100")
 	cityPath := t.TempDir()
 	cityStore := beads.NewMemStore()
-	rigStore := beads.NewMemStore()
+	rigPath := t.TempDir()
+	rigStore := newConfiguredAttemptTestStore(t, cityPath, rigPath)
 	control, err := rigStore.Create(beads.Bead{
 		Title:  "Finalize rig workflow",
 		Type:   "task",
@@ -3969,7 +3970,7 @@ func TestControlDispatcherTickRepairsRigRouteAndRestartsRuntimeMissingDispatcher
 	maxActive := 1
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
-		Rigs:      []config.Rig{{Name: "fixture", Path: t.TempDir()}},
+		Rigs:      []config.Rig{{Name: "fixture", Path: rigPath}},
 		Agents: []config.Agent{
 			{
 				Name:              config.ControlDispatcherAgentName,

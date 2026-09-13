@@ -32,6 +32,7 @@ type FactoryConfig struct {
 	// a keyed start is probed for stale resume-key failure. Nil preserves the
 	// session package production timer.
 	StaleKeyDetectionWaiter sessionpkg.StaleKeyDetectionWaiter
+	AttemptWorkStore        sessionpkg.AttemptWorkStoreAccess
 	// Pricing estimates per-invocation cost for telemetry. Nil falls back
 	// to the registry built from shipped defaults.
 	Pricing *pricing.Registry
@@ -62,6 +63,9 @@ func NewFactory(cfg FactoryConfig) (*Factory, error) {
 	}
 	if cfg.StaleKeyDetectionWaiter != nil {
 		opts = append(opts, sessionpkg.WithStaleKeyDetectionWaiter(cfg.StaleKeyDetectionWaiter))
+	}
+	if cfg.AttemptWorkStore != nil {
+		opts = append(opts, sessionpkg.WithAttemptWorkStoreAccess(cfg.AttemptWorkStore))
 	}
 	manager := sessionpkg.NewManagerWithOptions(cfg.Store, cfg.Provider, opts...)
 	return newFactory(manager, cfg.Store, cfg.Provider, cfg.SearchPaths, cfg.Recorder, cfg.UsageSink, cfg.ResolveSessionRuntime, cfg.Pricing)

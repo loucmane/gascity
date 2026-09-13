@@ -127,6 +127,8 @@ const (
 	MaxAttemptsMetadataKey               = "gc.max_attempts"
 	MissingRootBeadIDMetadataKey         = "gc.missing_root_bead_id"
 	ModelMetadataKey                     = "gc.model"
+	NativeAttemptMetadataKey             = "gc.native_task_attempt"
+	NativeAttemptTokenMetadataKey        = "gc.native_task_attempt_token"
 	NextAttemptMetadataKey               = "gc.next_attempt"
 	OnExhaustedMetadataKey               = "gc.on_exhausted"
 	OnFailMetadataKey                    = "gc.on_fail"
@@ -373,6 +375,8 @@ var KnownMetadataKeys = []string{
 	MaxAttemptsMetadataKey,
 	MissingRootBeadIDMetadataKey,
 	ModelMetadataKey,
+	NativeAttemptMetadataKey,
+	NativeAttemptTokenMetadataKey,
 	NextAttemptMetadataKey,
 	OnExhaustedMetadataKey,
 	OnFailMetadataKey,

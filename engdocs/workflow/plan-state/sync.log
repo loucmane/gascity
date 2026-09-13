@@ -784,5 +784,233 @@
     "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
     "tracker_hash": "7a9de8cbc5e9fee77c7ed2816c6a3d194d7cd2cbde829e3b607e6611cd3072de",
     "synced_at": "2026-09-12T13:06:27.462039+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "ce47818359388933081fba7039b231a6691aaf2d93d4891c8c804547f1b6b913",
+    "synced_at": "2026-09-12T14:59:13.019582+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "05d996d16aef3ecef4e521fc27791891ac685db50f5bbfc0a14edc41f06cbb6b",
+    "synced_at": "2026-09-12T15:32:29.264893+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "32e57ec3dbbeab63f8dc45b24d373499a05c89182e71a8b609e50a507036c188",
+    "synced_at": "2026-09-12T17:21:22.717060+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "1a22d51412a67dd3cdd32747b7a99fb0c1d2af9b1c2bd7a8100e9cec3c034992",
+    "synced_at": "2026-09-12T19:16:18.494469+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "605ab1527d7f49ff78366d085f0a85fd0c248c8cf564f2ce562a31062870c523",
+    "synced_at": "2026-09-12T20:10:37.578901+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "1542b67c733b9e81a25f375f963b6bdea073c1845ec4bbc9bbff1e5c0618683e",
+    "synced_at": "2026-09-12T20:42:24.443961+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "a479969958b255f677ce9aa4625dcadfaaa77160fb01e7a745eafd3bec5b28a5",
+    "synced_at": "2026-09-12T21:27:45.754604+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "575fd918606042d5fcead51327cf8aa93acc5e662916ea8c59f7c4430e8e8769",
+    "synced_at": "2026-09-12T23:33:28.696729+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "669a939a80827f3015115c21ab2d59978efc1f825ccfe537b90a82a58c794080",
+    "synced_at": "2026-09-13T00:07:56.978122+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "dd1dfa8e4979722dd830962a335f8dc4d8f270f23bd3369470cf9efd55e5f5aa",
+    "synced_at": "2026-09-13T00:21:45.732431+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "accfdbc34f260c1fba650f7ca46eb11d83f9fe74268f5622686c94b0aab222c7",
+    "synced_at": "2026-09-13T01:08:51.849574+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3be6d7253050c27730c515032058e23925044978d7993031aa6797cfb07cd6c8",
+    "tracker_hash": "76ad8f561284f33e239f9c1c4f1523679e524b6e8006d3451329208ced024a8d",
+    "synced_at": "2026-09-13T01:22:02.988115+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "ca2be4171aadbc61141f4510b233985da9d19e74b8cb2bb6310c5a5d4186670d",
+    "tracker_hash": "20a4afa40575033a60137f699717f9e09b63b75060410693b4724d4809e1ef96",
+    "synced_at": "2026-09-13T01:36:04.932993+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "ca2be4171aadbc61141f4510b233985da9d19e74b8cb2bb6310c5a5d4186670d",
+    "tracker_hash": "d20ddf94623950a0efad4380befdd8010e60b422e80b5a75984b1ecfd891d8f0",
+    "synced_at": "2026-09-13T02:18:39.209247+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "daa80717a8efc78f52ed7fdbd3fca661268a7301f3653a4e49ede5b252907e1b",
+    "tracker_hash": "94aa762a4251ef58b99fe20b4488e83d2de83c9f7f3f27a1c54c0d150b8e4e6f",
+    "synced_at": "2026-09-13T02:51:20.114597+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "c78edb577126fdc1912193631de5adb3b96a79a9d09d7bef89e6a8a87fa194da",
+    "tracker_hash": "6664fa752a34ab643bb3aef7ca0781e7783b464b7c4007162fa2aa88bf71554c",
+    "synced_at": "2026-09-13T03:27:31.167357+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "8372f7948d610913e040b2f3927d852817f2b090ed166ae880337a0063ebde96",
+    "tracker_hash": "d0e2af969dfc42824b0f4227a6f9cf77087d2d4bba79ed02db6a05090599f0e3",
+    "synced_at": "2026-09-13T03:54:02.105499+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "417c30b4eab0e138bf0a14db0d9272f155ee307c7dfaac25417ffbf5d316993c",
+    "tracker_hash": "bbe60acb54647922407b1211e178910459b055400fe2a0bcb1a73e713a5e5dfc",
+    "synced_at": "2026-09-13T04:10:06.315673+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "ec7a5794dc447a5b859e02318f3bdf0ed5ec5798c8050d2b8dc11a2218aeb1f4",
+    "tracker_hash": "09c74f7c47d2ec836f9a4fdc96292cebef7b3aed18cc7e848d43eab067aac078",
+    "synced_at": "2026-09-13T04:44:01.894147+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "c9d72f2be0462739087b577c5d7c1233d163dc1cca5fe9fd9f0943cb03852017",
+    "tracker_hash": "533d372eb4f9ac0fba8a44d9a0466c418594d4a83b2862660edd21a9c71b1ce6",
+    "synced_at": "2026-09-13T05:12:33.910484+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "0522bab9541f33ccb72a3c0f88687ed235687161c968ab8eff4d67d01cfbea95",
+    "tracker_hash": "4a78f99a63bf4e7f4904c3ffb8d15d22b16612d2262e11dd4af51b4ff6b0acb2",
+    "synced_at": "2026-09-13T05:33:36.775808+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "3ebb60afed647daee3f31254b22a818966f1c4a572b2ce720aef01f655dd1dc0",
+    "synced_at": "2026-09-13T06:49:04.625155+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "3ebb60afed647daee3f31254b22a818966f1c4a572b2ce720aef01f655dd1dc0",
+    "synced_at": "2026-09-13T06:58:22.132141+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "b48c87a74bc3ea0ba460b0c8d8e8bc7cc6557fd2135ff64b4e7880133e5a4de5",
+    "synced_at": "2026-09-13T07:09:17.805151+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "0645cd7d033b5cf306be71a2791fdb351bccc807f59c8ea75f364d66509b6787",
+    "synced_at": "2026-09-13T07:50:16.842569+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "099d1fd389662aa418bd270013b0760b124e1a2957463710c6b978bd06d3dd11",
+    "synced_at": "2026-09-13T08:21:52.240852+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "61ece0d59c902ba1c19058b9f5f0b5c27a325b2ed198195fe7c0b5ee586ea6da",
+    "synced_at": "2026-09-13T08:48:02.555731+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "604e08b386d1eb6e4c8e1d424630d8c04cb7f2fe9f4979bfe668dd772caf22e3",
+    "synced_at": "2026-09-13T09:23:25.099063+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "cddc6d03d00519c3c1fb8b3f56b6c18da63f3f46d555add5f80f5263a0a647a8",
+    "synced_at": "2026-09-13T10:46:10.413477+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "6d7d8c609939dd78438f327dda31e2cc563b05b8b61e59a0c3175dfe482bb3cc",
+    "synced_at": "2026-09-13T11:23:46.635880+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "c534359c168b4e98a5a970969b6c3cd14d7c75c18eb11d42c3bb40fb3d57c5f5",
+    "synced_at": "2026-09-13T11:42:51.248893+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "15f60bc60d16cc233c63ebe2c520370ea2ff5370966c5c63837beb8d3fc07086",
+    "synced_at": "2026-09-13T12:58:31.995597+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "aa07ed83f062df178e3ab8c443a46b9150c096d89899ebb23f7a644b0f94da86",
+    "synced_at": "2026-09-13T13:40:16.205197+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "177cf606140d0a907657eebc713c33bc6caa7a1d4e1c69698e4e53a4b6fc86e9",
+    "tracker_hash": "aa07ed83f062df178e3ab8c443a46b9150c096d89899ebb23f7a644b0f94da86",
+    "synced_at": "2026-09-13T14:09:10.262106+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "3b738e62e741de13ccbe039a48b0d2f20213bb828ac1271ccf3589a5247f0ab9",
+    "tracker_hash": "245417699c711549cfe5f3e38ab214cd6803114a43dadcd5d6d260e29dd5c76b",
+    "synced_at": "2026-09-13T22:15:11.015825+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "204278c4df1e80ca04774aaed355a5cc93d25ecbf2b3d9a705b62b8a6c396426",
+    "tracker_hash": "14a4de5431c920bf186002f476db9aa9258b46a6497f747c5730c7f031de388e",
+    "synced_at": "2026-09-13T22:35:16.026104+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "204278c4df1e80ca04774aaed355a5cc93d25ecbf2b3d9a705b62b8a6c396426",
+    "tracker_hash": "14a4de5431c920bf186002f476db9aa9258b46a6497f747c5730c7f031de388e",
+    "synced_at": "2026-09-13T23:04:00.320469+02:00"
+  },
+  {
+    "plan": "engdocs/workflow/plans/2026-09-08-ga-ecwh-typed-worker-receipts.md",
+    "plan_hash": "20a2f606835a56d258f06036ee3218d3c3cfffc33617750d3cf5c2d03ebd3d4d",
+    "tracker_hash": "1d5acdb2295de41bcfc5f5e554e627d3e9de4244797ef1fcdab912ae60193230",
+    "synced_at": "2026-09-13T23:17:16.350418+02:00"
   }
 ]

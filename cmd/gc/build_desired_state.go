@@ -3957,6 +3957,14 @@ func executePlannedPoolSessionBeadCreate(
 	template string,
 	plan poolSessionCreatePlan,
 ) (session.Info, error) {
+	token, err := reservePoolTaskAttempt(bp, template, plan.metadata)
+	if err != nil {
+		bp.releasePoolSessionCreate()
+		return session.Info{}, err
+	}
+	if token != "" {
+		plan.metadata[beadmeta.NativeAttemptTokenMetadataKey] = token
+	}
 	info, err := createPoolSessionBeadWithGuardedAlias(bp, cfgAgent, template, plan.qualifiedInstance, plan.slot, plan.metadata)
 	if err != nil {
 		bp.releasePoolSessionCreate()

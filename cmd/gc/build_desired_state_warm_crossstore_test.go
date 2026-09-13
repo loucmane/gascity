@@ -104,7 +104,7 @@ func createRoutedBead(t *testing.T, store beads.Store, title string) {
 func TestBuildDesiredState_WarmRigPoolSeesCityStoreRoutedDemand(t *testing.T) {
 	cityPath := t.TempDir()
 	cfg := warmCrossStoreCfg(t, cityPath)
-	cityStore := beads.NewMemStore()
+	cityStore := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	rigStore := beads.NewMemStore()
 	rigStores := map[string]beads.Store{"gascity": rigStore}
 
@@ -247,7 +247,7 @@ func TestBuildDesiredState_WarmNamedBackingRigPoolSeesCityStoreRoutedDemand(t *t
 		Dir:      "gascity",
 		Mode:     "on_demand",
 	}}
-	cityStore := beads.NewMemStore()
+	cityStore := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	rigStore := beads.NewMemStore()
 	rigStores := map[string]beads.Store{"gascity": rigStore}
 

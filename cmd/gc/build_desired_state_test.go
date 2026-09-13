@@ -3189,7 +3189,7 @@ func TestBuildDesiredState_RoutedQueueDoesNotCreateOneSessionPerBead(t *testing.
 	if err := os.MkdirAll(filepath.Join(cityPath, ".beads"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	for i := 0; i < 12; i++ {
 		if _, err := store.Create(beads.Bead{
 			Title:  "queued claude work",
@@ -4032,8 +4032,16 @@ func TestRealizePoolDesiredSessionsLimitsFreshCreatesToWakeBudget(t *testing.T) 
 
 func TestRealizePoolDesiredSessionsBindsTriggerBeadToFreshSession(t *testing.T) {
 	store := beads.NewMemStore()
+	cityPath := t.TempDir()
+	rigPath := filepath.Join(cityPath, "rigs", "gascity-packs")
+	tasks := newConfiguredAttemptTestStore(t, cityPath, rigPath)
+	task, err := tasks.Create(beads.Bead{Title: "Fix pack route templates!"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "gascity-packs", Path: rigPath}},
 		Agents: []config.Agent{{
 			Name:              "worker",
 			StartCommand:      "true",
@@ -4043,7 +4051,7 @@ func TestRealizePoolDesiredSessionsBindsTriggerBeadToFreshSession(t *testing.T) 
 		}},
 	}
 	var stderr bytes.Buffer
-	bp := newAgentBuildParams("test-city", t.TempDir(), cfg, runtime.NewFake(), time.Now().UTC(), store, &stderr)
+	bp := newAgentBuildParams("test-city", cityPath, cfg, runtime.NewFake(), time.Now().UTC(), store, &stderr)
 	bp.sessionBeads = &sessionBeadSnapshot{}
 	desired := map[string]TemplateParams{}
 
@@ -4052,7 +4060,7 @@ func TestRealizePoolDesiredSessionsBindsTriggerBeadToFreshSession(t *testing.T) 
 		Requests: []SessionRequest{{
 			Template:      "worker",
 			Tier:          "new",
-			WorkBeadID:    "gp-59q",
+			WorkBeadID:    task.ID,
 			WorkBeadTitle: "Fix pack route templates!",
 			WorkPack:      "packer",
 			WorkStoreRef:  "rig:gascity-packs",
@@ -4067,8 +4075,8 @@ func TestRealizePoolDesiredSessionsBindsTriggerBeadToFreshSession(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Get(session): %v", err)
 	}
-	if got := stored.Metadata[beadmeta.TriggerBeadIDMetadataKey]; got != "gp-59q" {
-		t.Fatalf("trigger bead metadata = %q, want gp-59q", got)
+	if got := stored.Metadata[beadmeta.TriggerBeadIDMetadataKey]; got != task.ID {
+		t.Fatalf("trigger bead metadata = %q, want %q", got, task.ID)
 	}
 	if got := stored.Metadata[beadmeta.TriggerBeadStoreRefMetadataKey]; got != "rig:gascity-packs" {
 		t.Fatalf("trigger store metadata = %q, want rig:gascity-packs", got)
@@ -4084,11 +4092,11 @@ func TestRealizePoolDesiredSessionsBindsTriggerBeadToFreshSession(t *testing.T) 
 		t.Fatalf("desired sessions = %d, want 1", len(desired))
 	}
 	for _, tp := range desired {
-		if got := tp.Env["GC_TRIGGER_BEAD_ID"]; got != "gp-59q" {
-			t.Fatalf("GC_TRIGGER_BEAD_ID = %q, want gp-59q", got)
+		if got := tp.Env["GC_TRIGGER_BEAD_ID"]; got != task.ID {
+			t.Fatalf("GC_TRIGGER_BEAD_ID = %q, want %q", got, task.ID)
 		}
-		if got := tp.Env["GC_TRIGGER_WORK_BEAD_ID"]; got != "gp-59q" {
-			t.Fatalf("GC_TRIGGER_WORK_BEAD_ID = %q, want gp-59q", got)
+		if got := tp.Env["GC_TRIGGER_WORK_BEAD_ID"]; got != task.ID {
+			t.Fatalf("GC_TRIGGER_WORK_BEAD_ID = %q, want %q", got, task.ID)
 		}
 		if got := tp.Env["GC_TRIGGER_BEAD_STORE_REF"]; got != "rig:gascity-packs" {
 			t.Fatalf("GC_TRIGGER_BEAD_STORE_REF = %q, want rig:gascity-packs", got)
@@ -4220,8 +4228,16 @@ func TestRealizePoolDesiredSessionsRebindPreservesDistinctWorkDirPerSlot(t *test
 
 func TestRealizePoolDesiredSessionsHonorsExplicitPackWorkspace(t *testing.T) {
 	store := beads.NewMemStore()
+	cityPath := t.TempDir()
+	rigPath := filepath.Join(cityPath, "rigs", "gascity-packs")
+	tasks := newConfiguredAttemptTestStore(t, cityPath, rigPath)
+	task, err := tasks.Create(beads.Bead{Title: "Fix pack route templates!"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "gascity-packs", Path: rigPath}},
 		Agents: []config.Agent{{
 			Name:              "worker",
 			StartCommand:      "true",
@@ -4231,7 +4247,7 @@ func TestRealizePoolDesiredSessionsHonorsExplicitPackWorkspace(t *testing.T) {
 		}},
 	}
 	var stderr bytes.Buffer
-	bp := newAgentBuildParams("test-city", t.TempDir(), cfg, runtime.NewFake(), time.Now().UTC(), store, &stderr)
+	bp := newAgentBuildParams("test-city", cityPath, cfg, runtime.NewFake(), time.Now().UTC(), store, &stderr)
 	bp.sessionBeads = &sessionBeadSnapshot{}
 	workspace := "gp-59q-fix-pack-route-templates"
 
@@ -4240,7 +4256,7 @@ func TestRealizePoolDesiredSessionsHonorsExplicitPackWorkspace(t *testing.T) {
 		Requests: []SessionRequest{{
 			Template:      "worker",
 			Tier:          "new",
-			WorkBeadID:    "gp-59q",
+			WorkBeadID:    task.ID,
 			WorkBeadTitle: "Fix pack route templates!",
 			WorkPack:      "packer",
 			WorkWorkspace: workspace,
@@ -5901,7 +5917,7 @@ func TestBuildDesiredState_MinZeroDefaultScaleCheckRoutedWorkCreatesPoolSession(
 
 func TestBuildDesiredState_GH1654PoolReadyWorkGrowsPastMinActiveSessions(t *testing.T) {
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	const template = "worker"
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
@@ -6031,7 +6047,7 @@ func TestBuildDesiredState_MinZeroDefaultScaleCheckNoWorkDropsPendingPoolCreate(
 
 func TestBuildDesiredState_PoolInFlightSessionsPreservePartialScaleDemand(t *testing.T) {
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	const template = "worker"
 
 	for i := 0; i < 5; i++ {
@@ -6123,7 +6139,7 @@ func TestBuildDesiredState_PoolInFlightSessionsPreservePartialScaleDemand(t *tes
 
 func TestBuildDesiredState_OnDemandNamedSession_DefaultRoutedWorkUsesTemplatePoolDemand(t *testing.T) {
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	if _, err := store.Create(beads.Bead{
 		Title:  "queued mayor work",
 		Type:   "task",
@@ -6173,7 +6189,7 @@ func TestBuildDesiredState_OnDemandNamedSession_DefaultRoutedWorkUsesTemplatePoo
 
 func TestBuildDesiredState_OnDemandNamedSession_DefaultRoutedTaskWispUsesTemplatePoolDemand(t *testing.T) {
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	if _, err := store.Create(beads.Bead{
 		Title:     "queued mayor wisp",
 		Type:      "task",
@@ -6224,7 +6240,7 @@ func TestBuildDesiredState_OnDemandNamedSession_DefaultRoutedTaskWispUsesTemplat
 
 func TestBuildDesiredState_OnDemandNamedSession_DefaultRoutedTemplateUsesGenericPoolDemand(t *testing.T) {
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	if _, err := store.Create(beads.Bead{
 		Title:  "queued worker work",
 		Type:   "task",
@@ -6276,7 +6292,7 @@ func TestBuildDesiredState_OnDemandNamedSession_DefaultRoutedTemplateUsesGeneric
 
 func TestBuildDesiredState_OnDemandNamedSession_DefaultRoutedTemplateDoesNotPickAmbiguousIdentity(t *testing.T) {
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	if _, err := store.Create(beads.Bead{
 		Title:  "queued worker work",
 		Type:   "task",
@@ -6481,7 +6497,7 @@ func TestBuildDesiredState_NamedBackingPoolNoCap_RoutedDemandDoesNotSpawnPhantom
 // sizing in that case; only the named wake is withheld.
 func TestBuildDesiredState_RoutedDemandWakesOnlyCanonicalSingletonNamedSessions(t *testing.T) {
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	const singletonTemplate = "solo"
 	const multiTemplate = "crew"
 	for _, template := range []string{singletonTemplate, multiTemplate} {
@@ -7444,7 +7460,7 @@ func TestBuildDesiredState_OnDemandNamedSession_ColdCustomScaleCheckWakesOnRoute
 	// the routed bead below was stranded forever: scale_check reports 0, and
 	// nothing else ever woke the pool to re-evaluate it.
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	if _, err := store.Create(beads.Bead{
 		Title: "queued dog job",
 		Metadata: map[string]string{
@@ -8366,7 +8382,7 @@ func TestBuildDesiredState_LegacyNamepoolPoolSessionWithoutMetadataDoesNotBypass
 
 func TestBuildDesiredState_UsesBeadNamedPoolSessionsForScaleCheckDemand(t *testing.T) {
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	if _, err := store.Create(beads.Bead{
 		Title: "queued worker job",
 		Metadata: map[string]string{
@@ -8379,6 +8395,7 @@ func TestBuildDesiredState_UsesBeadNamedPoolSessionsForScaleCheckDemand(t *testi
 	// verifies that pool sessions created under demand use bead-derived names
 	// and pool-managed metadata, not that routed work itself increments demand.
 	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
 		Agents: []config.Agent{
 			{
 				Name:              "worker",
@@ -8834,7 +8851,7 @@ func TestBuildDesiredState_PendingCreatePoolSessionDropsWithoutScaleDemand(t *te
 
 func TestBuildDesiredState_PendingCreatePoolSessionCountsTowardScaleDemand(t *testing.T) {
 	cityPath := t.TempDir()
-	store := beads.NewMemStore()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	const template = "worker"
 	sessionName := "worker-mc-starting"
 	for i := 0; i < 2; i++ {
@@ -8868,6 +8885,7 @@ func TestBuildDesiredState_PendingCreatePoolSessionCountsTowardScaleDemand(t *te
 		t.Fatalf("create session bead: %v", err)
 	}
 	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
 		Agents: []config.Agent{{
 			Name:              template,
 			StartCommand:      "true",
@@ -11634,7 +11652,7 @@ func TestRepairControlDispatcherRoutesDoesNotGuessUnscopedControlOwnership(t *te
 
 func TestBuildDesiredState_RepairsRigRoutedCityControlWork(t *testing.T) {
 	cityPath := t.TempDir()
-	cityStore := beads.NewMemStore()
+	cityStore := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	rigStore := beads.NewMemStore()
 	control, err := cityStore.Create(beads.Bead{
 		Title:  "Finalize city workflow",
