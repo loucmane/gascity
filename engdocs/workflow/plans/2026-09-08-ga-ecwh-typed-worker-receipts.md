@@ -3,7 +3,7 @@ session_id: 2026-09-08-001
 work_context: ga-ecwh-typed-worker-receipts
 handler_target: .
 bead_ids: [ga-ecwh]
-attached_bead_ids: [ga-ecwh.2, ga-tmgr]
+attached_bead_ids: [ga-ecwh.2, ga-tmgr, ga-ecwh.5]
 branch_policy: codex/ga-ecwh-typed-worker-receipts
 evidence_summary:
   - engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE
@@ -254,3 +254,252 @@ Combined R1 source checkpoint: `engdocs/workflow/work-tracking/active/20260908-g
 - Independent Astra SOURCE PASS binds the common-epoch mutation-budget correction and bounded same-pidfd observer completion. Exact source hashes, semantic RED/GREEN, owning-package evidence and 54 independent observer tests are recorded in reports/20260912-budget-observer-source-pass.md under this ACTIVE tracker.
 - Supported daily continuation moved evidence to September12 while retaining September11 history. Normal signed delivery and required hosted gates precede a fresh independently reviewed source/image-bound synthetic package under the standing grant; no repeated micro-authorization or replay of a consumed root.
 - Hostile-negative proof, reviewed live adoption, worker capabilities/useful delivery, bidirectional handover and original terminal acceptance remain owed. ga-oz9e stays deferred; protected projects and unrelated rigs/services remain untouched.
+
+## Usability-first outcome checkpoint — 2026-09-13
+
+- Later verified outcomes supersede the pending descriptions above without
+  altering their history: Core delivery and live metadata adoption are complete;
+  gct-13ku PR59 and gct-10pg PR60 are delivered and CLOSED source PASS. Do not
+  repeat those deliveries, adoption or consumed worker attempts.
+- PR60 merge7186568953d498e11b380543f669fa864536014f preserves exact reviewed
+  treeff6521097b5108e73cae483605d23a018e082be7; corrected hosted34724445410
+  passed in5m28s with the original time budget. Final independent710-test clone
+  and159 mandatory cases, source review, native close/restoration and merge
+  gates are bound by reports/20260912-native-metadata-adoption-pass.md.
+- Next source task is gct-2tbg, freshly created/read back OPEN, unassigned and
+  unrouted in the Template store after the scoped duplicate sweep. Contract
+  /tmp/gct-claude-signing-followup-20260913/contract.md,
+  SHA256362d26890082f661e78f0c24f7511d43b2eba575eac4daef1a4a2a97ad2e249e.
+  Independent design PASS requires exact effective settings and durable
+  subscription-only launch; a policy file alone is insufficient. Use a native
+  Gas City implementation worker after binding/reviewing its exact source and
+  launch package. Reuse existing Core typed consumers and gascity-core signer;
+  no new Core/signer/root prerequisite is currently indicated.
+- Source scope is the missing Claude signing-policy renderer/profile and narrow
+  subscription launch integration with tests. Preserve existing candidate and
+  legacy profile bytes. Do not reopen failed ga-vh6 or ga-43s as successes;
+  historical Opus/Haiku proofs are reused only for their demonstrated scope.
+- Still owed: merged-profile activation and current native capability/signing
+  receipt; one useful Fable-orchestrated task through Gas City; both handover
+  directions preserving Bead/worktree/staged/unstaged/untracked work; negative
+  permission and zero-residue acceptance; terminal evidence/eligible closeouts.
+- Continuity snapshot's preserved-recovery-record parser refusal is a reporting
+  finding, not a new execution prerequisite. Use authoritative live Beads and
+  this linked evidence; ga-oz9e remains deferred and nonblocking.
+- SAME full goal remains ACTIVE, with unchanged historical identities, runtime
+  and standing grant. No new operator micro-authorization is needed within
+  scope; all genuine excluded boundaries and technical review gates remain.
+
+### 2026-09-13 — native source checkpoint, append-forward
+
+- gct-2tbg native session ci-c9xl produced its candidate; focused255tests pass,
+  but independent SOURCE HOLD requires source-only Python execution, hermetic
+  mandatory integration tests and a current Python pin. No source delivery or
+  live Claude acceptance has occurred. Preserve this candidate and its failures.
+- Native session is closed, claim released, all rigs held, exact baseline
+  restored/reloaded and zero native/test residue proven. The separate source
+  inventory gate remains honestly held on9generated artifacts; do not delete
+  them, relabel them as initial startup, or call the combined package PASS.
+- Next action is a narrow native corrective continuation under the existing
+  standing grant, protecting the complete prior inventory and using fresh
+  disposable test fixtures. Reuse completed proof; do not repeat Core delivery,
+  metadata adoption, gct-13ku/gct-10pg delivery or prior launch operations.
+- Evidence/next-scope: reports/20260912-native-metadata-adoption-pass.md and
+  /tmp/gct-2tbg-native-source-20260913/independent-source-review.md. Same full
+  goal ACTIVE; deferred workflow improvements remain deferred/nonblocking.
+
+### 2026-09-13 — corrective native execution in progress
+
+- Same gct-2tbg, fresh native ci-1l32, exact base7186568 in the registered
+  gct-2tbg-claude-signing-correction-r1 worktree. Package R2 ba025d44 passed
+  independent review; it verifies the existing route instead of re-slinging.
+- Actual pre-edit claim/workspace, positive/negative native permission and
+  preserved-candidate checks passed. One supported source release completed;
+  only the three reviewed source corrections are assigned. Unchanged window
+  ends2026-09-13T01:46:50.008121Z. Other rigs and service epochs are unchanged.
+- Two incidental Python caches are preserved and independently attributed;
+  no false zero-write claim. Source-only coordinator execution and fresh test
+  fixtures prevent reuse. Full evidence is in the linked adoption report and
+  /tmp/gct-2tbg-native-correction-r1-20260913.
+- Next: candidate/focused tests, independent review, supported closeout and
+  exact restoration, final full/mandatory tests and normal signed CI delivery.
+  Actual Claude signing/useful-work and both handovers remain owed. SAME goal
+  remains ACTIVE; no new approval or deferred-redesign prerequisite is added.
+
+### 2026-09-13 — source delivery checkpoint: PR61
+
+- Native corrective candidate997c6a4e received independent SOURCE_PASS;
+  supported worker closeout and exact baseline restoration prove all rigs held,
+  zero residue and unchanged service epochs. The50ms status-read refusal was
+  preserved and resolved by fresh complete observation, never weaker checks.
+- Final offline standalone clone:728PASS/0skip, all159 mandatory identities
+  passed once, full source/evidence and host non-interference. Validation
+  97e270862638b0df1507c0e561c5131bb0b5753b1ed5d8e4396424ff2e189bc8.
+- Signed head a87aa87b522acd31c8477ea9869a054e3b31ade6, exact tree
+  e48ca6478a96dd913333c68543b3bd7f54477624, draftPR61 on base7186568953.
+  Hosted CI and all exact merge gates remain required. Keep all evidence and
+  branches; no source or live-acceptance Bead is prematurely closed.
+- After gated delivery, continue merge-bound actual Claude capability/signing,
+  useful Fable-orchestrated worker execution and both handovers. SAME full goal
+  stays ACTIVE; no new operator approval at this checkpoint.
+
+### 2026-09-13 — PR61 delivered; source milestone closed
+
+- Hosted run34731533545 passed in6m47 under the existing10-minute budget.
+  PR61 merged5797f19cfeedc2f33e2dfd7efe7a079115a05268 after fresh exact
+  signed-head/base, CLEAN/MERGEABLE and zero-unresolved-thread checks; merge
+  tree e48ca6478a96dd913333c68543b3bd7f54477624 is byte-identical to the
+  reviewed signed candidate. Branch, source worktrees and evidence preserved.
+- Independent Astra delivery review confirmed gct-2tbg CLOSE-ELIGIBLE
+  SOURCE_PASS. Supported close completed once; readback proves CLOSED,
+  unassigned, acceptance/metadata/dependencies unchanged. This does not close
+  the full goal or count as actual Claude signing/useful-work acceptance.
+- Next: bind the merged launcher/profile to the existing reviewed provisioning
+  path, then actual native Claude capability/signing and useful Fable-led task.
+  The canonical Template checkout remains clean but parked at dcc29da1;
+  provider commands name that canonical root. Inspect the supported source
+  activation path before any adoption; do not silently change its branch,
+  use arbitrary nested-worktree defaults, or replay completed source delivery.
+- Both handovers, live negative-permission/zero-residue acceptance and terminal
+  evidence remain OPEN. Same full goal ACTIVE, same standing grant and stop
+  conditions. No new approval or deferred-redesign prerequisite is introduced.
+
+### 2026-09-13 — canonical Template source activation PASS
+
+- Existing canonical Template source is now detached at reviewed PR61 merge
+  5797f19cfeedc2f33e2dfd7efe7a079115a05268, tree
+  e48ca6478a96dd913333c68543b3bd7f54477624. All219 tracked source files
+  match; the parked branch remains at dcc29da1 and4030 ignored files are
+  preserved. This is not a claim that the whole checkout is clean.
+- Independently reviewed source-only activation completed once with unchanged
+  city configuration, provisioning receipt, supervisor/signer epochs and all
+  rigs suspended. No worker or inference launched. Result
+  /tmp/ga-ecwh-claude-live-20260913/source-activation-result.json,
+  SHA256 e2c6f3c44d8de2196b5dcb25a4ef1b2785791f46fa061ad241ecc2530a4741ab.
+  Preserve the pre-mutation GIT_PAGER refusal and focused publication-failure
+  RED/GREEN proof; no completed activation or source delivery is replayed.
+- Live acceptance is recorded as ga-ecwh.3, OPEN/unassigned, related to this
+  primary. Next: independently reviewed existing renderer/provisioner and
+  metadata reconciliation, then actual Claude signing/useful execution and
+  both handovers. Reuse the reviewed Core build/adoption/interoperability
+  evidence. The full goal remains ACTIVE; standing grant08f86cff applies.
+
+### 2026-09-13 — prospective profile prepared; observation mechanism reassessed
+
+- Exact canonical source activation is complete and must not be repeated.
+  Prepared combined registry/fragment replaces only Core's entry, preserving
+  Blog; independent review confirms existing Core acceptance evidence reusable
+  and no additional platform metadata adoption needed for these unpinned paths.
+- Non-live observer R1 failed before build completion; corrected R2 built but
+  its copied city omitted convention-discovered agents, causing a BEFORE
+  refusal. Both attempts and containment evidence are preserved. No provider
+  launch, live configuration write, lifecycle or protected-project edit occurred.
+- Reassess complete read-only actual-city observation with a private cache
+  and process-local prospective fragment overlay before another execution;
+  independent review is required. Do not repair Blog or weaken its checks.
+- Exact report and next action: tracker reports/
+  20260913-claude-live-profile-preparation.md. Same full goal ACTIVE;
+  ga-ecwh.3 live acceptance remains OPEN. No new micro-authorization gate.
+
+### 2026-09-13 — actual composition observed; complete dispatch contract next
+
+- R3 proved actual initial/resume composition and unchanged host inputs, but
+  failed overall parity because named providers synthesize aliases in every
+  namespace. Preserve its evidence; no live adoption or provider launch occurred.
+- Next package must preserve all old unrelated profiles, explicitly contain
+  new generic aliases, and bind canonical-path config.Revision. Do not erase
+  these differences or change protected work to make assertions pass.
+- Correction: dispatch (unlike fragment-only integrity) requires current
+  Template and signing-provider platform pins. Reuse existing native metadata
+  adoption; independently review the complete supported config/adoption/receipt
+  ordering before execution. Do not use stale receipt commits or repeat Core
+  delivery. ga-ecwh.3 and the same full goal remain ACTIVE/open as applicable.
+
+### 2026-09-13 — R4 prospective configuration PASS
+
+- Independently verified actual-path observer result41ee2e86:97 old unrelated
+  profiles unchanged, five explicit suspended additions, exact Claude initial/
+  resume arrays and revision9f3dae18, complete owned-process terminality and
+  unchanged host inputs. No provider, signing or live adoption occurred.
+- Do not repeat this proof or source delivery. Next is one consolidated reviewed
+  existing-surface config/metadata/provisioning transaction, retaining all prior
+  integrity obligations and backups; then actual useful execution and both
+  handovers. Exact sequence/hashes: /tmp/ga-ecwh-claude-live-20260913/
+  next-supported-sequence.md. Same full goal ACTIVE; no new operator approval.
+
+### 2026-09-13 — reviewed installation package and host preflight ready
+
+- Reuse completed source delivery and R4 composition. Independent Astra passed
+  the bounded live config/native-metadata package, including strict rollback and
+  timer handling. Preserve initial tree-pin and private-source-mode refusals;
+  corrected R2 keeps source0600 and installed0644, with no weakened check.
+- Frozen bindings724d90ab and final manifest SELF4169a508 are under
+  /tmp/ga-ecwh-claude-live-20260913/live-install-r1.22focused mocked tests passed;
+  fresh genuine-host preflight passed with no live mutation, stable Core/signer,
+  all rigs held, zero sessions and unchanged protected/cache state.
+- Next: reviewed config stage, independently reviewed native observation,
+  metadata-only apply/FINAL9, then truthful typed receipt and actual Claude
+  signing/useful execution plus both handovers. ga-ecwh.3 remains OPEN and the
+  original full goal ACTIVE. No new authorization gate or completed-work replay.
+
+### 2026-09-13 — failed installation window contained and timer restored
+
+- Timer stop completed; full runtime postflight returned partial, so config,
+  metadata, provisioning and workers did not start. Preserve the original
+  consumed pause and failed read-only reconciliation, never replay or relabel.
+- The reconciliation found exactly two cached .git directory timestamps had
+  changed after the supported workflow log. All other fields/content match;
+  preserve attribution uncertainty and exact deltaee35edbb. Do not relax the
+  check or rewrite historical timestamps.
+- Independently reviewed timer-only recovery6d69ed3a completed with full host
+  pre/postconditions, terminal owned process and restored active/enabled timer;
+  completion17fc0482. Core/signer epochs and held rigs remain unchanged. No
+  source/config/native install or worker claim occurred.
+- Next window must finish durable logging before freezing its immediate
+  baseline, retain full runtime/cache proofs, use fresh append-forward phase
+  evidence and reuse completed source/R4 proof. Config/adoption currently HOLD;
+  same original goal ACTIVE, no new operator authorization needed. Exact report:
+  reports/20260913-claude-live-profile-preparation.md in the active tracker.
+
+### 2026-09-13 — R8 preserved/restored; ga-ecwh.5 source repair
+
+- Subsequent R8 reached Claude's workspace-trust menu but failed before inference,
+  claim, source edits or signing. Preserve all 78 failed native session records
+  and the complete R8 evidence; do not replay the consumed window. Exact baseline
+  restoration has independent RESTORATION_PASS under
+  /tmp/ga-5ot6-native-subscription-live-r8-20260913/.
+- ga-ecwh.5 is attached to this existing workflow under the shared external
+  coordinator ownership. The operator authorized only the narrow direct Core
+  bootstrap exception for explicit Claude trust selection and opt-in durable
+  task/store/template-scoped native attempt admission. Authorization digest:
+  dd89fe48b6bcede2ea7500b13c2fc303ba7c928723542f432c81a6990c0cb65c.
+- Independent Astra SOURCE_PASS binds the 31-file candidate corpus
+  44c8ca11985abb56c1a2d6405d49241b306a973aa77a90ca30e3b74b9df5728d.
+  Preserve findings and corrections, including genuine configured work-store
+  lookup, resolved city identity, no-refund failed creation/start, and unchanged
+  denial/cleanup assertions. Exact mapping and focused-test evidence are in
+  reports/20260913-ga-ecwh.5-independent-source-review.json.
+- The first final fast sweep remains FAIL: five synthetic Dolt leaks and a
+  missing testenv import were caught by existing guards. Only fixture setup and
+  the new package's standard environment scrubber were corrected; no guard was
+  relaxed. Corrected focused cases pass. Final fast regression is still running;
+  its logs are preserved at /tmp/ga-ecwh.5-final-fast-20260913/.
+- Source review, lint, vet, workflow verification and dashboard byte-parity are
+  delivery evidence, not live capability acceptance. Next: final regression,
+  signed/required-green-CI delivery and merge-bound adoption/proof. No worker retry
+  or rig/service transition occurred during this source repair. Keep the same
+  full goal active; useful Claude execution and both handovers remain required.
+
+### 2026-09-13 — final ga-ecwh.5 source validation PASS
+
+- The final sharded fast baseline passed all ten jobs, including all six CLI
+  shards; full logs are preserved at /tmp/ga-ecwh.5-final-fast-20260913/.
+  Lint, final vet, dashboard build/typecheck/client/byte-parity and supported
+  workflow verification passed. Review corpus44c8ca11 remains exact.
+- Final record: reports/20260913-ga-ecwh.5-final-validation.md. Prior failed
+  sweeps and R8 remain unchanged. Genuine-host observation confirms the five
+  temporary test PIDs absent; systemd signer epoch1758/210542077/restarts0 and
+  Core PID400145 remain as observed. No worker or rig transition occurred.
+- Next: signed/required-green-CI source delivery, then reviewed merge-bound
+  adoption and actual useful-worker/handover acceptance. Source PASS does not
+  close ga-ecwh.5 or the full original goal. No fresh operator approval gate.

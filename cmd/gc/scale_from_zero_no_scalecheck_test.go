@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,13 +15,15 @@ import (
 // executor and every specialist pool are shaped exactly this way.
 func newNoScaleCheckRigPoolCity(t *testing.T) (cfg *config.City, cityStore beads.Store, rigStores map[string]beads.Store, qualified string) {
 	t.Helper()
-	rigPath := t.TempDir() + "/rigs/rig-A"
+	cityPath := t.TempDir()
+	rigPath := cityPath + "/rigs/rig-A"
 	if err := os.MkdirAll(rigPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	maxSess := 5
 	minSess := 0
 	cfg = &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
 		Agents: []config.Agent{
 			{
 				Name:              "executor",
@@ -34,8 +37,8 @@ func newNoScaleCheckRigPoolCity(t *testing.T) (cfg *config.City, cityStore beads
 		Rigs:      []config.Rig{{Name: "rig-A", Path: rigPath}},
 		Providers: map[string]config.ProviderSpec{"mock": {Command: "true"}},
 	}
-	cityStore = beads.NewMemStore()
-	rigStores = map[string]beads.Store{"rig-A": beads.NewMemStore()}
+	cityStore = newConfiguredAttemptTestStore(t, cityPath, cityPath)
+	rigStores = map[string]beads.Store{"rig-A": newConfiguredAttemptTestStore(t, cityPath, rigPath)}
 	return cfg, cityStore, rigStores, "rig-A/executor"
 }
 
@@ -58,7 +61,7 @@ func TestBuildDesiredState_ScaleFromZero_NoScaleCheck_CrossStore(t *testing.T) {
 	}
 
 	result := buildDesiredStateWithSessionBeads(
-		"test-city", t.TempDir(), time.Now(), cfg, &localMockProvider{},
+		"test-city", filepath.Dir(filepath.Dir(cfg.Rigs[0].Path)), time.Now(), cfg, &localMockProvider{},
 		cityStore, rigStores, &sessionBeadSnapshot{}, nil, os.Stderr,
 	)
 
@@ -85,7 +88,7 @@ func TestBuildDesiredState_ScaleFromZero_NoScaleCheck_OwnRigStillWakes(t *testin
 	}
 
 	result := buildDesiredStateWithSessionBeads(
-		"test-city", t.TempDir(), time.Now(), cfg, &localMockProvider{},
+		"test-city", filepath.Dir(filepath.Dir(cfg.Rigs[0].Path)), time.Now(), cfg, &localMockProvider{},
 		cityStore, rigStores, &sessionBeadSnapshot{}, nil, os.Stderr,
 	)
 
@@ -101,7 +104,7 @@ func TestBuildDesiredState_ScaleFromZero_NoScaleCheck_NoDemandNoWake(t *testing.
 	cfg, cityStore, rigStores, qualified := newNoScaleCheckRigPoolCity(t)
 
 	result := buildDesiredStateWithSessionBeads(
-		"test-city", t.TempDir(), time.Now(), cfg, &localMockProvider{},
+		"test-city", filepath.Dir(filepath.Dir(cfg.Rigs[0].Path)), time.Now(), cfg, &localMockProvider{},
 		cityStore, rigStores, &sessionBeadSnapshot{}, nil, os.Stderr,
 	)
 

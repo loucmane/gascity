@@ -563,6 +563,7 @@ type Manager struct {
 	transportResolver       func(template, provider string) transportResolution
 	clk                     clock.Clock
 	staleKeyDetectionWaiter StaleKeyDetectionWaiter
+	attemptWorkStore        AttemptWorkStoreAccess
 }
 
 // PruneResult reports which sessions were pruned and which queued wait nudges
@@ -1009,7 +1010,7 @@ func (m *Manager) createStarted(ctx context.Context, spec CreateOptions) (Info, 
 			}
 			return err
 		}
-		if err := m.sp.Start(ctx, sessName, cfg); err != nil {
+		if err := m.startRuntime(ctx, b.ID, sessName, cfg); err != nil {
 			if runtimeSessionMatchesBead(m.sp, sessName, b.ID, meta["instance_token"]) {
 				if metaErr := m.confirmStartedRuntimeMetadata(b.ID, &b); metaErr != nil {
 					return metaErr

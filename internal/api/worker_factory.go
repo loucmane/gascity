@@ -1,6 +1,9 @@
 package api
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/worker"
 )
@@ -22,7 +25,20 @@ func (s *Server) workerFactory(store beads.Store) (*worker.Factory, error) {
 		UsageSink:             s.state.UsageSink(),
 		ResolveTransport:      resolveTransport,
 		ResolveSessionRuntime: s.resolveWorkerSessionRuntimeWithMetadata,
-		Pricing:               cfg.PricingRegistry(),
+		AttemptWorkStore: func(ref string, use func(beads.Store) error) error {
+			if ref == "" || ref == "city" || (s.state.CityName() != "" && ref == "city:"+s.state.CityName()) {
+				return use(s.state.CityBeadStore())
+			}
+			if !strings.HasPrefix(ref, "rig:") {
+				return fmt.Errorf("noncanonical task store identity %q", ref)
+			}
+			workStore := s.state.BeadStore(strings.TrimPrefix(ref, "rig:"))
+			if workStore == nil {
+				return fmt.Errorf("task store %q unavailable", ref)
+			}
+			return use(workStore) // Borrowed controller store: do not close.
+		},
+		Pricing: cfg.PricingRegistry(),
 	})
 }
 

@@ -225,7 +225,7 @@ func (m *Manager) retryFreshStartAfterStaleKey(
 		}
 		return false, err
 	}
-	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
+	if err := m.startRuntime(ctx, id, sessName, cfg); err != nil {
 		projectionErr := m.tombstoneSessionFenceProjection(id, b.Metadata["instance_token"], sessionFenceGeneration(b.Metadata["generation"]))
 		if unroute != nil {
 			unroute()
@@ -417,7 +417,7 @@ func (m *Manager) ensureRunning(ctx context.Context, id string, b beads.Bead, se
 		}
 		return err
 	}
-	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
+	if err := m.startRuntime(ctx, id, sessName, cfg); err != nil {
 		if errors.Is(err, runtime.ErrSessionDiedDuringStartup) && b.Metadata["session_key"] != "" {
 			retried, err := m.retryFreshStartAfterStaleKey(ctx, id, &b, sessName, resumeCommand, cfg, unroute)
 			if err != nil {
@@ -553,7 +553,7 @@ func (m *Manager) ensureRunningRuntimeOnly(ctx context.Context, id string, b bea
 		}
 		return err
 	}
-	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
+	if err := m.startRuntime(ctx, id, sessName, cfg); err != nil {
 		switch {
 		case errors.Is(err, runtime.ErrSessionDiedDuringStartup) && b.Metadata["session_key"] != "":
 			retried, err := m.retryFreshStartAfterStaleKey(ctx, id, &b, sessName, resumeCommand, cfg, unroute)

@@ -614,7 +614,7 @@ func TestSessionReconcilerTraceGH1654WorkRequestedStartCandidates(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			cityDir := t.TempDir()
 			writeCityTOML(t, cityDir, "trace-town", "worker")
-			store := beads.NewMemStore()
+			store := newConfiguredAttemptTestStore(t, cityDir, cityDir)
 			sp := runtime.NewFake()
 			cfg, dsResult, sessionBeads := tc.setup(t, cityDir, store, sp)
 
