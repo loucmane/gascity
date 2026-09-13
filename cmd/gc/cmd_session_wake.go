@@ -43,6 +43,7 @@ Accepts a session ID (e.g., gc-42) or session alias (e.g., mayor).`,
 
 type sessionWakeDeps struct {
 	store                     beads.Store
+	resolveID                 func(beads.Store, string) (string, error)
 	cfg                       *config.City
 	cityPath                  string
 	cityResolved              bool
@@ -102,7 +103,10 @@ func cmdSessionWake(args []string, stdout, stderr io.Writer, jsonOutput ...bool)
 		return code
 	}
 	return doSessionWake(args[0], stdout, stderr, asJSON, sessionWakeDeps{
-		store:                     store,
+		store: store,
+		resolveID: func(sessStore beads.Store, target string) (string, error) {
+			return resolveSessionIDMaterializingNamed(cityPath, cfg, sessStore, target)
+		},
 		cfg:                       cfg,
 		cityPath:                  cityPath,
 		cityResolved:              cityErr == nil,
@@ -131,10 +135,18 @@ func renderSessionWakeResult(id string, stdout, stderr io.Writer, asJSON bool, w
 }
 
 func doSessionWake(target string, stdout, stderr io.Writer, asJSON bool, deps sessionWakeDeps) int {
+	if deps.resolveID == nil {
+		fmt.Fprintln(stderr, "gc session wake: session resolver unavailable") //nolint:errcheck
+		return 1
+	}
 	sessStore := cliSessionStore(deps.store, deps.cfg, deps.cityPath)
-	id, err := resolveSessionIDMaterializingNamed(deps.cityPath, deps.cfg, sessStore, target)
+	id, err := deps.resolveID(sessStore, target)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc session wake: %v\n", err) //nolint:errcheck
+		return 1
+	}
+	if strings.TrimSpace(id) == "" {
+		fmt.Fprintln(stderr, "gc session wake: session resolver returned an empty ID") //nolint:errcheck
 		return 1
 	}
 

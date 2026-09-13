@@ -503,3 +503,18 @@ Combined R1 source checkpoint: `engdocs/workflow/work-tracking/active/20260908-g
 - Next: signed/required-green-CI source delivery, then reviewed merge-bound
   adoption and actual useful-worker/handover acceptance. Source PASS does not
   close ga-ecwh.5 or the full original goal. No fresh operator approval gate.
+
+### 2026-09-13 — committed-source guard integration correction
+
+- Preserved signed head791c4c7 and its failed pre-push. Remote refs stayed
+  unchanged. The resource census missed an untracked new helper during the
+  earlier sweep, then correctly found the committed wake-to-store-recovery path.
+- Add only an explicit sessionWakeDeps resolution boundary, production wiring
+  unchanged, and refusal/nonmutation tests. Independent Astra SOURCE_PASS and
+  focused wake/relocation/resource-census GREEN are recorded in
+  reports/20260913-ga-ecwh.5-wake-resolution-integration.md with exact digests.
+  No guard/waiver/attempt policy changed. Supported active checkpoint passed;
+  open repairs remain open rather than being closed for publication.
+- Next: append-forward signed delivery with mandatory full pre-push validation
+  and hosted CI, then reviewed merge-bound adoption. No live worker retry,
+  lifecycle change, provider parity or handover completion is claimed.

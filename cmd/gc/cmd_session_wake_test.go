@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -228,6 +229,7 @@ func TestDoSessionWake_PokesManagedControllerAfterStateChange(t *testing.T) {
 	var calls []string
 	deps := sessionWakeDeps{
 		store:        store,
+		resolveID:    resolveSessionID,
 		cityPath:     "/city",
 		cityResolved: true,
 		now: func() time.Time {
@@ -312,6 +314,7 @@ func TestDoSessionWake_DoesNotPokeWithoutManagedController(t *testing.T) {
 	poked := false
 	deps := sessionWakeDeps{
 		store:        store,
+		resolveID:    resolveSessionID,
 		cityPath:     "/city",
 		cityResolved: true,
 		now: func() time.Time {
@@ -353,6 +356,7 @@ func TestDoSessionWake_PokeFailureWarnsWithoutFailingWake(t *testing.T) {
 
 	deps := sessionWakeDeps{
 		store:        store,
+		resolveID:    resolveSessionID,
 		cityPath:     "/city",
 		cityResolved: true,
 		now: func() time.Time {
@@ -382,6 +386,55 @@ func TestDoSessionWake_PokeFailureWarnsWithoutFailingWake(t *testing.T) {
 	}
 	if got := updated.Metadata["state"]; got != "asleep" {
 		t.Fatalf("state = %q, want asleep", got)
+	}
+}
+
+func TestDoSessionWake_ResolutionFailureDoesNotMutate(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		resolve func(beads.Store, string) (string, error)
+		want    string
+	}{
+		{name: "missing resolver", want: "session resolver unavailable"},
+		{name: "resolver error", resolve: func(beads.Store, string) (string, error) {
+			return "", errors.New("resolution refused")
+		}, want: "resolution refused"},
+		{name: "empty ID", resolve: func(beads.Store, string) (string, error) {
+			return "", nil
+		}, want: "session resolver returned an empty ID"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := beads.NewMemStore()
+			before, err := store.Create(beads.Bead{
+				Type:     session.BeadType,
+				Labels:   []string{session.LabelSession},
+				Metadata: map[string]string{"state": "suspended", "held_until": "preserved"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			deps := sessionWakeDeps{
+				store: store, resolveID: tc.resolve, cityResolved: true,
+				now:                       func() time.Time { t.Fatal("resolution failure reached mutation clock"); return time.Time{} },
+				withdrawQueuedWaitNudges:  func(string, []string) error { t.Fatal("resolution failure withdrew nudges"); return nil },
+				cityUsesManagedReconciler: func(string) bool { t.Fatal("resolution failure queried controller"); return false },
+				pokeController:            func(string) error { t.Fatal("resolution failure poked controller"); return nil },
+			}
+			if code := doSessionWake(before.ID, &stdout, &stderr, false, deps); code != 1 {
+				t.Fatalf("doSessionWake = %d, want refusal", code)
+			}
+			if stdout.Len() != 0 || !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stdout=%q stderr=%q, want %q", stdout.String(), stderr.String(), tc.want)
+			}
+			after, err := store.Get(before.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("bead changed after resolution refusal: before=%+v after=%+v", before, after)
+			}
+		})
 	}
 }
 
