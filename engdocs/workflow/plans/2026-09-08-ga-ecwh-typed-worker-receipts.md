@@ -518,3 +518,19 @@ Combined R1 source checkpoint: `engdocs/workflow/work-tracking/active/20260908-g
 - Next: append-forward signed delivery with mandatory full pre-push validation
   and hosted CI, then reviewed merge-bound adoption. No live worker retry,
   lifecycle change, provider parity or handover completion is claimed.
+
+### 2026-09-14 — R9 restored; native admission store repair
+
+- R9 never launched a worker. The rig control-store resolver selected a CLI
+  backend without conditional writes; preserve the unconsumed requested policy,
+  complete containment/restoration evidence and all earlier delivery.
+- Under the existing ga-ecwh.5 direct-bootstrap exception, bind attempt admission
+  to the registered authoritative native-capable store factory. Do not weaken
+  preflight, store identity, rollout or one-start CAS semantics.
+- Focused source validation now passes, including real Dolt, reopened-handle
+  persistence, failure/no-refund and negative identity/scope cases. Preserve
+  setup, timeout and wrong-negative fixture failures separately. Exact evidence:
+  reports/20260914-ga-ecwh.5-native-admission-store.md.
+- Continue final review and signed/green-CI delivery, then reviewed merge-bound
+  adoption and fresh bounded useful-worker execution. The original goal, its
+  provider parity/handover acceptance and all unsatisfied Beads remain open.

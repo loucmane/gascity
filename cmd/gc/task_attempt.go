@@ -8,6 +8,7 @@ import (
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/rollout/gate"
 	"github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/taskattempt"
 )
@@ -17,16 +18,32 @@ func attemptWorkStoreAccess(cityPath string, cfg *config.City) session.AttemptWo
 		if ref == "" || ref == "city" {
 			ref = "city:" + loadedCityName(cfg, cityPath)
 		}
-		if ref != "city:"+loadedCityName(cfg, cityPath) && !strings.HasPrefix(ref, "rig:") {
-			return fmt.Errorf("%w: noncanonical store identity %q", taskattempt.ErrRefused, ref)
+		scopeRoot := cityPath
+		if ref != "city:"+loadedCityName(cfg, cityPath) {
+			scopeRoot = ""
+			if cfg != nil && strings.HasPrefix(ref, "rig:") {
+				for _, rig := range cfg.Rigs {
+					if ref == "rig:"+rig.Name && rig.Name != "" {
+						scopeRoot = rig.Path
+						break
+					}
+				}
+			}
+			if strings.TrimSpace(scopeRoot) == "" {
+				return fmt.Errorf("%w: unknown or noncanonical store identity %q", taskattempt.ErrRefused, ref)
+			}
 		}
-		s, err := makeStoreRefResolver(cityPath, cfg)(ref)
+		// Admission needs the authoritative work backend, not the deliberately
+		// CLI-only control-dispatch resolver. The ordinary factory retains its
+		// identity preflight and rollout policy, and normalizes registered rig
+		// paths against this city. An incapable fallback still refuses CAS.
+		result, err := openStoreResultAtForCityWithConfig(scopeRoot, cityPath, cfg, gate.ModeUnset, false, true)
 		if err != nil {
 			return err
 		}
 		// Always open the configured work authority, including city work. The
 		// factory's session store may be relocated and contain same-ID decoys.
-		return errors.Join(use(s), closeBeadStoreHandle(s))
+		return errors.Join(use(result.Store), closeBeadStoreHandle(result.Store))
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +16,64 @@ import (
 	"github.com/gastownhall/gascity/internal/taskattempt"
 	"github.com/gastownhall/gascity/internal/worker"
 )
+
+func TestTaskAttemptRejectsUnregisteredStoreRefs(t *testing.T) {
+	cityPath := t.TempDir()
+	cfg := &config.City{Workspace: config.Workspace{Name: "fixture"}, Rigs: []config.Rig{
+		{Name: "frontend", Path: "frontend"}, {Name: "empty"},
+	}}
+	for _, ref := range []string{"city:other", "city:", "city:fixture ", "rig:", "rig:missing", "rig:frontend ", "rig:../frontend", "rig:empty", "frontend"} {
+		t.Run(ref, func(t *testing.T) {
+			err := attemptWorkStoreAccess(cityPath, cfg)(ref, func(beads.Store) error {
+				t.Fatal("invalid store reference reached callback")
+				return nil
+			})
+			if !errors.Is(err, taskattempt.ErrRefused) {
+				t.Fatalf("%q: %v", ref, err)
+			}
+		})
+	}
+	if err := attemptWorkStoreAccess(cityPath, nil)("rig:frontend", func(beads.Store) error {
+		t.Fatal("rig without configuration reached callback")
+		return nil
+	}); !errors.Is(err, taskattempt.ErrRefused) {
+		t.Fatalf("missing configuration: %v", err)
+	}
+}
+
+func TestTaskAttemptResolvesRegisteredRigPaths(t *testing.T) {
+	for _, absolute := range []bool{false, true} {
+		t.Run(map[bool]string{false: "relative", true: "absolute"}[absolute], func(t *testing.T) {
+			t.Setenv("GC_HOME", t.TempDir())
+			cityPath := t.TempDir()
+			rigPath := filepath.Join(cityPath, "frontend")
+			if err := os.MkdirAll(rigPath, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			s := newConfiguredAttemptTestStore(t, cityPath, rigPath)
+			b, err := s.Create(beads.Bead{Title: "registered work authority"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			registeredPath := "frontend"
+			if absolute {
+				registeredPath = rigPath
+			}
+			cfg := &config.City{Workspace: config.Workspace{Name: "fixture"}, Rigs: []config.Rig{
+				{Name: "frontend", Path: registeredPath},
+			}}
+			if err := attemptWorkStoreAccess(cityPath, cfg)("rig:frontend", func(s beads.Store) error {
+				got, err := s.Get(b.ID)
+				if err == nil && got.Title != b.Title {
+					return errors.New("opened wrong work authority")
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 // Routed-demand fixtures must publish their task authority, rather than only
 // supplying a session-store fake: admission now re-opens that authority.
