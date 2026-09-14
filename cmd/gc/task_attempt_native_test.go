@@ -21,7 +21,8 @@ import (
 // installed CLI may lack fencing, even when native metadata CAS is available.
 // The existing real-Dolt fixture owns the process and gates this process lane.
 func TestTaskAttemptConfiguredNativeStore(t *testing.T) {
-	skipSlowCmdGCTest(t, "requires a real Dolt server; run make test-cmd-gc-process for full coverage")
+	// startPasswordedDoltServer owns the process-lane gate before any spawn.
+	// Keep that shared resource owner instead of duplicating its skip marker.
 	clearInheritedBeadsEnv(t)
 	resetFlags(t)
 	t.Setenv("GC_HOME", t.TempDir())

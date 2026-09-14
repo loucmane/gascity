@@ -534,3 +534,14 @@ Combined R1 source checkpoint: `engdocs/workflow/work-tracking/active/20260908-g
 - Continue final review and signed/green-CI delivery, then reviewed merge-bound
   adoption and fresh bounded useful-worker execution. The original goal, its
   provider parity/handover acceptance and all unsatisfied Beads remain open.
+
+### 2026-09-14 — preserve pre-push refusal; shared test-gate correction
+
+- Signed d446bfcd remains preserved; pre-push failed before remote mutation
+  on the new test's duplicate slow-process marker. Nine jobs passed, including
+  every CLI shard; full failed evidence is retained. No census ceiling changed.
+- Reuse the existing Dolt helper's process gate. Independent SOURCE_PASS,
+  resource-census GREEN, explicit fast-mode SKIP and real native GREEN are
+  bound in reports/20260914-ga-ecwh.5-native-admission-r2.md.
+- Continue append-forward signed delivery and required CI; refresh candidate
+  artifact bindings before any adoption. No previous live operation is replayed.
