@@ -61,7 +61,7 @@ func TestMetadataLeaseRefusesUnavailableClockAndInvalidBounds(t *testing.T) {
 	if _, err := lease.Begin(request); !errors.Is(err, clockErr) {
 		t.Fatalf("clock error = %v", err)
 	}
-	for _, deadline := range []int64{-1, 0, 100, 30_000_000_101} {
+	for _, deadline := range []int64{-1, 0, 100, 65_000_000_101} {
 		lease := newMetadataLease(strings.Repeat("a", 64), func() (int64, error) { return 100, nil })
 		request.Deadline = deadline
 		if _, err := lease.Begin(request); err == nil {

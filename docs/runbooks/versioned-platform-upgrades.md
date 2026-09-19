@@ -372,6 +372,13 @@ runtime/source pins, launch environment, namespace and process-terminal checks
 remain required. See [the versioned transaction contract](https://github.com/loucmane/gascity/blob/main/internal/platforminstall/METADATA_TRANSACTION.md)
 for custody assumptions, bounds, completion and failure classification.
 
+Metadata timing is one source-bound policy: 60s mutation grant, 63s lease and
+65s enclosing context, with 60s channel limits. Host validation spends the
+original transaction budget; an earlier caller deadline only shortens it.
+Changing these limits requires a reviewed new image and fresh adoption evidence,
+not editing a launch wrapper's threshold or extending an active lease. Prior
+consumed attempts remain historical, and a timeout is not proof of rollback.
+
 When the canonical metadata directory already contains preserved directories
 such as `assets/` or `backups/`, bind each through the optional `protected_trees`
 inventory. They remain in place and become separate read-only mounts inside W

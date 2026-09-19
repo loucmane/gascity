@@ -172,7 +172,7 @@ func metadataWriterPipes(deadline time.Time) (_ *os.File, _ *os.File, returnErr 
 func MetadataWriterEntrypoint() (returnErr error) {
 	committed := false
 	defer func() { returnErr = metadataCommittedError(returnErr, committed) }()
-	deadline := time.Now().Add(25 * time.Second)
+	deadline := time.Now().Add(metadataPipeBudget)
 	input, output, err := metadataWriterPipes(deadline)
 	if err != nil {
 		return err
@@ -200,7 +200,7 @@ func MetadataWriterEntrypoint() (returnErr error) {
 	if err != nil {
 		return err
 	}
-	if now < 0 || binding.Deadline <= now || binding.LeaseEnd-now > 30_000_000_000 {
+	if now < 0 || binding.Deadline <= now || binding.LeaseEnd-now > int64(metadataTransactionBudget) {
 		return fmt.Errorf("writer grant lifetime refused")
 	}
 	if binding.Transaction != manifest.Metadata.Transaction || binding.Attempt != manifest.Metadata.Attempt {
@@ -383,7 +383,7 @@ func RunMetadataTransaction(ctx context.Context, manifest Manifest, planOnly boo
 	if err != nil {
 		return Receipt{}, nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, metadataTransactionBudget)
 	defer cancel()
 	if err := metadataCheckFDs(false); err != nil {
 		return Receipt{}, nil, err
@@ -420,7 +420,7 @@ func RunMetadataTransaction(ctx context.Context, manifest Manifest, planOnly boo
 	closeParentInput := metadataCloseOnce(parentInput.Close)
 	closeChildOutput := metadataCloseOnce(childOutput.Close)
 	defer func() { returnErr = errors.Join(returnErr, closeParentInput(), closeChildOutput()) }()
-	deadline := time.Now().Add(25 * time.Second)
+	deadline := time.Now().Add(metadataPipeBudget)
 	if err := parentInput.SetReadDeadline(deadline); err != nil {
 		return Receipt{}, nil, err
 	}
@@ -587,7 +587,7 @@ func metadataWaitLeaseExpiry(ctx context.Context, deadline int64, now func() (in
 		if err != nil {
 			return err
 		}
-		if current < 0 || deadline <= 0 || deadline-current > 30_000_000_000 {
+		if current < 0 || deadline <= 0 || deadline-current > int64(metadataTransactionBudget) {
 			return fmt.Errorf("invalid lease expiry wait")
 		}
 		if current >= deadline {

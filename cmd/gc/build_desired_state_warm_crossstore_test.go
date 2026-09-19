@@ -139,8 +139,8 @@ func TestBuildDesiredState_WarmRigPoolSeesCityStoreRoutedDemand(t *testing.T) {
 func TestBuildDesiredState_WarmRigPoolCityProbeDoesNotDoubleCountRigDemand(t *testing.T) {
 	cityPath := t.TempDir()
 	cfg := warmCrossStoreCfg(t, cityPath)
-	cityStore := beads.NewMemStore()
-	rigStore := beads.NewMemStore()
+	cityStore := newConfiguredAttemptTestStore(t, cityPath, cityPath)
+	rigStore := newConfiguredAttemptTestStore(t, cityPath, cfg.Rigs[0].Path)
 	rigStores := map[string]beads.Store{"gascity": rigStore}
 
 	createWarmSessionBead(t, cityStore)
@@ -175,9 +175,14 @@ type aliasStore struct{ beads.Store }
 // (1), not 2 — with the city probe no longer cold-gated, a double count here
 // would be a persistent warm 2x-demand condition, not a one-tick overshoot.
 func TestBuildDesiredState_WarmAliasedRigStoreDoesNotDoubleCountDemand(t *testing.T) {
+	// Preserve legacy shared backing when attempt admission reopens the store.
+	t.Setenv("GC_BEADS", "file")
 	cityPath := t.TempDir()
 	cfg := warmCrossStoreCfg(t, cityPath)
-	cityStore := beads.NewMemStore()
+	cityStore, err := openScopeLocalFileStore(cityPath)
+	if err != nil {
+		t.Fatalf("open city store: %v", err)
+	}
 	rigStores := map[string]beads.Store{"gascity": aliasStore{cityStore}}
 
 	createWarmSessionBead(t, cityStore)

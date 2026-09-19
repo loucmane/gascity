@@ -6,13 +6,6 @@ import (
 	"time"
 )
 
-const (
-	metadataGrantBudget   = 25 * time.Second
-	metadataLeaseBudget   = 28 * time.Second
-	metadataExpiryGap     = metadataLeaseBudget - metadataGrantBudget
-	metadataReturnReserve = 2 * time.Second
-)
-
 func metadataLeaseWindow(epoch, now int64, remaining time.Duration, observation bool) (int64, int64, error) {
 	if now <= 0 || now > math.MaxInt64-int64(metadataLeaseBudget) {
 		return 0, 0, fmt.Errorf("invalid metadata lease clock")

@@ -120,8 +120,22 @@ aliases, nested link materialization, mount shadowing, cycles, and overlap with
 writable parents, protected siblings or host authority paths refuse. Existing
 file/tree pins, closed loader environment, confinement and deadlines are unchanged.
 
-Transaction context is 30s; channel deadlines 25s; nonrenewing mutation lease 28s with
-at least a 2s commit margin. Version output is bounded to 8192 bytes, integrity
+The shared source policy in `metadata_limits.go` bounds the transaction context
+and lease-admission horizon to 65s, each channel deadline to 60s, the mutation
+grant to 60s and its exclusive lease to 63s. The original monotonic transaction
+epoch precedes host validation: validation consumes this budget and cannot
+renew it. A shorter caller context shortens both grant and lease, preserving the
+3s grant-to-expiry gap and 2s expiry-to-return reserve; an exhausted budget refuses
+before lease acquisition. Observation challenges retain their separate read-only
+semantics and cannot authorize publication. The protocol schema is unchanged,
+but older images retain their old bounds and must not be paired with this policy.
+
+These finite bounds accommodate the measured full preserved closure without
+removing or caching away integrity checks. They are not a command-line override
+and do not certify that a particular host finishes in time. A new image requires
+independent review, delivery and fresh input-bound adoption proof; historical
+synthetic/runtime results do not establish this timing policy's live acceptance.
+Version output is bounded to 8192 bytes, integrity
 helper streams to 1MiB each and helper execution to 5s. Protocol frames and import
 files use `metadataFrameLimit`. Unexpected nonzero helper exits remain failures.
 Outer writer wait plus pidfd terminal evidence is required, not stdout alone.
