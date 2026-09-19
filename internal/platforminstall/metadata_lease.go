@@ -63,8 +63,8 @@ func validateMetadataLeaseRequest(request MetadataLeaseRequest, now int64) error
 			return err
 		}
 	}
-	if now < 0 || request.Deadline <= now || request.Deadline-now > 30_000_000_000 {
-		return fmt.Errorf("metadata lease must expire within 30 monotonic seconds")
+	if now < 0 || request.Deadline <= now || request.Deadline-now > int64(metadataTransactionBudget) {
+		return fmt.Errorf("metadata lease must expire within %s of monotonic time", metadataTransactionBudget)
 	}
 	return nil
 }

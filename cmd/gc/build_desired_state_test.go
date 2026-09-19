@@ -11512,6 +11512,8 @@ func TestBuildDesiredState_RepairsCityRoutedRigControlWork(t *testing.T) {
 }
 
 func TestBuildDesiredState_RepairsAliasedRigControlWorkOnlyOnce(t *testing.T) {
+	// Attempt admission must reopen the same legacy unscoped file backing.
+	t.Setenv("GC_BEADS", "file")
 	cityPath := t.TempDir()
 	cityStore, err := openScopeLocalFileStore(cityPath)
 	if err != nil {

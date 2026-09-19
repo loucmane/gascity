@@ -3,7 +3,7 @@ session_id: 2026-09-08-001
 work_context: ga-ecwh-typed-worker-receipts
 handler_target: .
 bead_ids: [ga-ecwh]
-attached_bead_ids: [ga-ecwh.2, ga-tmgr, ga-ecwh.5]
+attached_bead_ids: [ga-ecwh.2, ga-tmgr, ga-ecwh.5, ga-mutg]
 branch_policy: codex/ga-ecwh-typed-worker-receipts
 evidence_summary:
   - engdocs/workflow/work-tracking/active/20260908-ga-ecwh-typed-worker-receipts-ACTIVE
