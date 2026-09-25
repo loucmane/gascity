@@ -88,14 +88,19 @@ EVENTS="$(gc events --type bead.updated --since "$LOOKBACK" 2>/dev/null)" || exi
 # Reduce to unique "<bead_id>\t<routed_to>" pairs. Only events that actually
 # carry a non-empty gc.routed_to target are considered.
 #
-# The bead.updated payload is flat — .payload.id and .payload.metadata — not
-# the nested .payload.bead.{id,metadata} an earlier schema exposed. The nested
-# paths match nothing against the current event shape, so every routed bead was
-# silently dropped and no nudge was ever delivered.
+# bead.updated reaches this script in two shapes. The event log records the
+# flat bead snapshot (.payload.id, .payload.metadata) that CachingStore emits,
+# while `gc events` served by the supervisor API re-encodes the typed
+# BeadEventPayload as {"bead": {...}} (.payload.bead.id, .payload.bead.metadata).
+# Matching only one shape silently drops every routed bead in the other, so
+# decode both the way beads.DecodeBeadEventPayload does: the wrapped form when
+# present, the flat snapshot otherwise.
 PAIRS="$(printf '%s\n' "$EVENTS" \
-    | jq -r 'select(.payload.metadata."gc.routed_to" != null
-                    and .payload.metadata."gc.routed_to" != "")
-             | [.payload.id, .payload.metadata."gc.routed_to"] | @tsv' 2>/dev/null \
+    | jq -r '(if (.payload.bead | type) == "object" then .payload.bead else .payload end) as $bead
+             | select(($bead | type) == "object"
+                      and $bead.metadata."gc.routed_to" != null
+                      and $bead.metadata."gc.routed_to" != "")
+             | [$bead.id, $bead.metadata."gc.routed_to"] | @tsv' 2>/dev/null \
     | sort -u)" || PAIRS=""
 [ -n "$PAIRS" ] || exit 0
 
