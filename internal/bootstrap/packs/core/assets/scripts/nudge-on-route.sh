@@ -88,14 +88,35 @@ EVENTS="$(gc events --type bead.updated --since "$LOOKBACK" 2>/dev/null)" || exi
 # Reduce to unique "<bead_id>\t<routed_to>" pairs. Only events that actually
 # carry a non-empty gc.routed_to target are considered.
 #
-# The bead.updated payload is flat — .payload.id and .payload.metadata — not
-# the nested .payload.bead.{id,metadata} an earlier schema exposed. The nested
-# paths match nothing against the current event shape, so every routed bead was
-# silently dropped and no nudge was ever delivered.
+# bead.updated reaches this script in two shapes. The event log records the
+# flat bead snapshot (.payload.id, .payload.metadata) that CachingStore emits,
+# while `gc events` served by the supervisor API re-encodes the typed
+# BeadEventPayload as {"bead": {...}} (.payload.bead.id, .payload.bead.metadata).
+# Matching only one shape silently drops every routed bead in the other, so
+# accept both shapes that beads.DecodeBeadEventPayload accepts. It tries the flat
+# snapshot first; this filter takes .payload.bead when it is an object and the
+# flat snapshot otherwise. The two agree, because a bead snapshot has no "bead"
+# field.
+#
+# The filter is total: every type is checked before it is indexed, and each
+# event line is decoded under try, so one malformed event can never make jq
+# fail and discard the pairs of every other event in the lookback window. Lines
+# are read raw (-R) and parsed inside the try, so a line that is not JSON at all
+# is skipped the same way.
 PAIRS="$(printf '%s\n' "$EVENTS" \
-    | jq -r 'select(.payload.metadata."gc.routed_to" != null
-                    and .payload.metadata."gc.routed_to" != "")
-             | [.payload.id, .payload.metadata."gc.routed_to"] | @tsv' 2>/dev/null \
+    | jq -R -r 'try (
+               fromjson
+               | .payload as $p
+               | (if ($p | type) == "object" and ($p.bead | type) == "object" then $p.bead
+                  elif ($p | type) == "object" then $p
+                  else null end) as $bead
+               | select(($bead | type) == "object"
+                        and ($bead.id | type) == "string" and $bead.id != ""
+                        and ($bead.metadata | type) == "object"
+                        and ($bead.metadata."gc.routed_to" | type) == "string"
+                        and $bead.metadata."gc.routed_to" != "")
+               | [$bead.id, $bead.metadata."gc.routed_to"] | @tsv
+             ) catch empty' 2>/dev/null \
     | sort -u)" || PAIRS=""
 [ -n "$PAIRS" ] || exit 0
 
