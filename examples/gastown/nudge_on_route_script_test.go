@@ -42,17 +42,17 @@ func runNudgeOnRoute(t *testing.T, events string) (string, func() (string, strin
 		t.Fatalf("WriteFile(events): %v", err)
 	}
 	writeExecutable(t, filepath.Join(binDir, "gc"), nudgeOnRouteGCStub)
-	env := mergeTestEnv(map[string]string{
+	env := map[string]string{
 		"GC_CITY":           cityDir,
 		"GC_PACK_STATE_DIR": filepath.Join(cityDir, "state"),
 		"GC_EVENTS_FILE":    eventsFile,
 		"GC_NUDGE_LOG":      nudgeLog,
 		"PATH":              binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
-	})
+	}
 	run := func() string {
-		cmd := exec.Command(coreScriptPath("nudge-on-route.sh"))
-		cmd.Env = env
-		out, err := cmd.CombinedOutput()
+		// runScriptResult is the package's reviewed script runner; reusing it
+		// keeps this test inside the subprocess resource census baseline.
+		out, err := runScriptResult(t, coreScriptPath("nudge-on-route.sh"), env)
 		if err != nil {
 			t.Fatalf("nudge-on-route.sh failed: %v\n%s", err, out)
 		}
