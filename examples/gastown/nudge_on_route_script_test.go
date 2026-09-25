@@ -29,7 +29,7 @@ esac
 exit 1
 `
 
-func runNudgeOnRoute(t *testing.T, events string) (string, func() string) {
+func runNudgeOnRoute(t *testing.T, events string) (string, func() (string, string)) {
 	t.Helper()
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("nudge-on-route.sh requires jq")
@@ -66,7 +66,7 @@ func runNudgeOnRoute(t *testing.T, events string) (string, func() string) {
 		}
 		return string(data)
 	}
-	return out, func() string { run(); return readLog() }
+	return out, func() (string, string) { again := run(); return readLog(), again }
 }
 
 // TestNudgeOnRouteAcceptsWrappedAndFlatPayloads guards ga-odny: the supervisor
@@ -79,19 +79,31 @@ func TestNudgeOnRouteAcceptsWrappedAndFlatPayloads(t *testing.T) {
 		`{"seq":1,"type":"bead.updated","actor":"cache-reconcile","subject":"ga-wrapped","payload":{"bead":{"id":"ga-wrapped","status":"open","metadata":{"gc.routed_to":"gascity/gc.implementation-worker"}}}}`,
 		// Flat snapshot recorded by CachingStore.
 		`{"seq":2,"type":"bead.updated","actor":"bd","subject":"ga-flat","payload":{"id":"ga-flat","status":"open","metadata":{"gc.routed_to":"gascity/gc.review-worker"}}}`,
-		// Unrouted, empty-target and malformed payloads are ignored.
+		// Unrouted, empty-target and malformed events are ignored, and none of
+		// them may suppress the valid events around them.
 		`{"seq":3,"type":"bead.updated","actor":"bd","subject":"ga-plain","payload":{"bead":{"id":"ga-plain","metadata":{}}}}`,
 		`{"seq":4,"type":"bead.updated","actor":"bd","subject":"ga-empty","payload":{"id":"ga-empty","metadata":{"gc.routed_to":""}}}`,
 		`{"seq":5,"type":"bead.updated","actor":"bd","subject":"ga-bad","payload":"not-an-object"}`,
+		`{"seq":7,"type":"bead.updated","actor":"bd","subject":"ga-array","payload":[{"id":"ga-array"}]}`,
+		`{"seq":8,"type":"bead.updated","actor":"bd","subject":"ga-strmeta","payload":{"id":"ga-strmeta","metadata":"gc.routed_to"}}`,
+		`{"seq":9,"type":"bead.updated","actor":"bd","subject":"ga-objroute","payload":{"id":"ga-objroute","metadata":{"gc.routed_to":{"name":"x"}}}}`,
+		`{"seq":10,"type":"bead.updated","actor":"bd","subject":"","payload":{"id":"","metadata":{"gc.routed_to":"gascity/gc.noid"}}}`,
+		`not json at all`,
 		// A repeated routing event is nudged once.
 		`{"seq":6,"type":"bead.updated","actor":"cache-reconcile","subject":"ga-wrapped","payload":{"bead":{"id":"ga-wrapped","status":"open","metadata":{"gc.routed_to":"gascity/gc.implementation-worker"}}}}`,
+		// A malformed event last: jq 1.7 takes its exit status from the final
+		// input, so this is the case that used to discard every pair.
+		`{"seq":11,"type":"bead.updated","actor":"bd","subject":"ga-last","payload":"not-an-object"}`,
 	}, "\n") + "\n"
 
 	out, rerun := runNudgeOnRoute(t, events)
 	if !strings.Contains(out, "nudged 2 newly-routed bead(s)") {
 		t.Fatalf("expected two nudges, got output:\n%s", out)
 	}
-	log := rerun()
+	log, again := rerun()
+	if strings.Contains(again, "nudged") {
+		t.Fatalf("a second run must not nudge again, got output:\n%s", again)
+	}
 	// The script visits unique pairs sorted by bead id: ga-flat, then ga-wrapped.
 	want := []string{
 		"gascity/gc.review-worker|check for assigned work",
