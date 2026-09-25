@@ -199,7 +199,9 @@ func canonicalizeCanaryEnvironment(environment CanaryEnvironment) CanaryEnvironm
 	for index := range environment.Providers {
 		environment.Providers[index].VersionArgs = append([]string(nil), environment.Providers[index].VersionArgs...)
 	}
-	sort.Slice(environment.Providers, func(i, j int) bool { return environment.Providers[i].Name < environment.Providers[j].Name })
+	sort.Slice(environment.Providers, func(i, j int) bool {
+		return platforminstall.ProviderPinLess(environment.Providers[i], environment.Providers[j])
+	})
 	environment.Profiles = append([]ProfilePin(nil), environment.Profiles...)
 	sort.Slice(environment.Profiles, func(i, j int) bool { return environment.Profiles[i].Name < environment.Profiles[j].Name })
 	return environment
@@ -306,12 +308,10 @@ func validateCanaryEnvironment(environment CanaryEnvironment) error {
 	if len(environment.Providers) == 0 {
 		return errors.New("providers must not be empty")
 	}
-	last := ""
 	for index, provider := range environment.Providers {
-		if provider.Name <= last {
-			return errors.New("providers must be sorted by unique name")
+		if index > 0 && !platforminstall.ProviderPinLess(environment.Providers[index-1], provider) {
+			return errors.New("providers must be sorted by unique name and path")
 		}
-		last = provider.Name
 		if err := validateProviderPin(provider); err != nil {
 			return fmt.Errorf("providers[%d]: %w", index, err)
 		}
@@ -319,7 +319,7 @@ func validateCanaryEnvironment(environment CanaryEnvironment) error {
 	if len(environment.Profiles) == 0 {
 		return errors.New("profiles must not be empty")
 	}
-	last = ""
+	last := ""
 	for index, profile := range environment.Profiles {
 		if strings.TrimSpace(profile.Name) == "" {
 			return fmt.Errorf("profiles[%d].name is required", index)

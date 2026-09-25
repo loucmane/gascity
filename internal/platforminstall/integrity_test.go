@@ -246,6 +246,28 @@ func TestLoadManifestRejectsUnsafeIntegrityPins(t *testing.T) {
 	}
 }
 
+func TestValidateIntegritySpecKeysProviderPinsByNameAndPath(t *testing.T) {
+	pin := func(path string) ProviderPin {
+		return ProviderPin{
+			Name: "claude", Path: path, ResolvedPath: path + "-release", SHA256: testSHA256([]byte(path)),
+			VersionArgs: []string{"--version"}, Version: "claude test",
+		}
+	}
+	signing, operations, template := pin("/opt/claude-signing"), pin("/opt/claude-operations"), pin("/opt/claude-template")
+	if err := validateIntegritySpec(&IntegritySpec{Providers: []ProviderPin{signing, operations, template}}); err != nil {
+		t.Fatalf("validateIntegritySpec(three claude-family wrappers) = %v, want nil", err)
+	}
+	err := validateIntegritySpec(&IntegritySpec{Providers: []ProviderPin{signing, operations, signing}})
+	if err == nil || !strings.Contains(err.Error(), `duplicate integrity provider pin "claude" at "/opt/claude-signing"`) {
+		t.Fatalf("validateIntegritySpec(duplicate identical pin) = %v, want duplicate pin refusal", err)
+	}
+	unnamed := operations
+	unnamed.Name = " "
+	if err := validateIntegritySpec(&IntegritySpec{Providers: []ProviderPin{unnamed}}); err == nil {
+		t.Fatal("validateIntegritySpec accepted a provider pin without a name")
+	}
+}
+
 func integrityManifest(t *testing.T, dir string) Manifest {
 	t.Helper()
 	manifest := testManifest(t, dir, []byte("candidate"), []byte("installed"))

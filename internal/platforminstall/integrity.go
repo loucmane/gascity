@@ -43,6 +43,26 @@ type ProviderPin struct {
 	Version      string   `json:"version"`
 }
 
+// ProviderPinKey identifies one provider pin. Several pinned wrappers of one
+// provider family share the family name and differ by entrypoint path.
+type ProviderPinKey struct {
+	Name string
+	Path string
+}
+
+// Key returns the identity of the pin: its provider family name and path.
+func (pin ProviderPin) Key() ProviderPinKey {
+	return ProviderPinKey{Name: pin.Name, Path: pin.Path}
+}
+
+// ProviderPinLess orders provider pins by name, then by path.
+func ProviderPinLess(a, b ProviderPin) bool {
+	if a.Name != b.Name {
+		return a.Name < b.Name
+	}
+	return a.Path < b.Path
+}
+
 // IntegritySpec is the complete managed-platform fingerprint inspected by the
 // installer doctor.
 type IntegritySpec struct {
@@ -154,12 +174,16 @@ func validateIntegritySpec(spec *IntegritySpec) error {
 		}
 	}
 
-	providerNames := make(map[string]struct{}, len(spec.Providers))
+	providerKeys := make(map[ProviderPinKey]struct{}, len(spec.Providers))
 	for _, pin := range spec.Providers {
 		field := "integrity.providers[" + pin.Name + "]"
-		if err := validatePinName("integrity provider", pin.Name, providerNames); err != nil {
-			return err
+		if strings.TrimSpace(pin.Name) == "" {
+			return errors.New("integrity provider name is required")
 		}
+		if _, exists := providerKeys[pin.Key()]; exists {
+			return fmt.Errorf("duplicate integrity provider pin %q at %q", pin.Name, pin.Path)
+		}
+		providerKeys[pin.Key()] = struct{}{}
 		if !filepath.IsAbs(pin.Path) {
 			return fmt.Errorf("%s.path must be an absolute path: %q", field, pin.Path)
 		}
