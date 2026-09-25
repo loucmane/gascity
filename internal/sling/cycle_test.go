@@ -2,6 +2,7 @@ package sling
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -176,5 +177,222 @@ func TestCycleErrorImplementsError(t *testing.T) {
 	var _ error = ce
 	if ce.Error() == "" {
 		t.Error("CycleError.Error() should return non-empty string")
+	}
+}
+
+// --- execution/hierarchy family separation ---
+
+// executionDepTypes lists every execution-family dependency type, including
+// the legacy empty type.
+var executionDepTypes = []string{"blocks", "waits-for", "conditional-blocks", ""}
+
+// failingDepGraph serves graph but fails DepList for failID.
+type failingDepGraph struct {
+	graph  fakeTypedDepGraph
+	failID string
+	err    error
+}
+
+func (g failingDepGraph) DepList(id, direction string) ([]beads.Dep, error) {
+	if id == g.failID {
+		return nil, g.err
+	}
+	return g.graph.DepList(id, direction)
+}
+
+// ring links ids into one cycle of typ edges: ids[0] → ids[1] → … → ids[0].
+func ring(typ string, ids ...string) fakeTypedDepGraph {
+	g := fakeTypedDepGraph{}
+	for i, id := range ids {
+		g[id] = append(g[id], fakeDepEdge{to: ids[(i+1)%len(ids)], typ: typ})
+	}
+	return g
+}
+
+func depTypeName(typ string) string {
+	if typ == "" {
+		return "legacy-empty"
+	}
+	return typ
+}
+
+// requireCyclePath asserts that err is a *CycleError reporting exactly want.
+func requireCyclePath(t *testing.T, err error, want ...string) {
+	t.Helper()
+	var ce *CycleError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *CycleError %v, got %T: %v", want, err, err)
+	}
+	if !slices.Equal(ce.Path, want) {
+		t.Fatalf("cycle path = %v, want %v", ce.Path, want)
+	}
+}
+
+func TestDetectCycleAcceptsMixedFamilyLoops(t *testing.T) {
+	graphs := map[string]fakeTypedDepGraph{
+		"grandparent waits on grandchild": {
+			"g": {{to: "c", typ: "waits-for"}},
+			"c": {{to: "p", typ: "parent-child"}},
+			"p": {{to: "g", typ: "parent-child"}},
+		},
+		"epic waits on chained children": {
+			"epic": {{to: "t2", typ: "waits-for"}},
+			"t2":   {{to: "t1", typ: "blocks"}, {to: "epic", typ: "parent-child"}},
+			"t1":   {{to: "epic", typ: "parent-child"}},
+		},
+		"parent waits on child blocked by sibling": {
+			"p":  {{to: "t1", typ: "blocks"}},
+			"t1": {{to: "t2", typ: "conditional-blocks"}, {to: "p", typ: "parent-child"}},
+			"t2": {{to: "p", typ: "parent-child"}},
+		},
+	}
+	for _, typ := range executionDepTypes {
+		graphs["parent waits on child via "+depTypeName(typ)] = fakeTypedDepGraph{
+			"parent": {{to: "child", typ: typ}},
+			"child":  {{to: "parent", typ: "parent-child"}},
+		}
+	}
+	for name, g := range graphs {
+		t.Run(name, func(t *testing.T) {
+			for start := range g {
+				if err := DetectCycle(start, g); err != nil {
+					t.Fatalf("DetectCycle(%q) = %v, want nil", start, err)
+				}
+			}
+		})
+	}
+}
+
+func TestDetectCycleRefusesSingleFamilyCycles(t *testing.T) {
+	for _, typ := range append(slices.Clone(executionDepTypes), "parent-child") {
+		t.Run(depTypeName(typ), func(t *testing.T) {
+			requireCyclePath(t, DetectCycle("a", ring(typ, "a", "b")), "a", "b", "a")
+			requireCyclePath(t, DetectCycle("a", ring(typ, "a", "b", "c")), "a", "b", "c", "a")
+			requireCyclePath(t, DetectCycle("a", ring(typ, "a")), "a", "a")
+		})
+	}
+	t.Run("mixed execution types", func(t *testing.T) {
+		g := fakeTypedDepGraph{
+			"a": {{to: "b", typ: "blocks"}},
+			"b": {{to: "c", typ: "waits-for"}},
+			"c": {{to: "d", typ: "conditional-blocks"}},
+			"d": {{to: "a", typ: ""}},
+		}
+		requireCyclePath(t, DetectCycle("a", g), "a", "b", "c", "d", "a")
+	})
+}
+
+func TestDetectCycleRefusesCyclesReachableThroughOppositeFamily(t *testing.T) {
+	viaParent := fakeTypedDepGraph{
+		"start": {{to: "p", typ: "parent-child"}},
+		"p":     {{to: "q", typ: "blocks"}},
+		"q":     {{to: "p", typ: "waits-for"}},
+	}
+	requireCyclePath(t, DetectCycle("start", viaParent), "p", "q", "p")
+
+	viaBlocker := fakeTypedDepGraph{
+		"start": {{to: "x", typ: "blocks"}},
+		"x":     {{to: "y", typ: "parent-child"}},
+		"y":     {{to: "x", typ: "parent-child"}},
+	}
+	requireCyclePath(t, DetectCycle("start", viaBlocker), "x", "y", "x")
+}
+
+func TestDetectCycleRefusesRealCycleInsideMixedGraph(t *testing.T) {
+	execution := fakeTypedDepGraph{
+		"parent":  {{to: "child", typ: "waits-for"}},
+		"child":   {{to: "parent", typ: "parent-child"}, {to: "sibling", typ: "blocks"}},
+		"sibling": {{to: "child", typ: "blocks"}},
+	}
+	requireCyclePath(t, DetectCycle("parent", execution), "child", "sibling", "child")
+
+	hierarchy := fakeTypedDepGraph{
+		"parent": {{to: "child", typ: "waits-for"}, {to: "child", typ: "parent-child"}},
+		"child":  {{to: "parent", typ: "parent-child"}},
+	}
+	requireCyclePath(t, DetectCycle("parent", hierarchy), "parent", "child", "parent")
+}
+
+func TestDetectCycleIgnoresInformationalEdges(t *testing.T) {
+	for _, typ := range []string{"relates-to", "tracks"} {
+		t.Run(typ, func(t *testing.T) {
+			graphs := []fakeTypedDepGraph{
+				// An informational edge never closes an execution or hierarchy cycle.
+				{"a": {{to: "b", typ: "blocks"}}, "b": {{to: "a", typ: typ}}},
+				{"a": {{to: "b", typ: "parent-child"}}, "b": {{to: "a", typ: typ}}},
+				// A cycle reachable only through an informational edge is out of scope.
+				{"a": {{to: "b", typ: typ}}, "b": {{to: "c", typ: "blocks"}}, "c": {{to: "b", typ: "blocks"}}},
+			}
+			for i, g := range graphs {
+				if err := DetectCycle("a", g); err != nil {
+					t.Errorf("graph %d: DetectCycle = %v, want nil", i, err)
+				}
+			}
+		})
+	}
+}
+
+func TestDetectCycleAcceptsAcyclicDiamonds(t *testing.T) {
+	for _, typ := range append(slices.Clone(executionDepTypes), "parent-child") {
+		g := fakeTypedDepGraph{
+			"a": {{to: "b", typ: typ}, {to: "c", typ: typ}},
+			"b": {{to: "d", typ: typ}},
+			"c": {{to: "d", typ: typ}},
+		}
+		if err := DetectCycle("a", g); err != nil {
+			t.Errorf("%s diamond: DetectCycle = %v, want nil", depTypeName(typ), err)
+		}
+	}
+	mixed := fakeTypedDepGraph{
+		"a": {{to: "b", typ: "blocks"}, {to: "c", typ: "parent-child"}, {to: "d", typ: "waits-for"}, {to: "d", typ: "parent-child"}},
+		"b": {{to: "d", typ: "parent-child"}},
+		"c": {{to: "d", typ: "conditional-blocks"}},
+	}
+	if err := DetectCycle("a", mixed); err != nil {
+		t.Errorf("mixed diamond: DetectCycle = %v, want nil", err)
+	}
+}
+
+func TestDetectCycleFailsClosedOnReadErrors(t *testing.T) {
+	errStore := errors.New("store down")
+	graphs := map[string]fakeTypedDepGraph{
+		"reachable only through hierarchy": {
+			"start": {{to: "p", typ: "parent-child"}},
+		},
+		"behind a valid mixed loop": {
+			"start": {{to: "child", typ: "waits-for"}},
+			"child": {{to: "start", typ: "parent-child"}, {to: "p", typ: "blocks"}},
+		},
+	}
+	for name, g := range graphs {
+		t.Run(name, func(t *testing.T) {
+			err := DetectCycle("start", failingDepGraph{graph: g, failID: "p", err: errStore})
+			if !errors.Is(err, errStore) {
+				t.Fatalf("DetectCycle = %v, want wrapped %v", err, errStore)
+			}
+			if !strings.Contains(err.Error(), "reading dependencies of p") {
+				t.Errorf("error %q should name the unreadable bead", err)
+			}
+		})
+	}
+}
+
+func TestDetectCycleDiagnosticsAreDeterministic(t *testing.T) {
+	// Execution cycles a⇄b and a⇄c and hierarchy cycle a⇄h share bead a.
+	// Whatever order the store lists dependencies in, the execution family is
+	// checked first and dependencies are visited in bead ID order.
+	forward := fakeTypedDepGraph{
+		"a": {{to: "b", typ: "blocks"}, {to: "c", typ: "blocks"}, {to: "h", typ: "parent-child"}},
+		"b": {{to: "a", typ: "blocks"}},
+		"c": {{to: "a", typ: "blocks"}},
+		"h": {{to: "a", typ: "parent-child"}},
+	}
+	reversed := fakeTypedDepGraph{}
+	for id, edges := range forward {
+		reversed[id] = slices.Clone(edges)
+		slices.Reverse(reversed[id])
+	}
+	for _, g := range []fakeTypedDepGraph{forward, reversed} {
+		requireCyclePath(t, DetectCycle("a", g), "a", "b", "a")
 	}
 }

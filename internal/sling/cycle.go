@@ -2,6 +2,7 @@ package sling
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -26,43 +27,119 @@ func (e *CycleError) Error() string {
 	return fmt.Sprintf("dependency cycle detected: %s", strings.Join(e.Path, " → "))
 }
 
-// DetectCycle performs a depth-first search from startID, following "down"
-// (depends-on) edges. It returns a CycleError if a cycle is reachable from
-// startID, or nil if the reachable subgraph is acyclic.
+// DetectCycle returns a CycleError if routing startID would depend on a
+// cycle that can never make progress, or nil otherwise. It first collects
+// every bead reachable from startID through execution or hierarchy
+// dependencies, then searches each family for a cycle independently, so a
+// cycle reachable only through the other family is still found.
 //
-// Only scheduling-relevant dependency types are cycle-sensitive
-// ("blocks", "waits-for", "conditional-blocks", "parent-child", and the
-// empty default); informational types ("relates-to", "tracks") are skipped.
+// Execution dependencies ("blocks", "waits-for", "conditional-blocks", and
+// the legacy empty type) order work; hierarchy dependencies ("parent-child")
+// record structure. A loop that mixes the two families is valid: a parent may
+// wait on its own child. Informational types ("relates-to", "tracks") are
+// skipped. A failure to read any collected bead's dependencies is returned
+// rather than treated as an acyclic graph.
+//
+// The reported cycle is deterministic: execution cycles are reported before
+// hierarchy cycles, and dependencies are visited in bead ID order.
 func DetectCycle(startID string, dl DepLister) error {
-	// Three-color DFS: white (unvisited), gray (in stack), black (done).
-	const (
-		white = 0
-		gray  = 1
-		black = 2
-	)
-	color := map[string]int{}
-	parent := map[string]string{}
+	g, err := collectRoutingDeps(startID, dl)
+	if err != nil {
+		return err
+	}
+	for _, edges := range []map[string][]string{g.execution, g.hierarchy} {
+		if path := findCycle(g.nodes, edges); path != nil {
+			return &CycleError{Path: path}
+		}
+	}
+	return nil
+}
 
-	var dfs func(id string) error
-	dfs = func(id string) error {
-		color[id] = gray
+// routingDeps is the dependency graph reachable from a sling target, split
+// into its execution and hierarchy families.
+type routingDeps struct {
+	nodes     []string            // discovery order, starting with the sling target
+	execution map[string][]string // bead ID → sorted execution dependency IDs
+	hierarchy map[string][]string // bead ID → sorted parent IDs
+}
+
+// collectRoutingDeps walks execution and hierarchy dependencies breadth-first
+// from startID, reading each reachable bead's dependencies exactly once.
+func collectRoutingDeps(startID string, dl DepLister) (routingDeps, error) {
+	g := routingDeps{execution: map[string][]string{}, hierarchy: map[string][]string{}}
+	seen := map[string]bool{startID: true}
+	queue := []string{startID}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		g.nodes = append(g.nodes, id)
 		deps, err := dl.DepList(id, "down")
 		if err != nil {
-			return fmt.Errorf("reading dependencies of %s: %w", id, err)
+			return routingDeps{}, fmt.Errorf("reading dependencies of %s: %w", id, err)
 		}
+		var reached []string
 		for _, d := range deps {
-			if !isCycleSensitiveDep(d.Type) {
+			switch {
+			case isExecutionDep(d.Type):
+				g.execution[id] = append(g.execution[id], d.DependsOnID)
+			case isHierarchyDep(d.Type):
+				g.hierarchy[id] = append(g.hierarchy[id], d.DependsOnID)
+			default:
 				continue
 			}
-			next := d.DependsOnID
-			if color[next] == gray {
-				// Cycle found — reconstruct the path.
-				return &CycleError{Path: buildCyclePath(parent, id, next)}
+			reached = append(reached, d.DependsOnID)
+		}
+		g.execution[id] = sortedUnique(g.execution[id])
+		g.hierarchy[id] = sortedUnique(g.hierarchy[id])
+		for _, next := range sortedUnique(reached) {
+			if !seen[next] {
+				seen[next] = true
+				queue = append(queue, next)
 			}
-			if color[next] == white {
+		}
+	}
+	return g, nil
+}
+
+// isExecutionDep reports whether a dependency type orders execution: the
+// ready-blocking types plus the legacy empty type.
+func isExecutionDep(depType string) bool {
+	return depType == "" || beads.IsReadyBlockingDependencyType(depType)
+}
+
+// isHierarchyDep reports whether a dependency type links a child to its parent.
+func isHierarchyDep(depType string) bool {
+	return depType == "parent-child"
+}
+
+func sortedUnique(ids []string) []string {
+	slices.Sort(ids)
+	return slices.Compact(ids)
+}
+
+// findCycle runs a three-color depth-first search along edges from each of
+// nodes in order and returns the first cycle found, or nil if edges are
+// acyclic.
+func findCycle(nodes []string, edges map[string][]string) []string {
+	const (
+		white = iota // unvisited
+		gray         // on the current search path
+		black        // fully explored
+	)
+	color := make(map[string]int, len(nodes))
+	parent := map[string]string{}
+
+	var visit func(id string) []string
+	visit = func(id string) []string {
+		color[id] = gray
+		for _, next := range edges[id] {
+			switch color[next] {
+			case gray:
+				return buildCyclePath(parent, id, next)
+			case white:
 				parent[next] = id
-				if err := dfs(next); err != nil {
-					return err
+				if path := visit(next); path != nil {
+					return path
 				}
 			}
 		}
@@ -70,18 +147,14 @@ func DetectCycle(startID string, dl DepLister) error {
 		return nil
 	}
 
-	return dfs(startID)
-}
-
-// isCycleSensitiveDep reports whether a dependency type creates a scheduling
-// obligation that would deadlock if cyclic. Informational relation types
-// ("relates-to", "tracks") are excluded.
-func isCycleSensitiveDep(depType string) bool {
-	switch depType {
-	case "blocks", "waits-for", "conditional-blocks", "parent-child", "":
-		return true
+	for _, id := range nodes {
+		if color[id] == white {
+			if path := visit(id); path != nil {
+				return path
+			}
+		}
 	}
-	return false
+	return nil
 }
 
 // buildCyclePath reconstructs the cycle as a human-readable slice.
