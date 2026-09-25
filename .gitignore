@@ -76,3 +76,12 @@ __pycache__/
 # Beads / Dolt files (added by bd init)
 .beads/proxieddb/
 .beads.backup-*
+/.claude/skills/.gc-skill-ownership.json
+/.claude/skills/core.gc-agents
+/.claude/skills/core.gc-city
+/.claude/skills/core.gc-dashboard
+/.claude/skills/core.gc-dispatch
+/.claude/skills/core.gc-mail
+/.claude/skills/core.gc-rigs
+/.claude/skills/core.gc-work
+/.claude/skills/gascity.mayor
