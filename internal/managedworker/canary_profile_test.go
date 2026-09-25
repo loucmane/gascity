@@ -234,6 +234,43 @@ func TestCandidateCanaryRefusesSigningAndIncompleteSteps(t *testing.T) {
 	}
 }
 
+func TestCanaryProfileScopeAcceptsPinnedWrappersOfOneProviderFamily(t *testing.T) {
+	provisioning, err := LoadProvisioningReceipt(typedReceiptWire(t, string(ProfileKindSigning), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signing := provisioning.Profiles[0]
+	environment := testCanaryEnvironment(provisioning)
+	for _, name := range []string{"operations-candidate", "template-candidate"} {
+		candidate := cloneProfile(signing)
+		candidate.Name = name
+		candidate.WorkerProfileSHA256 = digest(name)
+		candidate.Provider.Path = "/opt/gas-city/" + name + "/wrapper"
+		candidate.Provider.SHA256 = digest(name + "-wrapper")
+		provisioning.Profiles = append(provisioning.Profiles, candidate)
+		environment.Profiles = append(environment.Profiles, ProfilePin{Name: name, SHA256: candidate.WorkerProfileSHA256})
+		environment.Providers = append(environment.Providers, candidate.Provider)
+	}
+	environment = canonicalizeCanaryEnvironment(environment)
+	if err := validateCanaryEnvironment(environment); err != nil {
+		t.Fatalf("validateCanaryEnvironment(three wrappers of one family) = %v, want nil", err)
+	}
+	target := &CanaryProfile{Name: signing.Name, Kind: ProfileKindSigning, SHA256: signing.WorkerProfileSHA256}
+	if err := validateCanaryProfile(provisioning, environment, target); err != nil {
+		t.Fatalf("validateCanaryProfile(three wrappers of one family) = %v, want nil", err)
+	}
+	duplicate := cloneCanaryEnvironment(environment)
+	duplicate.Providers = append(duplicate.Providers, duplicate.Providers[0])
+	if err := validateCanaryEnvironment(canonicalizeCanaryEnvironment(duplicate)); err == nil {
+		t.Fatal("validateCanaryEnvironment accepted a duplicate identical provider pin")
+	}
+	unpinned := cloneCanaryEnvironment(environment)
+	unpinned.Providers = unpinned.Providers[1:]
+	if err := validateCanaryProfile(provisioning, unpinned, target); err == nil {
+		t.Fatal("validateCanaryProfile accepted a profile whose wrapper is not pinned")
+	}
+}
+
 func passingTypedCanaryEvidence(name string) CanaryScenarioEvidence {
 	if name == CanaryScenarioCandidateLauncher {
 		return CanaryScenarioEvidence{Name: name, Resolution: CanaryResolutionCompleted, CompletedSteps: RequiredCandidateLauncherSteps()}

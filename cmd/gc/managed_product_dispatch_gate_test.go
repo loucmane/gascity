@@ -124,6 +124,32 @@ func dispatchGateFixture(t *testing.T) (managedworker.ProvisioningReceipt, []byt
 	return provisioning, canaryData, environment
 }
 
+func TestDispatchGateProviderPinsKeyedByNameAndPath(t *testing.T) {
+	wrapper := func(name string) platforminstall.ProviderPin {
+		return platforminstall.ProviderPin{
+			Name: "claude", Path: "/opt/gas-city/" + name + "/claude", ResolvedPath: "/opt/gas-city/" + name + "/claude-release",
+			SHA256: dispatchGateDigest(name), VersionArgs: []string{"--version"}, Version: "claude test",
+		}
+	}
+	signing, operations, template := wrapper("core-signing"), wrapper("operations-candidate"), wrapper("template-candidate")
+	pins := providerPinIndex([]platforminstall.ProviderPin{signing, operations, template})
+	for _, provider := range []platforminstall.ProviderPin{signing, operations, template} {
+		pin, err := pinnedProfileProvider(pins, provider)
+		if err != nil || pin.Key() != provider.Key() {
+			t.Fatalf("pinnedProfileProvider(%s) = %+v, %v; want its own pin", provider.Path, pin, err)
+		}
+	}
+	drifted := operations
+	drifted.SHA256 = dispatchGateDigest("drifted")
+	unpinned := template
+	unpinned.Path = "/opt/gas-city/unpinned/claude"
+	for label, provider := range map[string]platforminstall.ProviderPin{"drifted": drifted, "unpinned": unpinned} {
+		if _, err := pinnedProfileProvider(pins, provider); err == nil {
+			t.Fatalf("pinnedProfileProvider accepted a %s wrapper", label)
+		}
+	}
+}
+
 func dispatchGateDigest(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])

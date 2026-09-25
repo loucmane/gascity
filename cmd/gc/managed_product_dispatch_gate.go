@@ -187,14 +187,12 @@ func (gate *managedProductDispatchGate) observeLiveEnvironment(ctx context.Conte
 		return managedworker.CanaryEnvironment{}, err
 	}
 
-	providerPins := make(map[string]platforminstall.ProviderPin)
+	var providerPins map[platforminstall.ProviderPinKey]platforminstall.ProviderPin
 	if manifest.Integrity != nil {
-		for _, pin := range manifest.Integrity.Providers {
-			providerPins[pin.Name] = pin
-		}
+		providerPins = providerPinIndex(manifest.Integrity.Providers)
 	}
 	profiles := make([]managedworker.ProfilePin, 0, len(provisioning.Profiles))
-	providers := make(map[string]platforminstall.ProviderPin)
+	providers := make(map[platforminstall.ProviderPinKey]platforminstall.ProviderPin)
 	for _, profile := range provisioning.Profiles {
 		if err := managedworker.VerifyControlPolicy(gate.readControlPolicy, profile); err != nil {
 			return managedworker.CanaryEnvironment{}, managedworker.RefuseDispatch("profiles["+profile.Name+"].control_policy", "exact protected policy", err.Error())
@@ -202,19 +200,16 @@ func (gate *managedProductDispatchGate) observeLiveEnvironment(ctx context.Conte
 		if err := verifyDispatchFilePin(gate.readFile, "profiles["+profile.Name+"].check_path", profile.CheckPath); err != nil {
 			return managedworker.CanaryEnvironment{}, err
 		}
-		pin, ok := providerPins[profile.Provider.Name]
-		if !ok {
-			return managedworker.CanaryEnvironment{}, managedworker.RefuseDispatch("providers["+profile.Provider.Name+"]", "platform-pinned", "missing")
-		}
-		if !providerPinsEqual(profile.Provider, pin) {
-			return managedworker.CanaryEnvironment{}, managedworker.RefuseDispatch("providers["+profile.Provider.Name+"]", fmt.Sprintf("%+v", profile.Provider), fmt.Sprintf("%+v", pin))
+		pin, err := pinnedProfileProvider(providerPins, profile.Provider)
+		if err != nil {
+			return managedworker.CanaryEnvironment{}, err
 		}
 		digest, digestErr := managedworker.WorkerProfileDigest(profile)
 		if digestErr != nil {
 			return managedworker.CanaryEnvironment{}, managedworker.RefuseDispatch("profiles["+profile.Name+"].sha256", "valid", digestErr.Error())
 		}
 		profiles = append(profiles, managedworker.ProfilePin{Name: profile.Name, SHA256: digest})
-		providers[pin.Name] = pin
+		providers[pin.Key()] = pin
 	}
 
 	if manifest.Integrity == nil || !containsRepositoryCommit(manifest.Integrity.Repositories, provisioning.TemplateCommit) {
@@ -227,7 +222,7 @@ func (gate *managedProductDispatchGate) observeLiveEnvironment(ctx context.Conte
 	for _, pin := range providers {
 		providerList = append(providerList, pin)
 	}
-	sort.Slice(providerList, func(i, j int) bool { return providerList[i].Name < providerList[j].Name })
+	sort.Slice(providerList, func(i, j int) bool { return platforminstall.ProviderPinLess(providerList[i], providerList[j]) })
 	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
 	return managedworker.CanaryEnvironment{
 		GCBinary:                  managedworker.BinaryPin{Commit: manifest.Activation.ExpectedCommit, SHA256: manifest.Core.SHA256},
@@ -239,6 +234,29 @@ func (gate *managedProductDispatchGate) observeLiveEnvironment(ctx context.Conte
 		Rules:                     provisioning.Rules,
 		TemplateCommit:            provisioning.TemplateCommit,
 	}, nil
+}
+
+// providerPinIndex keys platform provider pins by provider name and path, so
+// several pinned wrappers of one provider family coexist.
+func providerPinIndex(pins []platforminstall.ProviderPin) map[platforminstall.ProviderPinKey]platforminstall.ProviderPin {
+	index := make(map[platforminstall.ProviderPinKey]platforminstall.ProviderPin, len(pins))
+	for _, pin := range pins {
+		index[pin.Key()] = pin
+	}
+	return index
+}
+
+// pinnedProfileProvider returns the platform pin for a profile's provider
+// wrapper, refusing a wrapper that is unpinned or differs from its pin.
+func pinnedProfileProvider(pins map[platforminstall.ProviderPinKey]platforminstall.ProviderPin, provider platforminstall.ProviderPin) (platforminstall.ProviderPin, error) {
+	pin, ok := pins[provider.Key()]
+	if !ok {
+		return platforminstall.ProviderPin{}, managedworker.RefuseDispatch("providers["+provider.Name+"]", "platform-pinned", "missing")
+	}
+	if !providerPinsEqual(provider, pin) {
+		return platforminstall.ProviderPin{}, managedworker.RefuseDispatch("providers["+provider.Name+"]", fmt.Sprintf("%+v", provider), fmt.Sprintf("%+v", pin))
+	}
+	return pin, nil
 }
 
 func verifyDispatchFilePin(readFile func(string) ([]byte, error), field string, pin managedworker.FilePin) error {

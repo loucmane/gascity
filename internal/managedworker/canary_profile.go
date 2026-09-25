@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+
+	"github.com/gastownhall/gascity/internal/platforminstall"
 )
 
 const (
@@ -109,7 +111,7 @@ func validateCanaryProfile(provisioning ProvisioningReceipt, environment CanaryE
 	if len(environment.Profiles) != len(provisioning.Profiles) {
 		return errors.New("canary environment profile inventory differs from provisioning receipt")
 	}
-	providers := make(map[string]bool)
+	providers := make(map[platforminstall.ProviderPinKey]bool)
 	for _, declared := range provisioning.Profiles {
 		found := false
 		for _, pin := range environment.Profiles {
@@ -131,7 +133,7 @@ func validateCanaryProfile(provisioning ProvisioningReceipt, environment CanaryE
 		if !found {
 			return fmt.Errorf("canary environment provider %q differs from provisioning receipt", declared.Provider.Name)
 		}
-		providers[declared.Provider.Name] = true
+		providers[declared.Provider.Key()] = true
 	}
 	if len(providers) != len(environment.Providers) {
 		return errors.New("canary environment provider inventory differs from provisioning receipt")
