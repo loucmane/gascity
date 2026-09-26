@@ -124,3 +124,27 @@ func guardTemplateLaunchWorkDir(cityPath string, cfg *config.City, tp TemplatePa
 	log.Printf("session %s: ignoring %s work_dir %q: outside the allowed roots or not a safe path (ga-6umo)", boundedLogValue(sessionID), source, boundedLogValue(candidate))
 	return "", false
 }
+
+// safeSessionName reports whether a tmux session name read from bead metadata
+// may be substituted into setup templates: one plain name segment (ga-6umo).
+func safeSessionName(name string) bool {
+	return !strings.Contains(name, "/") && workdirutil.SafeIdentityName(name)
+}
+
+// unsafeSetupContextField names the first identity field of ctx that is not
+// a plain name, or returns "". Session, agent and rig names can come from
+// worker-writable bead metadata and are substituted unquoted into shell
+// templates, so a context with such a field is never expanded (ga-6umo).
+func unsafeSetupContextField(ctx SessionSetupContext) string {
+	for _, f := range []struct{ name, value string }{
+		{"session", ctx.Session},
+		{"agent", ctx.Agent},
+		{"agent base", ctx.AgentBase},
+		{"rig", ctx.Rig},
+	} {
+		if f.value != "" && !workdirutil.SafeIdentityName(f.value) {
+			return f.name
+		}
+	}
+	return ""
+}

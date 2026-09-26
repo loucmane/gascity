@@ -13,6 +13,7 @@ import (
 	"github.com/gastownhall/gascity/internal/materialize"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
+	workdirutil "github.com/gastownhall/gascity/internal/workdir"
 	"github.com/gastownhall/gascity/internal/worker"
 )
 
@@ -192,7 +193,15 @@ func resolvedRuntimeMCPServersWithConfig(
 	if identity == "" {
 		identity = strings.TrimSpace(provider)
 	}
+	// ga-6umo: the MCP identity comes from worker-writable metadata and is
+	// substituted into MCP server templates; only a plain name is used.
+	if identity != "" && !workdirutil.SafeIdentityName(identity) {
+		identity = ""
+	}
 	if agentCfg := findAgentByTemplate(cfg, template); agentCfg != nil {
+		if identity == "" {
+			identity = agentCfg.QualifiedName()
+		}
 		catalog, err := materialize.EffectiveMCPForSession(cfg, cityPath, agentCfg, identity, workDir)
 		if err != nil {
 			return nil, fmt.Errorf("loading effective MCP: %w", err)
@@ -605,9 +614,12 @@ func resolvedWorkerRuntimeWithConfigAndMetadata(cityPath string, cfg *config.Cit
 	// the session_live theme/keybinding hooks never run. The setup context is
 	// built via the reconciler's own sessionSetupContextForAgent() so
 	// {{.Rig}}/{{.RigRoot}}/{{.AgentBase}} expand correctly. See ga-vtkhi.
-	qualifiedName := firstNonEmptyGCString(info.AgentName, info.Template)
 	var sessionLive []string
 	if agentCfg := findAgentByTemplate(cfg, info.Template); agentCfg != nil && len(agentCfg.SessionLive) > 0 {
+		// ga-6umo: agent_name is worker-writable; only a plain identity of
+		// this agent expands the templates (session_name is checked by
+		// expandSessionSetup).
+		qualifiedName := workdirutil.SafeAgentIdentity(cityPath, *agentCfg, cfg.Rigs, info.AgentName)
 		setupCtx := sessionSetupContextForAgent(cityPath, cfg.EffectiveCityName(), qualifiedName, agentCfg, cfg.Rigs)
 		setupCtx.Session = info.SessionName
 		setupCtx.WorkDir = workDir

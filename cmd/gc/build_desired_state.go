@@ -3427,7 +3427,7 @@ func sessionBeadQualifiedName(cityPath string, cfgAgent *config.Agent, rigs []co
 	if cfgAgent == nil {
 		return ""
 	}
-	persistedAgentName := normalizeSessionBeadQualifiedName(cfgAgent, sessionBeadAgentName(sessionBead))
+	persistedAgentName := safeSessionBeadIdentity(cityPath, cfgAgent, rigs, normalizeSessionBeadQualifiedName(cfgAgent, sessionBeadAgentName(sessionBead)))
 	if persistedAgentName != "" {
 		if !cfgAgent.SupportsMultipleSessions() || persistedAgentName != cfgAgent.QualifiedName() {
 			return persistedAgentName
@@ -3455,7 +3455,7 @@ func sessionBeadQualifiedName(cityPath string, cfgAgent *config.Agent, rigs []co
 		explicitName,
 	)
 	if qualifiedName != "" {
-		return qualifiedName
+		return safeSessionBeadIdentity(cityPath, cfgAgent, rigs, qualifiedName)
 	}
 	return cfgAgent.QualifiedName()
 }
@@ -3470,7 +3470,7 @@ func sessionBeadQualifiedNameInfo(cityPath string, cfgAgent *config.Agent, rigs 
 	if cfgAgent == nil {
 		return ""
 	}
-	persistedAgentName := normalizeSessionBeadQualifiedName(cfgAgent, sessionBeadAgentNameInfo(info))
+	persistedAgentName := safeSessionBeadIdentity(cityPath, cfgAgent, rigs, normalizeSessionBeadQualifiedName(cfgAgent, sessionBeadAgentNameInfo(info)))
 	if persistedAgentName != "" {
 		if !cfgAgent.SupportsMultipleSessions() || persistedAgentName != cfgAgent.QualifiedName() {
 			return persistedAgentName
@@ -3498,10 +3498,24 @@ func sessionBeadQualifiedNameInfo(cityPath string, cfgAgent *config.Agent, rigs 
 		explicitName,
 	)
 	// ga-6umo: alias and session_name are worker-writable too.
-	if qualifiedName != "" && workdirutil.SafeIdentityName(qualifiedName) {
-		return qualifiedName
+	if qualifiedName != "" {
+		return safeSessionBeadIdentity(cityPath, cfgAgent, rigs, qualifiedName)
 	}
 	return cfgAgent.QualifiedName()
+}
+
+// safeSessionBeadIdentity keeps a session bead identity only when it is a
+// plain identity of cfgAgent whose directory part is the agent dir or its rig
+// (workdir.SafeAgentIdentity); otherwise the configured identity is used. The
+// identity comes from worker-writable agent_name, alias or session_name and
+// selects the rig, its bead store and roots, and startup template values, so
+// neither a traversal nor another rig prefix may pass (ga-6umo). An empty
+// identity stays empty.
+func safeSessionBeadIdentity(cityPath string, cfgAgent *config.Agent, rigs []config.Rig, identity string) string {
+	if cfgAgent == nil || strings.TrimSpace(identity) == "" {
+		return strings.TrimSpace(identity)
+	}
+	return workdirutil.SafeAgentIdentity(cityPath, *cfgAgent, rigs, identity)
 }
 
 func normalizeSessionBeadQualifiedName(cfgAgent *config.Agent, identity string) string {

@@ -39,3 +39,20 @@ func TestAPIResumeKeepsPermissionDefaultOnBadMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestResumeSessionIdentityRefusesUnsafeValues(t *testing.T) {
+	for _, tc := range []struct {
+		info     session.Info
+		metadata map[string]string
+		want     string
+	}{
+		{session.Info{AgentName: "myrig/ant-1"}, nil, "myrig/ant-1"},
+		{session.Info{AgentName: "../../x"}, nil, ""},
+		{session.Info{AgentName: "myrig/ant-1"}, map[string]string{session.MCPIdentityMetadataKey: "x; id"}, ""},
+		{session.Info{Template: "myrig/ant"}, nil, "myrig/ant"},
+	} {
+		if got := resumeSessionIdentity(tc.info, tc.metadata); got != tc.want {
+			t.Errorf("resumeSessionIdentity(%+v, %v) = %q, want %q", tc.info, tc.metadata, got, tc.want)
+		}
+	}
+}

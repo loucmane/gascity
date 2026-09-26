@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"sort"
@@ -224,6 +225,12 @@ type SessionSetupContext struct {
 func expandSessionSetup(cmds []string, ctx SessionSetupContext) []string {
 	if len(cmds) == 0 {
 		return nil
+	}
+	// ga-6umo: never substitute an identity value that is not a plain name;
+	// keep the raw commands, as on a template error.
+	if field := unsafeSetupContextField(ctx); field != "" {
+		log.Printf("session setup: not expanding templates: %s name is not a plain name (ga-6umo)", field)
+		return append([]string(nil), cmds...)
 	}
 	result := make([]string, len(cmds))
 	for i, raw := range cmds {

@@ -164,13 +164,24 @@ func sessionResumeInteractive(metadata map[string]string) bool {
 	return strings.TrimSpace(metadata["session_origin"]) == "manual"
 }
 
+// resumeSessionIdentity returns the MCP identity for a resumed session.
+// ga-6umo: every candidate comes from worker-writable metadata and is
+// substituted into MCP server templates, so only a plain name is used.
 func resumeSessionIdentity(info session.Info, metadata map[string]string) string {
+	candidates := []string{}
 	if metadata != nil {
-		if identity := strings.TrimSpace(metadata[session.MCPIdentityMetadataKey]); identity != "" {
-			return identity
+		candidates = append(candidates, metadata[session.MCPIdentityMetadataKey])
+	}
+	candidates = append(candidates, info.AgentName, info.Alias, info.Template, info.Provider)
+	for _, c := range candidates {
+		if c = strings.TrimSpace(c); c != "" {
+			if workdirutil.SafeIdentityName(c) {
+				return c
+			}
+			return ""
 		}
 	}
-	return firstNonEmptyString(info.AgentName, info.Alias, info.Template, info.Provider)
+	return ""
 }
 
 func (s *Server) resumeSessionMCPServers(info session.Info, metadata map[string]string, resolved *config.ResolvedProvider, workDir, transport string) ([]runtime.MCPServerConfig, error) {
@@ -227,7 +238,7 @@ func (s *Server) sessionMCPServers(template, providerName, identity, workDir, tr
 			cfg,
 			s.state.CityPath(),
 			&agentCfg,
-			firstNonEmptyString(identity, template),
+			firstNonEmptyString(identity, agentCfg.QualifiedName()),
 			workDir,
 		)
 		if err != nil {

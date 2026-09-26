@@ -271,3 +271,92 @@ func TestReconcilerIdentityIgnoresAgentNameTraversal(t *testing.T) {
 		t.Errorf("resolveConfiguredWorkDir(dog-2) = %q, %v, want the instance work_dir", workDir, err)
 	}
 }
+
+// ga-6umo round 3: identity values from worker-writable metadata are
+// substituted unquoted into shell templates and select the rig.
+func TestExpandSessionSetupRefusesUnsafeIdentity(t *testing.T) {
+	cmds := []string{`tmux set -t '{{.Session}}' @agent '{{.Agent}}'`}
+	safe := expandSessionSetup(cmds, SessionSetupContext{Session: "worker-1", Agent: "myrig/worker-1", AgentBase: "worker-1", Rig: "myrig"})
+	if got, want := safe[0], `tmux set -t 'worker-1' @agent 'myrig/worker-1'`; got != want {
+		t.Fatalf("safe expansion = %q, want %q", got, want)
+	}
+	for _, ctx := range []SessionSetupContext{
+		{Session: "x'; touch /tmp/pwn; '", Agent: "myrig/worker-1"},
+		{Session: "worker-1", Agent: "myrig/x'$(id)'"},
+		{Session: "worker-1", Agent: "myrig/worker-1", AgentBase: "a b"},
+		{Session: "worker-1", Agent: "myrig/worker-1", Rig: "../beta"},
+	} {
+		got := expandSessionSetup(cmds, ctx)
+		if len(got) != 1 || got[0] != cmds[0] {
+			t.Errorf("expandSessionSetup(%+v) = %q, want the raw unexpanded command", ctx, got)
+		}
+	}
+}
+
+func TestResolveSessionNameIgnoresUnsafeStoredName(t *testing.T) {
+	bp := &agentBuildParams{cityName: "fixture", beadNames: map[string]string{"worker": "x'; touch /tmp/pwn; '"}}
+	got := bp.resolveSessionName("worker", "worker")
+	if !safeSessionName(got) {
+		t.Fatalf("resolveSessionName = %q, want a plain derived session name", got)
+	}
+	bp = &agentBuildParams{cityName: "fixture", beadNames: map[string]string{"worker": "worker-custom"}}
+	if got := bp.resolveSessionName("worker", "worker"); got != "worker-custom" {
+		t.Fatalf("resolveSessionName(plain stored name) = %q, want worker-custom", got)
+	}
+}
+
+func TestResolvedWorkerRuntimeSessionLiveIgnoresUnsafeAgentName(t *testing.T) {
+	clearWorktreeRootEnv(t)
+	city := t.TempDir()
+	claude := config.BuiltinProviders()["claude"]
+	claude.PathCheck = "true"
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Agents:    []config.Agent{{Name: "worker", Provider: "claude", SessionLive: []string{`echo '{{.Agent}}' '{{.Session}}'`}}},
+		Providers: map[string]config.ProviderSpec{"claude": claude},
+	}
+	resolved, err := resolvedWorkerRuntimeWithConfigAndMetadata(city, cfg, session.Info{
+		ID:          "s-1",
+		Template:    "worker",
+		AgentName:   "x'; touch /tmp/pwn; '",
+		SessionName: "worker",
+	}, "", nil)
+	if err != nil || resolved == nil {
+		t.Fatalf("resolvedWorkerRuntimeWithConfigAndMetadata: %+v, %v", resolved, err)
+	}
+	for _, cmd := range resolved.Hints.SessionLive {
+		if strings.Contains(cmd, "touch") {
+			t.Fatalf("session_live %q carries the stored agent_name", cmd)
+		}
+	}
+	resolved, err = resolvedWorkerRuntimeWithConfigAndMetadata(city, cfg, session.Info{
+		ID:          "s-1",
+		Template:    "worker",
+		AgentName:   "worker",
+		SessionName: "x'; touch /tmp/pwn; '",
+	}, "", nil)
+	if err != nil || resolved == nil {
+		t.Fatalf("resolvedWorkerRuntimeWithConfigAndMetadata: %+v, %v", resolved, err)
+	}
+	for _, cmd := range resolved.Hints.SessionLive {
+		if strings.Contains(cmd, "touch") {
+			t.Fatalf("session_live %q carries the stored session_name", cmd)
+		}
+	}
+}
+
+func TestSessionBeadIdentityRefusesOtherRigPrefix(t *testing.T) {
+	city := t.TempDir()
+	rigs := []config.Rig{{Name: "alpha", Path: filepath.Join(city, "alpha")}, {Name: "beta", Path: filepath.Join(city, "beta")}}
+	helper := &config.Agent{Name: "helper", Scope: "rig", WorkDir: ".gc/worktrees/helper"}
+	if got := sessionBeadQualifiedNameInfo(city, helper, rigs, session.Info{AgentName: "beta/helper"}); got != "helper" {
+		t.Fatalf("sessionBeadQualifiedNameInfo(beta/helper) = %q, want helper", got)
+	}
+	ant := &config.Agent{Name: "ant", Dir: "alpha", MaxActiveSessions: intPtr(3)}
+	if got := sessionBeadQualifiedNameInfo(city, ant, rigs, session.Info{AgentName: "alpha/ant-adhoc-123"}); got != "alpha/ant-adhoc-123" {
+		t.Fatalf("sessionBeadQualifiedNameInfo(alpha/ant-adhoc-123) = %q, want it kept", got)
+	}
+	if got := sessionBeadQualifiedNameInfo(city, ant, rigs, session.Info{AgentName: "beta/ant-adhoc-123"}); got == "beta/ant-adhoc-123" {
+		t.Fatalf("sessionBeadQualifiedNameInfo(beta/ant-adhoc-123) kept another rig prefix")
+	}
+}
