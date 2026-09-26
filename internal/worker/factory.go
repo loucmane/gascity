@@ -182,12 +182,22 @@ func (f *Factory) sessionFromRecord(info sessionpkg.Info, pr sessionpkg.Persiste
 		spec.Profile = Profile(profile)
 	}
 	metadata := cloneStringMap(pr.Metadata)
+	var resolved *ResolvedRuntime
 	if f.resolveSessionRuntime != nil {
-		resolved, err := f.resolveSessionRuntime(info, sessionKind, metadata)
+		var err error
+		resolved, err = f.resolveSessionRuntime(info, sessionKind, metadata)
 		if err != nil {
 			return nil, err
 		}
+	}
+	if resolved != nil {
 		applyResolvedRuntimeToSessionSpec(&spec, resolved)
+	} else {
+		// ga-6umo: without a config-resolved runtime the spec holds the stored
+		// command, work dir and resume fields, which are worker-writable bead
+		// metadata. The handle may still observe, nudge or stop the session,
+		// but every launch through it is refused.
+		spec.launchRefusal = fmt.Errorf("%w: session %q has no config-resolved provider; refusing to launch stored metadata (ga-6umo)", ErrHandleConfig, info.ID)
 	}
 	return f.Session(spec)
 }

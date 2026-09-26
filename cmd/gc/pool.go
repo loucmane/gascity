@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"sort"
@@ -225,6 +226,12 @@ func expandSessionSetup(cmds []string, ctx SessionSetupContext) []string {
 	if len(cmds) == 0 {
 		return nil
 	}
+	// ga-6umo: never substitute an identity value with a shell-significant
+	// character; keep the raw commands, as on a template error.
+	if field := unsafeSetupContextField(ctx); field != "" {
+		log.Printf("session setup: not expanding templates: %s name has a shell-significant character (ga-6umo)", field)
+		return append([]string(nil), cmds...)
+	}
 	result := make([]string, len(cmds))
 	for i, raw := range cmds {
 		tmpl, err := template.New("setup").Parse(raw)
@@ -251,6 +258,7 @@ func deepCopyAgent(src *config.Agent, name, dir string) config.Agent {
 		Description:       src.Description,
 		Dir:               dir,
 		WorkDir:           src.WorkDir,
+		WorkDirRoots:      append([]string(nil), src.WorkDirRoots...),
 		TmuxAlias:         src.TmuxAlias,
 		Scope:             src.Scope,
 		Session:           src.Session,

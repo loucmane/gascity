@@ -401,22 +401,26 @@ func poolSessionExplicitBeadID(store beads.Store, instanceToken string) string {
 //
 // Results are cached in p.beadNames for the duration of the build cycle.
 func (p *agentBuildParams) resolveSessionName(qualifiedName, _ string) string {
+	// ga-6umo: a session_name read from bead metadata is worker-writable and
+	// is substituted as {{.Session}} into pre_start, session_setup and
+	// session_live shell templates. A stored name outside the plain-name
+	// grammar is never used; the legacy derived name is used instead.
 	// Check cache first.
-	if sn, ok := p.beadNames[qualifiedName]; ok {
+	if sn, ok := p.beadNames[qualifiedName]; ok && (sn == "" || safeSessionName(sn)) {
 		return sn
 	}
 
 	// Try bead store lookup if available.
 	if p.sessionBeads != nil {
 		sn := p.sessionBeads.FindSessionNameByTemplate(qualifiedName)
-		if sn != "" {
+		if sn != "" && safeSessionName(sn) {
 			p.beadNames[qualifiedName] = sn
 			return sn
 		}
 	}
 	if p.beadStore != nil {
 		sn := findSessionNameByTemplate(p.beadStore, qualifiedName)
-		if sn != "" {
+		if sn != "" && safeSessionName(sn) {
 			p.beadNames[qualifiedName] = sn
 			return sn
 		}

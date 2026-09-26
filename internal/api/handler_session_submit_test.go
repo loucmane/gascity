@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/nudgequeue"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
@@ -54,6 +55,10 @@ func TestHandleSessionSubmitDefaultsToProviderDefaultBehavior(t *testing.T) {
 
 func TestHandleSessionSubmitUsesImmediateDefaultForCodex(t *testing.T) {
 	fs := newSessionFakeState(t)
+	// ga-6umo: the session launches only through a config-resolved provider.
+	codex := config.BuiltinProviders()["codex"]
+	codex.PathCheck = "true"
+	fs.cfg.Providers["codex"] = codex
 	h := newTestCityHandler(t, fs)
 
 	mgr := session.NewManagerWithOptions(fs.cityBeadStore, fs.sp)

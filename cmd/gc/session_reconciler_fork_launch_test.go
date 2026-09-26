@@ -274,11 +274,12 @@ func TestUnsupportedProviderErrorNamesProvider(t *testing.T) {
 func newForkSessionCandidate(t *testing.T, rp *config.ResolvedProvider, parentSID, wakeMode string) (startCandidate, *config.City, beads.Store) {
 	t.Helper()
 	store := beads.NewMemStore()
+	workDir := t.TempDir()
 	meta := map[string]string{
 		"session_name":                     "worker",
 		"template":                         "worker",
 		"state":                            "asleep",
-		"work_dir":                         t.TempDir(),
+		"work_dir":                         workDir,
 		"session_key":                      "gc-stale-key",
 		"started_config_hash":              "deadbeef",
 		beadmeta.BrainParentSIDMetadataKey: parentSID,
@@ -293,7 +294,8 @@ func newForkSessionCandidate(t *testing.T, rp *config.ResolvedProvider, parentSI
 		t.Fatalf("Create(session): %v", err)
 	}
 	cfg := &config.City{Agents: []config.Agent{{Name: "worker"}}}
-	tp := TemplateParams{Command: "claude", SessionName: "worker", TemplateName: "worker", ResolvedProvider: rp}
+	// ga-6umo: the stored work_dir must lie inside the configured one.
+	tp := TemplateParams{Command: "claude", SessionName: "worker", TemplateName: "worker", WorkDir: workDir, ResolvedProvider: rp}
 	return startCandidate{info: sessiontest.SeedBead(t, session), tp: tp, order: 0}, cfg, store
 }
 

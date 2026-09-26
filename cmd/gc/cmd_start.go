@@ -1393,9 +1393,10 @@ func resolveConfiguredWorkDir(cityPath, cityName, qualifiedName string, a *confi
 	if a == nil {
 		return resolveAgentDir(cityPath, "")
 	}
-	if strings.TrimSpace(qualifiedName) == "" {
-		qualifiedName = a.QualifiedName()
-	}
+	// ga-6umo: qualifiedName can come from a session bead agent_name, which
+	// workers can write; only a plain identity of this agent expands the
+	// work_dir template.
+	qualifiedName = workdirutil.SafeAgentIdentity(cityPath, *a, rigs, qualifiedName)
 	workDir, err := workdirutil.ResolveWorkDirPathStrict(cityPath, cityName, qualifiedName, *a, rigs)
 	if err != nil {
 		return "", err

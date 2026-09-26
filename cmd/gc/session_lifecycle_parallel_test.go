@@ -757,7 +757,12 @@ func TestPrepareStartCandidate_UsesSessionIDForTaskWorkDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workDir := t.TempDir()
+	// ga-6umo: a task work_dir must lie inside the configured work_dir.
+	configuredWorkDir := t.TempDir()
+	workDir := filepath.Join(configuredWorkDir, "task-1")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	task, err := store.Create(beads.Bead{
 		Title: "task",
 		Metadata: map[string]string{
@@ -781,6 +786,7 @@ func TestPrepareStartCandidate_UsesSessionIDForTaskWorkDir(t *testing.T) {
 		tp: TemplateParams{
 			TemplateName: "frontend/worker",
 			SessionName:  "custom-worker-1",
+			WorkDir:      configuredWorkDir,
 		},
 		order: 0,
 	}, &config.City{
@@ -812,7 +818,12 @@ func TestPrepareStartCandidate_UsesAssignedWorkSnapshotForTaskWorkDir(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	workDir := t.TempDir()
+	// ga-6umo: a task work_dir must lie inside the configured work_dir.
+	configuredWorkDir := t.TempDir()
+	workDir := filepath.Join(configuredWorkDir, "task-1")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	task, err := store.Create(beads.Bead{
 		Title: "task",
 		Metadata: map[string]string{
@@ -837,6 +848,7 @@ func TestPrepareStartCandidate_UsesAssignedWorkSnapshotForTaskWorkDir(t *testing
 		tp: TemplateParams{
 			TemplateName: "frontend/worker",
 			SessionName:  "custom-worker-1",
+			WorkDir:      configuredWorkDir,
 		},
 		order: 0,
 	}, "", "", &config.City{
@@ -872,7 +884,7 @@ func TestPrepareStartCandidateReloadsOverridesBeforeWake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetMetadata(session.ID, "template_overrides", `{"permission_mode":"plan"}`); err != nil {
+	if err := store.SetMetadata(session.ID, "template_overrides", `{"effort":"high"}`); err != nil {
 		t.Fatalf("SetMetadata(template_overrides): %v", err)
 	}
 
@@ -881,17 +893,19 @@ func TestPrepareStartCandidateReloadsOverridesBeforeWake(t *testing.T) {
 		tp: TemplateParams{
 			TemplateName: "worker",
 			SessionName:  "worker",
-			Command:      "codex --ask-for-approval on-request",
+			Command:      "codex --effort low",
 			ResolvedProvider: &config.ResolvedProvider{
 				Name:          "codex",
 				ResumeFlag:    "resume",
 				ResumeStyle:   "subcommand",
-				ResumeCommand: "codex resume {{.SessionKey}} --ask-for-approval on-request",
+				ResumeCommand: "codex resume {{.SessionKey}} --effort low",
 				OptionsSchema: []config.ProviderOption{{
-					Key: "permission_mode",
+					// ga-6umo: effort is overridable from metadata;
+					// permission_mode is not.
+					Key: "effort",
 					Choices: []config.OptionChoice{
-						{Value: "default", FlagArgs: []string{"--ask-for-approval", "on-request"}},
-						{Value: "plan", FlagArgs: []string{"--ask-for-approval", "never"}},
+						{Value: "low", FlagArgs: []string{"--effort", "low"}},
+						{Value: "high", FlagArgs: []string{"--effort", "high"}},
 					},
 				}},
 			},
@@ -901,13 +915,13 @@ func TestPrepareStartCandidateReloadsOverridesBeforeWake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareStartCandidate: %v", err)
 	}
-	if !strings.Contains(prepared.cfg.Command, "--ask-for-approval never") {
+	if !strings.Contains(prepared.cfg.Command, "--effort high") {
 		t.Fatalf("prepared.cfg.Command = %q, want reloaded permission override", prepared.cfg.Command)
 	}
-	if got := shellquote.Join(prepared.managedWorkerArgv); got != "codex --ask-for-approval never" {
+	if got := shellquote.Join(prepared.managedWorkerArgv); got != "codex --effort high" {
 		t.Fatalf("managedWorkerArgv = %q, want stable policy argv without dynamic resume key", got)
 	}
-	want := "codex resume --ask-for-approval never abc-123"
+	want := "codex resume --effort high abc-123"
 	if prepared.cfg.Command != want {
 		t.Fatalf("prepared.cfg.Command = %q, want %q", prepared.cfg.Command, want)
 	}

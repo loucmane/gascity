@@ -1027,10 +1027,18 @@ func buildPreparedStartWithWorkDirResolver(
 	managedWorkerArgv := shellquote.Split(strings.TrimSpace(agentCfg.Command))
 
 	preOverrideWorkDir := agentCfg.WorkDir
+	// ga-6umo: both work_dir sources are worker-writable metadata; each must be
+	// a safe path inside the agent's allowed roots or it is ignored.
+	taskWorkDir := ""
 	if wd := resolvePreparedTaskWorkDir(candidate, cityPath, cfg, store, workDirResolver); wd != "" {
-		agentCfg.WorkDir = wd
+		taskWorkDir, _ = guardTemplateLaunchWorkDir(cityPath, cfg, tp, candidate.info.ID, "task", wd)
+	}
+	if taskWorkDir != "" {
+		agentCfg.WorkDir = taskWorkDir
 	} else if wd := candidate.info.WorkDir; wd != "" {
-		agentCfg.WorkDir = resolveWorkDirAgainstCity(cityPath, wd)
+		if guarded, ok := guardTemplateLaunchWorkDir(cityPath, cfg, tp, candidate.info.ID, "session", resolveWorkDirAgainstCity(cityPath, wd)); ok {
+			agentCfg.WorkDir = guarded
+		}
 	}
 	// The task work_dir override above can replace agentCfg.WorkDir after
 	// template resolution already rendered PreStart commands (materialize-
@@ -1052,7 +1060,9 @@ func buildPreparedStartWithWorkDirResolver(
 	// transcript layer so each provider keeps its own resumability rules; for
 	// providers whose resume state we cannot probe on disk (codex/gemini/...)
 	// the probe reports !probeable and we leave their metadata untouched.
-	if sk := strings.TrimSpace(candidate.info.SessionKey); sk != "" && agentCfg.WorkDir != "" {
+	// ga-6umo: a key outside the session-key grammar is never probed as a
+	// transcript path component (nor spliced later).
+	if sk := strings.TrimSpace(candidate.info.SessionKey); sk != "" && sessionpkg.ValidSessionKey(sk) && agentCfg.WorkDir != "" {
 		provider := sessionTranscriptProvider(tp.ResolvedProvider, candidate.info)
 		if present, probeable := staleResumeKeyProbe(provider, agentCfg.WorkDir, sk); probeable && !present {
 			var sessFront *sessionpkg.Store
@@ -1108,7 +1118,9 @@ func buildPreparedStartWithWorkDirResolver(
 	parentSID := strings.TrimSpace(candidate.info.BrainParentSID)
 	if parentSID != "" {
 		parentStale := false
-		if firstStart && !forceFresh && tp.ResolvedProvider != nil && agentCfg.WorkDir != "" {
+		// ga-6umo: validateForkLaunch refuses a parent id outside the grammar;
+		// it is never probed as a transcript path component first.
+		if firstStart && !forceFresh && tp.ResolvedProvider != nil && agentCfg.WorkDir != "" && sessionpkg.ValidSessionKey(parentSID) {
 			provider := sessionTranscriptProvider(tp.ResolvedProvider, candidate.info)
 			if present, probeable := staleResumeKeyProbe(provider, agentCfg.WorkDir, parentSID); probeable && !present {
 				parentStale = true
@@ -1165,9 +1177,14 @@ func buildPreparedStartWithWorkDirResolver(
 					existing = parts[0]
 				}
 			}
-			if existing != "" {
+			switch {
+			case existing != "":
 				agentCfg.PromptSuffix = shellquote.Quote(existing + "\n\n---\n\nUser message:\n" + msg)
-			} else {
+			case strings.HasPrefix(msg, "-"):
+				// ga-6umo: a lone positional prompt beginning with "-" would be
+				// parsed by the provider CLI as a flag.
+				log.Printf("session %s: ignoring initial_message that begins with \"-\" (ga-6umo)", boundedLogValue(candidate.info.ID))
+			default:
 				agentCfg.PromptSuffix = shellquote.Quote(msg)
 			}
 		}
@@ -1273,6 +1290,9 @@ func applySchemaOptionOverridesForLaunch(agentCfg *runtime.Config, tp *TemplateP
 	for k, v := range resolved.EffectiveDefaults {
 		fullOptions[k] = v
 	}
+	// ga-6umo: session and work-bead overrides are worker-writable; only
+	// benign model/effort choices may replace config defaults.
+	overrides = filterMetadataOptionOverridesLogged(resolved, sessionID, overrides)
 	for k, v := range overrides {
 		if k == "initial_message" {
 			continue
@@ -1993,6 +2013,11 @@ var staleResumeKeyProbe = func(provider, workDir, sessionKey string) (present, p
 func validateForkLaunch(parentSID string, rp *config.ResolvedProvider, firstStart, forceFresh, parentStale bool) error {
 	if parentSID == "" {
 		return nil
+	}
+	// ga-6umo: the parent id is worker-writable metadata spliced into the fork
+	// command. Refuse loudly (never degrade to fresh) when it is unsafe.
+	if !sessionpkg.ValidSessionKey(parentSID) {
+		return fmt.Errorf("fork-launch: %s=%q is not a valid session id; refused (ga-6umo)", beadmeta.BrainParentSIDMetadataKey, boundedLogValue(parentSID))
 	}
 	providerName := ""
 	if rp != nil {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/pathutil"
 	"github.com/gastownhall/gascity/internal/promptsafe"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/sessionlog"
@@ -81,6 +82,31 @@ func stripResumeFlagArg(cmd, resumeFlag, resumeStyle string) string {
 	return stripTrailingResumeFlagArg(cmd, resumeFlag)
 }
 
+// stripResumeFlagPair removes the first space-separated "<resumeFlag> <key>"
+// pair from cmd wherever it appears, or returns cmd unchanged.
+func stripResumeFlagPair(cmd, resumeFlag string) string {
+	if resumeFlag == "" {
+		return cmd
+	}
+	needle := " " + resumeFlag + " "
+	start := strings.Index(cmd, needle)
+	if start < 0 {
+		return cmd
+	}
+	keyStart := start + len(needle)
+	for keyStart < len(cmd) && cmd[keyStart] == ' ' {
+		keyStart++
+	}
+	keyEnd := keyStart
+	for keyEnd < len(cmd) && cmd[keyEnd] != ' ' {
+		keyEnd++
+	}
+	if keyEnd == keyStart {
+		return cmd
+	}
+	return strings.TrimSpace(cmd[:start] + cmd[keyEnd:])
+}
+
 func stripTrailingResumeFlagArg(cmd, resumeFlag string) string {
 	trimmed := strings.TrimRight(cmd, " ")
 	keyStart := strings.LastIndexByte(trimmed, ' ')
@@ -120,19 +146,6 @@ func stripInsertedResumeSubcommandArg(cmd, resumeFlag string) string {
 		return binary
 	}
 	return strings.TrimSpace(binary + " " + afterKey)
-}
-
-func freshStartCommandFromMetadata(metadata map[string]string, fallback string) string {
-	if metadata == nil {
-		return fallback
-	}
-	if cmd := metadata["command"]; cmd != "" {
-		return cmd
-	}
-	if provider := metadata["provider"]; provider != "" {
-		return provider
-	}
-	return fallback
 }
 
 func (m *Manager) clearStaleResumeMetadata(id string, b *beads.Bead) error {
@@ -177,6 +190,16 @@ func (m *Manager) retryFreshStartAfterStaleKey(
 		return false, nil
 	}
 	resumeFlag := b.Metadata["resume_flag"]
+	// ga-6umo: resume_flag and resume_style are worker-writable bead metadata.
+	// The strip below removes the flag and the token after it, so an arbitrary
+	// value (for example "--settings") would strip a security flag instead of
+	// the resume form. Only builtin provider resume forms are honored.
+	if (resumeFlag != "" && !KnownResumeFlag(resumeFlag)) || !KnownResumeStyle(b.Metadata["resume_style"]) {
+		if unroute != nil {
+			unroute()
+		}
+		return false, fmt.Errorf("stale-key retry for %q refused: bead resume form is not a known provider resume form (ga-6umo)", id)
+	}
 	freshCmd := stripResumeFlag(resumeCommand, resumeFlag, b.Metadata["session_key"])
 	if err := m.clearStaleResumeMetadata(id, b); err != nil {
 		if unroute != nil {
@@ -200,12 +223,15 @@ func (m *Manager) retryFreshStartAfterStaleKey(
 	// killExistingOrphans. If even the generic strip finds nothing, the
 	// command carries no resume flag and is itself a fresh-start command.
 	if resumeFlag != "" && freshCmd == resumeCommand {
-		if b.Metadata["resume_command"] != "" {
-			log.Printf("session: resume key for %q diverged from explicit resume_command; falling back to stored start command", id)
-			freshCmd = freshStartCommandFromMetadata(b.Metadata, resumeCommand)
-		} else {
-			log.Printf("session: resume key for %q diverged from bead metadata; falling back to generated resume strip", id)
-			freshCmd = stripResumeFlagArg(resumeCommand, resumeFlag, b.Metadata["resume_style"])
+		// ga-6umo: the stored start command is worker-writable and is never
+		// launched; the value-agnostic strip of the known resume form is used for
+		// explicit resume_command providers too.
+		log.Printf("session: resume key for %q diverged from bead metadata; falling back to generated resume strip", id)
+		freshCmd = stripResumeFlagArg(resumeCommand, resumeFlag, b.Metadata["resume_style"])
+		if freshCmd == resumeCommand && b.Metadata["resume_style"] != "subcommand" {
+			// An explicit resume_command may carry the flag/key pair before
+			// other arguments.
+			freshCmd = stripResumeFlagPair(resumeCommand, resumeFlag)
 		}
 	}
 	cfg.Command = freshCmd
@@ -361,7 +387,11 @@ func (m *Manager) ensureRunning(ctx context.Context, id string, b beads.Bead, se
 	cfg := hints
 	cfg.Command = resumeCommand
 	if cfg.WorkDir == "" {
-		cfg.WorkDir = b.Metadata["work_dir"]
+		// ga-6umo: bead metadata is worker-writable; the fallback is used only
+		// when it cannot inject shell syntax. Callers pass a guarded work dir.
+		if wd := strings.TrimSpace(b.Metadata["work_dir"]); pathutil.SafeLaunchPath(wd) {
+			cfg.WorkDir = wd
+		}
 	}
 	generation, err := strconv.Atoi(b.Metadata["generation"])
 	if err != nil || generation <= 0 {
@@ -496,7 +526,11 @@ func (m *Manager) ensureRunningRuntimeOnly(ctx context.Context, id string, b bea
 	cfg := hints
 	cfg.Command = resumeCommand
 	if cfg.WorkDir == "" {
-		cfg.WorkDir = b.Metadata["work_dir"]
+		// ga-6umo: bead metadata is worker-writable; the fallback is used only
+		// when it cannot inject shell syntax. Callers pass a guarded work dir.
+		if wd := strings.TrimSpace(b.Metadata["work_dir"]); pathutil.SafeLaunchPath(wd) {
+			cfg.WorkDir = wd
+		}
 	}
 	generation, err := strconv.Atoi(b.Metadata["generation"])
 	if err != nil || generation <= 0 {

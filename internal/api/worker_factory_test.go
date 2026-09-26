@@ -15,7 +15,9 @@ import (
 	"github.com/gastownhall/gascity/internal/worker"
 )
 
-func TestResolveWorkerSessionRuntimePreservesStoredResolvedCommandAndBackfillsCurrentResumeSettings(t *testing.T) {
+// ga-6umo: the stored command and provider are worker-writable metadata; the
+// runtime is rebuilt from the resolved provider.
+func TestResolveWorkerSessionRuntimeIgnoresStoredCommandAndBackfillsCurrentResumeSettings(t *testing.T) {
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "api-resume-anthropic-token")
 	t.Setenv("ANTHROPIC_BASE_URL", "https://process.example.test")
 	t.Setenv("OLLAMA_API_KEY", "api-resume-ollama-token")
@@ -60,7 +62,7 @@ func TestResolveWorkerSessionRuntimePreservesStoredResolvedCommandAndBackfillsCu
 		Template:      "myrig/worker",
 		Command:       "/bin/echo --composed",
 		Provider:      "persisted-provider",
-		WorkDir:       t.TempDir(),
+		WorkDir:       filepath.Join(fs.cityPath, ".gc", "worktrees", "myrig", "task-1"),
 		ResumeFlag:    "--resume-persisted",
 		ResumeStyle:   "subcommand",
 		ResumeCommand: "persisted resume {{.SessionKey}}",
@@ -73,10 +75,10 @@ func TestResolveWorkerSessionRuntimePreservesStoredResolvedCommandAndBackfillsCu
 	if runtimeCfg == nil {
 		t.Fatal("resolveWorkerSessionRuntime() = nil")
 	}
-	if got, want := runtimeCfg.Command, info.Command; got != want {
+	if got, want := runtimeCfg.Command, "/bin/echo"; got != want {
 		t.Fatalf("Command = %q, want %q", got, want)
 	}
-	if got, want := runtimeCfg.Provider, info.Provider; got != want {
+	if got, want := runtimeCfg.Provider, "resolved-worker"; got != want {
 		t.Fatalf("Provider = %q, want %q", got, want)
 	}
 	if got, want := runtimeCfg.WorkDir, info.WorkDir; got != want {
@@ -206,7 +208,7 @@ func TestResolveWorkerSessionRuntimeUsesResolvedCommandWhenPersistedCommandIsSta
 		Template:      "myrig/worker",
 		Command:       "legacy-agent --dangerously-skip-permissions",
 		Provider:      "persisted-provider",
-		WorkDir:       t.TempDir(),
+		WorkDir:       filepath.Join(fs.cityPath, ".gc", "worktrees", "myrig", "task-1"),
 		ResumeFlag:    "--resume-persisted",
 		ResumeStyle:   "subcommand",
 		ResumeCommand: "persisted resume {{.SessionKey}}",
@@ -222,7 +224,7 @@ func TestResolveWorkerSessionRuntimeUsesResolvedCommandWhenPersistedCommandIsSta
 	if got, want := runtimeCfg.Command, "/bin/echo"; got != want {
 		t.Fatalf("Command = %q, want %q", got, want)
 	}
-	if got, want := runtimeCfg.Provider, info.Provider; got != want {
+	if got, want := runtimeCfg.Provider, "resolved-worker"; got != want {
 		t.Fatalf("Provider = %q, want %q", got, want)
 	}
 	if got, want := runtimeCfg.WorkDir, info.WorkDir; got != want {
@@ -593,7 +595,8 @@ command = [broken
 	}
 }
 
-func TestResolveWorkerSessionRuntimeFallsBackToStoredCommandWhenTemplateOverridesInvalid(t *testing.T) {
+// ga-6umo: invalid template_overrides no longer fall back to the stored command.
+func TestResolveWorkerSessionRuntimeIgnoresStoredCommandWhenTemplateOverridesInvalid(t *testing.T) {
 	fs := newSessionFakeState(t)
 	fs.cfg.Providers["test-agent"] = config.ProviderSpec{
 		Command:   "/bin/echo",
@@ -617,7 +620,7 @@ func TestResolveWorkerSessionRuntimeFallsBackToStoredCommandWhenTemplateOverride
 	if runtimeCfg == nil {
 		t.Fatal("resolveWorkerSessionRuntimeWithMetadata() = nil")
 	}
-	if got, want := runtimeCfg.Command, "/bin/echo --stored"; got != want {
+	if got, want := runtimeCfg.Command, "/bin/echo"; got != want {
 		t.Fatalf("Command = %q, want %q", got, want)
 	}
 }
@@ -701,7 +704,7 @@ func TestResolveWorkerSessionRuntimeUsesProviderACPDefaultWithoutTemplateSession
 	}
 }
 
-func TestResolveWorkerSessionRuntimeFallsBackToPersistedRuntimeOnIncompleteResolvedConfig(t *testing.T) {
+func TestResolveWorkerSessionRuntimeIgnoresPersistedRuntimeOnIncompleteResolvedConfig(t *testing.T) {
 	fs := newSessionFakeState(t)
 	fs.cfg.Providers["test-agent"] = config.ProviderSpec{
 		ReadyPromptPrefix: "resolved-ready>",
@@ -726,26 +729,19 @@ func TestResolveWorkerSessionRuntimeFallsBackToPersistedRuntimeOnIncompleteResol
 	if runtimeCfg == nil {
 		t.Fatal("resolveWorkerSessionRuntimeWithMetadata() = nil")
 	}
-	if got, want := runtimeCfg.Command, info.Command; got != want {
+	// ga-6umo: a provider without a launch command resolves to its name, and
+	// no persisted command, provider, work dir or resume form is reused.
+	if got, want := runtimeCfg.Command, "test-agent"; got != want {
 		t.Fatalf("Command = %q, want %q", got, want)
 	}
-	if got, want := runtimeCfg.Provider, info.Provider; got != want {
+	if got, want := runtimeCfg.Provider, "test-agent"; got != want {
 		t.Fatalf("Provider = %q, want %q", got, want)
 	}
-	if got, want := runtimeCfg.WorkDir, info.WorkDir; got != want {
-		t.Fatalf("WorkDir = %q, want %q", got, want)
+	if runtimeCfg.WorkDir == info.WorkDir || runtimeCfg.Hints.WorkDir == info.WorkDir {
+		t.Fatalf("WorkDir = %q, Hints.WorkDir = %q, want the configured work dir, not %q", runtimeCfg.WorkDir, runtimeCfg.Hints.WorkDir, info.WorkDir)
 	}
-	if got, want := runtimeCfg.Resume.ResumeFlag, info.ResumeFlag; got != want {
-		t.Fatalf("Resume.ResumeFlag = %q, want %q", got, want)
-	}
-	if got, want := runtimeCfg.Resume.ResumeStyle, info.ResumeStyle; got != want {
-		t.Fatalf("Resume.ResumeStyle = %q, want %q", got, want)
-	}
-	if got, want := runtimeCfg.Resume.ResumeCommand, info.ResumeCommand; got != want {
-		t.Fatalf("Resume.ResumeCommand = %q, want %q", got, want)
-	}
-	if got, want := runtimeCfg.Hints.WorkDir, info.WorkDir; got != want {
-		t.Fatalf("Hints.WorkDir = %q, want %q", got, want)
+	if runtimeCfg.Resume.ResumeFlag == info.ResumeFlag || runtimeCfg.Resume.ResumeStyle == info.ResumeStyle || runtimeCfg.Resume.ResumeCommand == info.ResumeCommand {
+		t.Fatalf("Resume = %+v, want no persisted resume form", runtimeCfg.Resume)
 	}
 	if got, want := runtimeCfg.Hints.ReadyPromptPrefix, "resolved-ready>"; got != want {
 		t.Fatalf("Hints.ReadyPromptPrefix = %q, want %q", got, want)
@@ -755,7 +751,8 @@ func TestResolveWorkerSessionRuntimeFallsBackToPersistedRuntimeOnIncompleteResol
 	}
 }
 
-func TestResolveWorkerSessionRuntimeFallsBackToPersistedProviderWhenCommandMissing(t *testing.T) {
+// ga-6umo: the persisted provider name is never used as a launch command.
+func TestResolveWorkerSessionRuntimeUsesResolvedProviderNameWhenCommandMissing(t *testing.T) {
 	fs := newSessionFakeState(t)
 	fs.cfg.Providers["test-agent"] = config.ProviderSpec{
 		ReadyPromptPrefix: "resolved-ready>",
@@ -774,10 +771,10 @@ func TestResolveWorkerSessionRuntimeFallsBackToPersistedProviderWhenCommandMissi
 	if runtimeCfg == nil {
 		t.Fatal("resolveWorkerSessionRuntimeWithMetadata() = nil")
 	}
-	if got, want := runtimeCfg.Command, info.Provider; got != want {
+	if got, want := runtimeCfg.Command, "test-agent"; got != want {
 		t.Fatalf("Command = %q, want %q", got, want)
 	}
-	if got, want := runtimeCfg.Provider, info.Provider; got != want {
+	if got, want := runtimeCfg.Provider, "test-agent"; got != want {
 		t.Fatalf("Provider = %q, want %q", got, want)
 	}
 }
@@ -849,7 +846,8 @@ func TestResolveWorkerSessionRuntimeProviderNameCollisionUsesPersistedProvider(t
 	if got, wantPrefix := runtimeCfg.Command, "/bin/echo provider-session"; !strings.HasPrefix(got, wantPrefix) {
 		t.Fatalf("Command = %q, want prefix %q", got, wantPrefix)
 	}
-	if got, want := runtimeCfg.WorkDir, providerWorkDir; got != want {
+	// ga-6umo: a provider-kind session only runs in the city root.
+	if got, want := runtimeCfg.WorkDir, fs.cityPath; got != want {
 		t.Fatalf("WorkDir = %q, want %q", got, want)
 	}
 }
@@ -973,7 +971,8 @@ func TestWorkerFactorySessionByIDUsesResolvedTemplateRuntime(t *testing.T) {
 	}
 }
 
-func TestWorkerFactorySessionByIDPreservesStoredResolvedCommand(t *testing.T) {
+// ga-6umo: the stored session command is never launched.
+func TestWorkerFactorySessionByIDIgnoresStoredResolvedCommand(t *testing.T) {
 	fs := newSessionFakeState(t)
 	fs.cfg.Agents[0].Provider = "resolved-worker"
 	fs.cfg.Providers["resolved-worker"] = config.ProviderSpec{
@@ -1005,7 +1004,7 @@ func TestWorkerFactorySessionByIDPreservesStoredResolvedCommand(t *testing.T) {
 	if start == nil {
 		t.Fatal("LastStartConfig() = nil")
 	}
-	if got, want := start.Command, "/bin/echo --composed --session-id-resolved "+info.SessionKey; got != want {
+	if got, want := start.Command, "/bin/echo --session-id-resolved "+info.SessionKey; got != want {
 		t.Fatalf("start command = %q, want %q", got, want)
 	}
 }
@@ -1057,7 +1056,9 @@ func TestWorkerFactorySessionByIDUsesResolvedCommandAndResumeSettingsOnResume(t 
 	}
 }
 
-func TestWorkerFactorySessionByIDAppliesTemplateOverridesToExplicitResumeCommand(t *testing.T) {
+// ga-6umo: permission_mode in template_overrides is worker-writable metadata
+// and is ignored; the resume command keeps the schema default.
+func TestWorkerFactorySessionByIDIgnoresMetadataPermissionOverrideOnExplicitResumeCommand(t *testing.T) {
 	fs := newSessionFakeStateWithOptions(t)
 	fs.cfg.Agents[0].Provider = "resolved-worker"
 	spec := fs.cfg.Providers["test-agent"]
@@ -1099,7 +1100,7 @@ func TestWorkerFactorySessionByIDAppliesTemplateOverridesToExplicitResumeCommand
 	if start == nil {
 		t.Fatal("LastStartConfig() = nil")
 	}
-	want := "/bin/echo resume " + info.SessionKey + " --permission-mode plan --effort max"
+	want := "/bin/echo resume " + info.SessionKey + " --skip-permissions --effort max"
 	if got := start.Command; got != want {
 		t.Fatalf("start command = %q, want %q", got, want)
 	}

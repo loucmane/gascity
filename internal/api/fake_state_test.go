@@ -86,6 +86,9 @@ func newFakeState(t testing.TB) *fakeState {
 			},
 			Providers: map[string]config.ProviderSpec{
 				"test-agent": {DisplayName: "Test Agent"},
+				// ga-6umo: sessions from createTestSession launch only
+				// through a config-resolved provider.
+				"test": {DisplayName: "Test", Command: "echo", Args: []string{"test"}, PathCheck: "true"},
 			},
 		},
 		sp:           runtime.NewFake(),

@@ -80,7 +80,10 @@ func TestBuildSessionResumeUsesResolvedProviderCommand(t *testing.T) {
 	if got, want := cmd, "aimux run gemini -- --approval-mode yolo"; got != want {
 		t.Fatalf("resume command = %q, want %q", got, want)
 	}
-	if got, want := hints.WorkDir, "/tmp/workdir"; got != want {
+	// ga-6umo: the stored work_dir lies outside the allowed roots of the
+	// mayor template (whose configured work_dir is the city root), so the
+	// configured work_dir is used.
+	if got, want := hints.WorkDir, fs.cityPath; got != want {
 		t.Fatalf("hints.WorkDir = %q, want %q", got, want)
 	}
 	if got, want := hints.ReadyPromptPrefix, "> "; got != want {
@@ -91,7 +94,9 @@ func TestBuildSessionResumeUsesResolvedProviderCommand(t *testing.T) {
 	}
 }
 
-func TestBuildSessionResumeAppliesTemplateOverridesToExplicitResumeCommand(t *testing.T) {
+// ga-6umo: permission_mode stored in template_overrides is worker-writable
+// metadata and is ignored when the resume command is built.
+func TestBuildSessionResumeIgnoresMetadataPermissionOverrideOnExplicitResumeCommand(t *testing.T) {
 	fs := newSessionFakeState(t)
 	fs.cfg = &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
@@ -103,6 +108,9 @@ func TestBuildSessionResumeAppliesTemplateOverridesToExplicitResumeCommand(t *te
 				ResumeStyle:   "subcommand",
 				SessionIDFlag: "--session-id",
 				PathCheck:     "true",
+				// The inherited codex default ("unrestricted") is not a
+				// choice here; name a valid default so the launch builds.
+				OptionDefaults: map[string]string{"permission_mode": "default"},
 				OptionsSchema: []config.ProviderOption{{
 					Key: "permission_mode",
 					Choices: []config.OptionChoice{
@@ -132,13 +140,16 @@ func TestBuildSessionResumeAppliesTemplateOverridesToExplicitResumeCommand(t *te
 	if err != nil {
 		t.Fatalf("buildSessionResume: %v", err)
 	}
-	want := "codex resume --ask-for-approval never " + info.SessionKey
+	// The rejected override leaves the configured resume command unchanged.
+	want := "codex resume " + info.SessionKey + " --ask-for-approval on-request"
 	if cmd != want {
 		t.Fatalf("resume command = %q, want %q", cmd, want)
 	}
 }
 
-func TestBuildSessionResumePreservesStoredResolvedCommand(t *testing.T) {
+// ga-6umo: the stored session command is worker-writable and is never
+// launched; resume rebuilds the command from the resolved provider.
+func TestBuildSessionResumeIgnoresStoredResolvedCommand(t *testing.T) {
 	fs := newSessionFakeState(t)
 	fs.cfg = &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
@@ -167,8 +178,8 @@ func TestBuildSessionResumePreservesStoredResolvedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSessionResume: %v", err)
 	}
-	if got, want := cmd, "claude --dangerously-skip-permissions --settings /tmp/settings.json"; got != want {
-		t.Fatalf("resume command = %q, want %q", got, want)
+	if !strings.HasPrefix(cmd, "claude") || strings.Contains(cmd, "/tmp/settings.json") {
+		t.Fatalf("resume command = %q, want a command rebuilt from the provider without the stored settings path", cmd)
 	}
 }
 
@@ -272,7 +283,9 @@ func TestBuildSessionResumeUsesStoredACPCommandForProviderSession(t *testing.T) 
 	}
 }
 
-func TestBuildSessionResumeFallsBackToStoredCommandWhenTemplateOverridesInvalid(t *testing.T) {
+// ga-6umo: invalid template_overrides no longer fall back to the stored
+// command.
+func TestBuildSessionResumeIgnoresStoredCommandWhenTemplateOverridesInvalid(t *testing.T) {
 	fs := newSessionFakeState(t)
 	fs.cfg.Providers["test-agent"] = config.ProviderSpec{
 		Command:   "/bin/echo",
@@ -291,8 +304,8 @@ func TestBuildSessionResumeFallsBackToStoredCommandWhenTemplateOverridesInvalid(
 	if err != nil {
 		t.Fatalf("buildSessionResume: %v", err)
 	}
-	if got, want := cmd, "/bin/echo --stored"; got != want {
-		t.Fatalf("resume command = %q, want %q", got, want)
+	if strings.Contains(cmd, "--stored") {
+		t.Fatalf("resume command = %q, want a command rebuilt from config", cmd)
 	}
 }
 
@@ -750,6 +763,7 @@ func TestBuildSessionResumeUsesStoredAgentNameForResumeMCPMaterialization(t *tes
 	fs := newSessionFakeState(t)
 	fs.cfg = &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "myrig", Path: "myrig"}},
 		Agents: []config.Agent{{
 			Name:              "ant",
 			Dir:               "myrig",

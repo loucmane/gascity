@@ -2065,6 +2065,11 @@ func sessionNameFor(beadID string) string {
 // Priority: explicit ResumeCommand (with {{.SessionKey}} expansion) >
 // ResumeFlag/ResumeStyle auto-construction > stored command as-is.
 func BuildResumeCommand(info Info) string {
+	// ga-6umo: the session key comes from worker-writable metadata. A key
+	// outside the safe grammar is never spliced; the session starts fresh.
+	if !ValidSessionKey(info.SessionKey) {
+		info.SessionKey = ""
+	}
 	// Explicit resume_command takes precedence.
 	if info.ResumeCommand != "" && info.SessionKey != "" {
 		return strings.ReplaceAll(info.ResumeCommand, "{{.SessionKey}}", info.SessionKey)

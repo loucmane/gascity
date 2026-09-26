@@ -525,6 +525,7 @@ func TestDeliverSessionNudgeWithWorkerImmediateResumesSuspendedSession(t *testin
 
 	target := nudgeTarget{
 		cityPath:    dir,
+		cfg:         resumableNudgeTestConfig("claude"),
 		sessionID:   info.ID,
 		sessionName: info.SessionName,
 	}
@@ -578,6 +579,7 @@ func TestDeliverSessionNudgeWithWorkerWaitIdleResumesClaudeSession(t *testing.T)
 
 	target := nudgeTarget{
 		cityPath:    dir,
+		cfg:         resumableNudgeTestConfig("claude"),
 		sessionID:   info.ID,
 		sessionName: info.SessionName,
 	}
@@ -1061,6 +1063,7 @@ func TestDeliverSessionNudgeWithWorkerWaitIdleQueuesUnsupportedProviderAfterResu
 
 	target := nudgeTarget{
 		cityPath:    dir,
+		cfg:         resumableNudgeTestConfig("codex"),
 		sessionID:   info.ID,
 		sessionName: info.SessionName,
 	}
@@ -5196,4 +5199,16 @@ func TestResolveNudgePollInterval(t *testing.T) {
 			t.Fatalf("resolveNudgePollInterval = %v, want default %v", got, defaultNudgePollInterval)
 		}
 	})
+}
+
+// resumableNudgeTestConfig configures the "worker" template with a builtin
+// provider so a suspended session can be resumed: since ga-6umo a worker handle
+// launches only through a config-resolved provider.
+func resumableNudgeTestConfig(provider string) *config.City {
+	spec := config.BuiltinProviders()[provider]
+	spec.PathCheck = "true"
+	return &config.City{
+		Agents:    []config.Agent{{Name: "worker", Provider: provider}},
+		Providers: map[string]config.ProviderSpec{provider: spec},
+	}
 }

@@ -1178,7 +1178,8 @@ func TestResolvedWorkerRuntimeWithConfigReplaysTemplateOverridesOnResume(t *test
 	}
 }
 
-func TestResolvedWorkerRuntimeWithConfigFallsBackToStoredCommandWhenTemplateOverridesInvalid(t *testing.T) {
+// ga-6umo: invalid template_overrides no longer fall back to the stored command.
+func TestResolvedWorkerRuntimeWithConfigIgnoresStoredCommandWhenTemplateOverridesInvalid(t *testing.T) {
 	cityDir := t.TempDir()
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
@@ -1208,7 +1209,7 @@ func TestResolvedWorkerRuntimeWithConfigFallsBackToStoredCommandWhenTemplateOver
 	if resolved == nil {
 		t.Fatal("resolvedWorkerRuntimeWithConfigAndMetadata() = nil")
 	}
-	if got, want := resolved.Command, "/bin/echo --stored"; got != want {
+	if got, want := resolved.Command, "/bin/echo"; got != want {
 		t.Fatalf("Command = %q, want %q", got, want)
 	}
 }
@@ -1902,6 +1903,10 @@ work_dir = ".gc/worktrees/{{.Rig}}/ants/{{.AgentBase}}"
 min_active_sessions = 0
 max_active_sessions = 4
 
+[[rigs]]
+name = "myrig"
+path = "myrig"
+
 [providers.stub]
 command = "/bin/echo"
 supports_acp = true
@@ -2215,7 +2220,7 @@ func TestWorkerSessionRuntimeResolverWithConfigFallsBackToProviderNameWhenResolv
 	}
 }
 
-func TestWorkerSessionRuntimeResolverWithConfigFallsBackToPersistedRuntimeOnIncompleteResolvedConfig(t *testing.T) {
+func TestWorkerSessionRuntimeResolverWithConfigIgnoresPersistedRuntimeOnIncompleteResolvedConfig(t *testing.T) {
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
 		Agents: []config.Agent{{
@@ -2252,26 +2257,19 @@ func TestWorkerSessionRuntimeResolverWithConfigFallsBackToPersistedRuntimeOnInco
 	if runtimeCfg == nil {
 		t.Fatal("resolver() = nil")
 	}
-	if got, want := runtimeCfg.Command, info.Command; got != want {
+	// ga-6umo: a provider without a launch command resolves to its name, and
+	// no persisted command, provider, work dir or resume form is reused.
+	if got, want := runtimeCfg.Command, "stub"; got != want {
 		t.Fatalf("Command = %q, want %q", got, want)
 	}
-	if got, want := runtimeCfg.Provider, info.Provider; got != want {
+	if got, want := runtimeCfg.Provider, "stub"; got != want {
 		t.Fatalf("Provider = %q, want %q", got, want)
 	}
-	if got, want := runtimeCfg.WorkDir, info.WorkDir; got != want {
-		t.Fatalf("WorkDir = %q, want %q", got, want)
+	if runtimeCfg.WorkDir == info.WorkDir || runtimeCfg.Hints.WorkDir == info.WorkDir {
+		t.Fatalf("WorkDir = %q, Hints.WorkDir = %q, want the configured work dir, not %q", runtimeCfg.WorkDir, runtimeCfg.Hints.WorkDir, info.WorkDir)
 	}
-	if got, want := runtimeCfg.Resume.ResumeFlag, info.ResumeFlag; got != want {
-		t.Fatalf("Resume.ResumeFlag = %q, want %q", got, want)
-	}
-	if got, want := runtimeCfg.Resume.ResumeStyle, info.ResumeStyle; got != want {
-		t.Fatalf("Resume.ResumeStyle = %q, want %q", got, want)
-	}
-	if got, want := runtimeCfg.Resume.ResumeCommand, info.ResumeCommand; got != want {
-		t.Fatalf("Resume.ResumeCommand = %q, want %q", got, want)
-	}
-	if got, want := runtimeCfg.Hints.WorkDir, info.WorkDir; got != want {
-		t.Fatalf("Hints.WorkDir = %q, want %q", got, want)
+	if runtimeCfg.Resume.ResumeFlag == info.ResumeFlag || runtimeCfg.Resume.ResumeStyle == info.ResumeStyle || runtimeCfg.Resume.ResumeCommand == info.ResumeCommand {
+		t.Fatalf("Resume = %+v, want no persisted resume form", runtimeCfg.Resume)
 	}
 	if got, want := runtimeCfg.Hints.ReadyPromptPrefix, "resolved-ready>"; got != want {
 		t.Fatalf("Hints.ReadyPromptPrefix = %q, want %q", got, want)
@@ -2281,7 +2279,8 @@ func TestWorkerSessionRuntimeResolverWithConfigFallsBackToPersistedRuntimeOnInco
 	}
 }
 
-func TestWorkerSessionRuntimeResolverWithConfigFallsBackToPersistedProviderWhenCommandMissing(t *testing.T) {
+// ga-6umo: the persisted provider name is never used as a launch command.
+func TestWorkerSessionRuntimeResolverWithConfigUsesResolvedProviderNameWhenCommandMissing(t *testing.T) {
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
 		Agents: []config.Agent{{
@@ -2312,10 +2311,10 @@ func TestWorkerSessionRuntimeResolverWithConfigFallsBackToPersistedProviderWhenC
 	if runtimeCfg == nil {
 		t.Fatal("resolver() = nil")
 	}
-	if got, want := runtimeCfg.Command, info.Provider; got != want {
+	if got, want := runtimeCfg.Command, "resolved-provider"; got != want {
 		t.Fatalf("Command = %q, want %q", got, want)
 	}
-	if got, want := runtimeCfg.Provider, info.Provider; got != want {
+	if got, want := runtimeCfg.Provider, "resolved-provider"; got != want {
 		t.Fatalf("Provider = %q, want %q", got, want)
 	}
 }

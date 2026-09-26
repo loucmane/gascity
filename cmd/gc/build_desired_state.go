@@ -3208,7 +3208,9 @@ func poolTriggerWorkDir(bp *agentBuildParams, cfgAgent *config.Agent, qualifiedN
 	if err != nil || strings.TrimSpace(base) == "" {
 		return ""
 	}
-	if pack := strings.TrimSpace(request.WorkPack); pack != "" {
+	// ga-6umo: gc.pack is worker-writable bead metadata; only a single safe
+	// path segment may select the pack directory, like gc.pack_workspace.
+	if pack := safeWorkspaceName(request.WorkPack, 96); pack != "" {
 		packDir := filepath.Join(filepath.Dir(base), pack)
 		if workspace := packWorkspaceSlug(request); workspace != "" {
 			return filepath.Join(packDir, workspace)
@@ -3425,7 +3427,7 @@ func sessionBeadQualifiedName(cityPath string, cfgAgent *config.Agent, rigs []co
 	if cfgAgent == nil {
 		return ""
 	}
-	persistedAgentName := normalizeSessionBeadQualifiedName(cfgAgent, sessionBeadAgentName(sessionBead))
+	persistedAgentName := safeSessionBeadIdentity(cityPath, cfgAgent, rigs, normalizeSessionBeadQualifiedName(cfgAgent, sessionBeadAgentName(sessionBead)))
 	if persistedAgentName != "" {
 		if !cfgAgent.SupportsMultipleSessions() || persistedAgentName != cfgAgent.QualifiedName() {
 			return persistedAgentName
@@ -3453,7 +3455,7 @@ func sessionBeadQualifiedName(cityPath string, cfgAgent *config.Agent, rigs []co
 		explicitName,
 	)
 	if qualifiedName != "" {
-		return qualifiedName
+		return safeSessionBeadIdentity(cityPath, cfgAgent, rigs, qualifiedName)
 	}
 	return cfgAgent.QualifiedName()
 }
@@ -3468,7 +3470,7 @@ func sessionBeadQualifiedNameInfo(cityPath string, cfgAgent *config.Agent, rigs 
 	if cfgAgent == nil {
 		return ""
 	}
-	persistedAgentName := normalizeSessionBeadQualifiedName(cfgAgent, sessionBeadAgentNameInfo(info))
+	persistedAgentName := safeSessionBeadIdentity(cityPath, cfgAgent, rigs, normalizeSessionBeadQualifiedName(cfgAgent, sessionBeadAgentNameInfo(info)))
 	if persistedAgentName != "" {
 		if !cfgAgent.SupportsMultipleSessions() || persistedAgentName != cfgAgent.QualifiedName() {
 			return persistedAgentName
@@ -3495,10 +3497,25 @@ func sessionBeadQualifiedNameInfo(cityPath string, cfgAgent *config.Agent, rigs 
 		strings.TrimSpace(info.Alias),
 		explicitName,
 	)
+	// ga-6umo: alias and session_name are worker-writable too.
 	if qualifiedName != "" {
-		return qualifiedName
+		return safeSessionBeadIdentity(cityPath, cfgAgent, rigs, qualifiedName)
 	}
 	return cfgAgent.QualifiedName()
+}
+
+// safeSessionBeadIdentity keeps a session bead identity only when it is a
+// plain identity of cfgAgent whose directory part is the agent dir or its rig
+// (workdir.SafeAgentIdentity); otherwise the configured identity is used. The
+// identity comes from worker-writable agent_name, alias or session_name and
+// selects the rig, its bead store and roots, and startup template values, so
+// neither a traversal nor another rig prefix may pass (ga-6umo). An empty
+// identity stays empty.
+func safeSessionBeadIdentity(cityPath string, cfgAgent *config.Agent, rigs []config.Rig, identity string) string {
+	if cfgAgent == nil || strings.TrimSpace(identity) == "" {
+		return strings.TrimSpace(identity)
+	}
+	return workdirutil.SafeAgentIdentity(cityPath, *cfgAgent, rigs, identity)
 }
 
 func normalizeSessionBeadQualifiedName(cfgAgent *config.Agent, identity string) string {
@@ -3507,6 +3524,12 @@ func normalizeSessionBeadQualifiedName(cfgAgent *config.Agent, identity string) 
 	}
 	identity = strings.TrimSpace(identity)
 	if identity == "" {
+		return ""
+	}
+	// ga-6umo: a persisted agent_name is worker-writable and becomes the
+	// session identity that expands work_dir and startup templates. A value
+	// with a traversal or non-plain segment is ignored.
+	if !workdirutil.SafeIdentityName(identity) {
 		return ""
 	}
 	if identity == cfgAgent.QualifiedName() || strings.Contains(identity, "/") {

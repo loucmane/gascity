@@ -1109,6 +1109,7 @@ func TestAgentConfigFromAgentCoversPersistedFields(t *testing.T) {
 		Description:            "test agent description",
 		Dir:                    "demo",
 		WorkDir:                ".gc/agents/worker",
+		WorkDirRoots:           []string{"/srv/worktrees"},
 		TmuxAlias:              "worker--{{.CityName}}",
 		Scope:                  "city",
 		Suspended:              true,
