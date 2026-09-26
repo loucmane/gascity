@@ -25,7 +25,7 @@ func LaunchWorkDirRoots(cityPath, cityName, qualifiedName string, a config.Agent
 			exactRoot = configured
 		} else {
 			roots = append(roots, configured)
-			if packRoot := PackSiblingRoot(cityPath, configured); packRoot != "" {
+			if packRoot := PackSiblingRoot(cityPath, configured, rigs); packRoot != "" {
 				roots = append(roots, packRoot)
 			}
 		}
@@ -118,10 +118,12 @@ func UsableConfiguredRoot(cityPath, configured string) bool {
 // PackSiblingRoot returns the parent of the configured work_dir, where
 // pack-routed work lands (<parent>/<gc.pack>[/<gc.pack_workspace>]), when that
 // parent lies strictly inside the city and is neither the city root nor its
-// .gc directory. Otherwise it returns "". The parent also holds sibling
-// directories of other agents; that reach is a documented residual of the
-// ga-6umo hotfix (full containment is ga-5eix).
-func PackSiblingRoot(cityPath, configured string) string {
+// .gc directory, and holds no configured rig root. Otherwise it returns "".
+// The parent also holds sibling directories of other agents; that reach is a
+// documented residual of the ga-6umo hotfix (full containment is ga-5eix),
+// but a parent that holds a rig root (for example <city>/rigs for an agent
+// whose work_dir is its rig root) would reach whole other rigs and is refused.
+func PackSiblingRoot(cityPath, configured string, rigs []config.Rig) string {
 	if cityPath == "" || configured == "" {
 		return ""
 	}
@@ -131,6 +133,14 @@ func PackSiblingRoot(cityPath, configured string) string {
 	}
 	if !pathutil.ContainedIn(parent, cityPath) {
 		return ""
+	}
+	for _, rig := range rigs {
+		if strings.TrimSpace(rig.Path) == "" {
+			continue
+		}
+		if pathutil.ContainedIn(ResolveDirPath(cityPath, rig.Path), parent) {
+			return ""
+		}
 	}
 	return parent
 }
@@ -169,7 +179,11 @@ func SessionLaunchWorkDir(candidate, cityPath string, cfg *config.City, a *confi
 	if wd, ok := GuardMetadataWorkDir(candidate, cityPath, cityName, qualifiedName, *a, rigs); ok {
 		return wd, false
 	}
-	if configured := ResolveWorkDirPath(cityPath, cityName, qualifiedName, *a, rigs); configured != "" && UsableConfiguredRoot(cityPath, configured) {
+	// The configured work_dir is expanded from a safe identity of this agent,
+	// so it is the fallback even when it cannot serve as a containment root
+	// (for example a configured path with a space); the city root is used only
+	// when nothing is configured.
+	if configured := ResolveWorkDirPath(cityPath, cityName, qualifiedName, *a, rigs); configured != "" && !pathutil.SamePath(configured, filepath.Join(cityPath, ".gc")) {
 		return configured, true
 	}
 	return cityPath, true

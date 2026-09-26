@@ -284,7 +284,7 @@ func TestExpandSessionSetupRefusesUnsafeIdentity(t *testing.T) {
 		{Session: "x'; touch /tmp/pwn; '", Agent: "myrig/worker-1"},
 		{Session: "worker-1", Agent: "myrig/x'$(id)'"},
 		{Session: "worker-1", Agent: "myrig/worker-1", AgentBase: "a b"},
-		{Session: "worker-1", Agent: "myrig/worker-1", Rig: "../beta"},
+		{Session: "worker-1", Agent: "myrig/worker-1", Rig: "beta;id"},
 	} {
 		got := expandSessionSetup(cmds, ctx)
 		if len(got) != 1 || got[0] != cmds[0] {
@@ -358,5 +358,25 @@ func TestSessionBeadIdentityRefusesOtherRigPrefix(t *testing.T) {
 	}
 	if got := sessionBeadQualifiedNameInfo(city, ant, rigs, session.Info{AgentName: "beta/ant-adhoc-123"}); got == "beta/ant-adhoc-123" {
 		t.Fatalf("sessionBeadQualifiedNameInfo(beta/ant-adhoc-123) kept another rig prefix")
+	}
+}
+
+// ga-6umo round 4: configured identities of path-matched rig agents with an
+// absolute Dir are not plain names but are shell-inert, and must still expand.
+func TestExpandSessionSetupExpandsAbsoluteDirAgent(t *testing.T) {
+	cmds := []string{"git -C {{.RigRoot}} worktree add {{.WorkDir}}", "tmux set -t {{.Session}} @agent {{.Agent}}"}
+	got := expandSessionSetup(cmds, SessionSetupContext{
+		Session:   "--home--me--app--worker",
+		Agent:     "/home/me/app/worker",
+		AgentBase: "worker",
+		Rig:       "app",
+		RigRoot:   "/home/me/app",
+		WorkDir:   "/home/me/app/.gc/worktrees/worker",
+	})
+	want := []string{"git -C /home/me/app worktree add /home/me/app/.gc/worktrees/worker", "tmux set -t --home--me--app--worker @agent /home/me/app/worker"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("expandSessionSetup[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }

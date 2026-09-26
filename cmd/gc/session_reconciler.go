@@ -3927,6 +3927,11 @@ func resolvePreservedConfiguredNamedSessionTemplate(
 	if !ok || spec.Agent == nil {
 		return TemplateParams{}, fmt.Errorf("configured named session %q not found", identity)
 	}
+	// ga-6umo: use the configured identity, not the stored metadata value the
+	// lookup normalized (for example a trailing "/").
+	if configured := strings.TrimSpace(spec.Identity); configured != "" {
+		identity = configured
+	}
 	bp := newAgentBuildParams(cityName, cityPath, cfg, sp, clk.Now().UTC(), store, stderr)
 	bp.sessionBeads = newSessionBeadSnapshotFromInfos(openInfos)
 	fpExtra := buildFingerprintExtra(spec.Agent)

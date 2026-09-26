@@ -140,7 +140,8 @@ func TestBuildSessionResumeIgnoresMetadataPermissionOverrideOnExplicitResumeComm
 	if err != nil {
 		t.Fatalf("buildSessionResume: %v", err)
 	}
-	want := "codex resume --ask-for-approval on-request " + info.SessionKey
+	// The rejected override leaves the configured resume command unchanged.
+	want := "codex resume " + info.SessionKey + " --ask-for-approval on-request"
 	if cmd != want {
 		t.Fatalf("resume command = %q, want %q", cmd, want)
 	}

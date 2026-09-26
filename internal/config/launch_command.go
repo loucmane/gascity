@@ -125,6 +125,9 @@ func BuildProviderResumeCommand(resolved *ResolvedProvider, optionOverrides map[
 		return "", fmt.Errorf("resolved provider is nil")
 	}
 	command := strings.TrimSpace(resolved.ResumeCommand)
+	// ga-6umo: overrides come from worker-writable metadata; decide on the
+	// filtered set so a rejected override never triggers the flag rewrite.
+	optionOverrides, _ = FilterMetadataOptionOverrides(resolved.OptionsSchema, optionOverrides)
 	if command == "" || len(resolved.OptionsSchema) == 0 || !hasSchemaOptionOverrides(optionOverrides) {
 		return command, nil
 	}

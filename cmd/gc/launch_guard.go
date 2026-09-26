@@ -83,7 +83,7 @@ func templateLaunchWorkDirRoots(cityPath string, cfg *config.City, tp TemplatePa
 			exactRoot = configured
 		} else {
 			roots = append(roots, configured)
-			if packRoot := workdirutil.PackSiblingRoot(cityPath, configured); packRoot != "" {
+			if packRoot := workdirutil.PackSiblingRoot(cityPath, configured, cfgRigs(cfg)); packRoot != "" {
 				roots = append(roots, packRoot)
 			}
 		}
@@ -131,10 +131,13 @@ func safeSessionName(name string) bool {
 	return !strings.Contains(name, "/") && workdirutil.SafeIdentityName(name)
 }
 
-// unsafeSetupContextField names the first identity field of ctx that is not
-// a plain name, or returns "". Session, agent and rig names can come from
-// worker-writable bead metadata and are substituted unquoted into shell
-// templates, so a context with such a field is never expanded (ga-6umo).
+// unsafeSetupContextField names the first identity field of ctx that holds a
+// character outside [A-Za-z0-9._/-], or returns "". Session, agent and rig
+// names can come from worker-writable bead metadata and are substituted
+// unquoted into shell templates, so a context with a shell-significant
+// character (whitespace, quotes, metacharacters) is never expanded. Traversal
+// is not a shell concern here: work dirs and rig selection are guarded where
+// they are derived (ga-6umo).
 func unsafeSetupContextField(ctx SessionSetupContext) string {
 	for _, f := range []struct{ name, value string }{
 		{"session", ctx.Session},
@@ -142,9 +145,30 @@ func unsafeSetupContextField(ctx SessionSetupContext) string {
 		{"agent base", ctx.AgentBase},
 		{"rig", ctx.Rig},
 	} {
-		if f.value != "" && !workdirutil.SafeIdentityName(f.value) {
+		if !shellInertName(f.value) {
 			return f.name
 		}
 	}
 	return ""
+}
+
+// shellInertName reports whether v is made only of [A-Za-z0-9._/-]
+// characters, so it cannot change the meaning of a shell command line.
+func shellInertName(v string) bool {
+	for _, r := range v {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '_' || r == '/' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func cfgRigs(cfg *config.City) []config.Rig {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.Rigs
 }

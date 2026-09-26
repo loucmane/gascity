@@ -162,3 +162,26 @@ func TestBuildMetadataLaunchCommandFailsClosed(t *testing.T) {
 		t.Fatal("BuildMetadataLaunchCommand = nil error, want the permission policy refusal")
 	}
 }
+
+// ga-6umo round 4: a rejected metadata override must not trigger the resume
+// schema-flag rewrite.
+func TestBuildProviderResumeCommandIgnoresRejectedOverride(t *testing.T) {
+	rp := &ResolvedProvider{
+		Name:          "codex-custom",
+		Command:       "codex",
+		ResumeCommand: "codex resume {{.SessionKey}} --sandbox workspace-write",
+		ResumeFlag:    "resume",
+		ResumeStyle:   "subcommand",
+		OptionsSchema: []ProviderOption{{Key: "permission_mode", Choices: []OptionChoice{
+			{Value: "safe", FlagArgs: []string{"--sandbox", "workspace-write"}},
+			{Value: "unrestricted", FlagArgs: []string{"--sandbox", "danger-full-access"}},
+		}}},
+	}
+	got, err := BuildProviderResumeCommand(rp, map[string]string{"permission_mode": "unrestricted"})
+	if err != nil {
+		t.Fatalf("BuildProviderResumeCommand: %v", err)
+	}
+	if got != rp.ResumeCommand {
+		t.Fatalf("BuildProviderResumeCommand = %q, want the configured resume command %q", got, rp.ResumeCommand)
+	}
+}

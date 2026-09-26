@@ -22,7 +22,7 @@ func TestPackSiblingRoot(t *testing.T) {
 		{"/elsewhere/worktrees/worker", ""},        // parent outside the city
 	}
 	for _, tc := range cases {
-		if got := PackSiblingRoot(city, tc.configured); got != tc.want {
+		if got := PackSiblingRoot(city, tc.configured, nil); got != tc.want {
 			t.Errorf("PackSiblingRoot(%q) = %q, want %q", tc.configured, got, tc.want)
 		}
 	}
@@ -118,5 +118,33 @@ func TestUsableConfiguredRoot(t *testing.T) {
 		if got := UsableConfiguredRoot(city, tc.root); got != tc.want {
 			t.Errorf("UsableConfiguredRoot(%q) = %v, want %v", tc.root, got, tc.want)
 		}
+	}
+}
+
+// ga-6umo round 4: a pack parent that holds a rig root would reach whole
+// other rigs.
+func TestPackSiblingRootRefusesParentHoldingRigs(t *testing.T) {
+	city := t.TempDir()
+	rigs := []config.Rig{{Name: "gascity", Path: "rigs/gascity"}, {Name: "other", Path: filepath.Join(city, "rigs", "other")}}
+	if got := PackSiblingRoot(city, filepath.Join(city, "rigs", "gascity"), rigs); got != "" {
+		t.Fatalf("PackSiblingRoot(rig root) = %q, want empty", got)
+	}
+	if got, want := PackSiblingRoot(city, filepath.Join(city, ".gc", "workspaces", "worker"), rigs), filepath.Join(city, ".gc", "workspaces"); got != want {
+		t.Fatalf("PackSiblingRoot(workspace) = %q, want %q", got, want)
+	}
+}
+
+// ga-6umo round 4: the resume fallback is the configured work_dir even when
+// it cannot serve as a containment root, never the wider city root.
+func TestSessionLaunchWorkDirFallsBackToConfiguredPathWithSpace(t *testing.T) {
+	for _, key := range []string{"GC_WORKTREES_DIR", "T3CODE_WORKTREES_DIR", "T3CODE_HOME"} {
+		t.Setenv(key, "")
+	}
+	city := t.TempDir()
+	configured := filepath.Join(t.TempDir(), "My Repo")
+	a := config.Agent{Name: "w", WorkDir: configured}
+	got, refused := SessionLaunchWorkDir("/etc", city, &config.City{Agents: []config.Agent{a}}, &a, "")
+	if !refused || got != configured {
+		t.Fatalf("SessionLaunchWorkDir = %q, refused=%v, want configured %q", got, refused, configured)
 	}
 }
