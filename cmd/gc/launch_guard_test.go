@@ -15,6 +15,7 @@ import (
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/session/sessiontest"
+	workdirutil "github.com/gastownhall/gascity/internal/workdir"
 )
 
 // ga-6umo: work_dir guard, gc.pack sanitizing and initial_message flag guard.
@@ -233,5 +234,40 @@ func TestResolvedWorkerRuntimeKeepsPermissionDefaultOnBadMetadata(t *testing.T) 
 		if resolved == nil || !strings.Contains(resolved.Command, "--dangerously-skip-permissions") {
 			t.Fatalf("%s: runtime = %+v, want the configured permission default", tc.name, resolved)
 		}
+	}
+}
+
+// ga-6umo round 2: the reconciler start path takes a manual session identity
+// from the worker-writable agent_name. A traversal must not become the session
+// identity or expand the work_dir template.
+func TestReconcilerIdentityIgnoresAgentNameTraversal(t *testing.T) {
+	city := t.TempDir()
+	dog := &config.Agent{Name: "dog", WorkDir: ".gc/agents/{{.AgentBase}}", MaxActiveSessions: intPtr(3)}
+	for _, name := range []string{"x/..", "../../../../..", "dog/../..", "a b", "x/../../home/user"} {
+		if got := normalizeSessionBeadQualifiedName(dog, name); got != "" {
+			t.Errorf("normalizeSessionBeadQualifiedName(%q) = %q, want empty", name, got)
+		}
+		got := sessionBeadQualifiedNameInfo(city, dog, nil, session.Info{AgentName: name})
+		if got != dog.QualifiedName() {
+			t.Errorf("sessionBeadQualifiedNameInfo(agent_name %q) = %q, want %q", name, got, dog.QualifiedName())
+		}
+		if got := sessionBeadQualifiedNameInfo(city, dog, nil, session.Info{AgentName: name, Alias: name}); !workdirutil.SafeIdentityName(got) {
+			t.Errorf("sessionBeadQualifiedNameInfo(alias %q) = %q, want a plain identity", name, got)
+		}
+		workDir, err := resolveConfiguredWorkDir(city, "fixture", name, dog, nil)
+		if err != nil {
+			t.Fatalf("resolveConfiguredWorkDir(%q): %v", name, err)
+		}
+		if want := filepath.Join(city, ".gc", "agents", "dog"); workDir != want {
+			t.Errorf("resolveConfiguredWorkDir(%q) = %q, want %q", name, workDir, want)
+		}
+	}
+	// A legitimate pool instance keeps its own identity and work_dir.
+	if got := normalizeSessionBeadQualifiedName(dog, "dog-2"); got != "dog-2" {
+		t.Errorf("normalizeSessionBeadQualifiedName(dog-2) = %q, want dog-2", got)
+	}
+	workDir, err := resolveConfiguredWorkDir(city, "fixture", "dog-2", dog, nil)
+	if err != nil || workDir != filepath.Join(city, ".gc", "agents", "dog-2") {
+		t.Errorf("resolveConfiguredWorkDir(dog-2) = %q, %v, want the instance work_dir", workDir, err)
 	}
 }

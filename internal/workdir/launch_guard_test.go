@@ -61,12 +61,12 @@ func TestSafeAgentIdentity(t *testing.T) {
 		{"myrig/.hidden", "myrig/ant"},
 		{"myrig/ant/extra", "myrig/ant"},
 	} {
-		if got := SafeAgentIdentity(a, tc.in); got != tc.want {
+		if got := SafeAgentIdentity("", a, nil, tc.in); got != tc.want {
 			t.Errorf("SafeAgentIdentity(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 	city := config.Agent{Name: "dog"}
-	if got := SafeAgentIdentity(city, "x/.."); got != "dog" {
+	if got := SafeAgentIdentity("", city, nil, "x/.."); got != "dog" {
 		t.Errorf("SafeAgentIdentity(city agent, x/..) = %q, want dog", got)
 	}
 }

@@ -403,7 +403,10 @@ func (s *Server) resolvedSessionRuntimeCommand(resolved *config.ResolvedProvider
 	if err != nil {
 		return "", fmt.Errorf("building provider launch command: %w", err)
 	}
-	return firstNonEmptyString(launchCommand.Command, configuredCommand, resolved.Name), nil
+	if strings.TrimSpace(launchCommand.Command) == "" {
+		return "", fmt.Errorf("building provider launch command: provider %q produced an empty command", resolved.Name)
+	}
+	return launchCommand.Command, nil
 }
 
 func configuredSessionRuntimeCommand(resolved *config.ResolvedProvider, transport string) string {
@@ -653,7 +656,7 @@ func (s *Server) resolveSessionRuntimeWithMetadata(info session.Info, metadata m
 						if info.WorkDir != "" {
 							// ga-6umo: the stored work_dir is worker-writable; keep it
 							// only inside the allowed roots of the template.
-							workDir, _ = workdirutil.SessionLaunchWorkDir(info.WorkDir, s.state.CityPath(), cfg, &agentCfg, agentCfg.QualifiedName())
+							workDir, _ = workdirutil.SessionLaunchWorkDir(info.WorkDir, s.state.CityPath(), cfg, &agentCfg, info.AgentName)
 						}
 						configuredTransport = config.ResolveSessionCreateTransport(agentCfg.Session, resolved)
 					}

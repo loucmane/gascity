@@ -15,7 +15,7 @@ import (
 // When the configured work_dir is the city root itself only that exact
 // directory is allowed, never an arbitrary descendant of the city.
 func LaunchWorkDirRoots(cityPath, cityName, qualifiedName string, a config.Agent, rigs []config.Rig) (roots []string, exactRoot string) {
-	qualifiedName = SafeAgentIdentity(a, qualifiedName)
+	qualifiedName = SafeAgentIdentity(cityPath, a, rigs, qualifiedName)
 	configured := ResolveWorkDirPath(cityPath, cityName, qualifiedName, a, rigs)
 	if configured != "" && !UsableConfiguredRoot(cityPath, configured) {
 		configured = ""
@@ -43,28 +43,45 @@ func LaunchWorkDirRoots(cityPath, cityName, qualifiedName string, a config.Agent
 	return roots, exactRoot
 }
 
-// SafeAgentIdentity returns qualifiedName when it can safely expand the
-// work_dir template of agent a: every segment is a plain name
-// ([A-Za-z0-9][A-Za-z0-9._-]*, never "." or "..") and its directory part is
-// the agent dir. Otherwise it returns a.QualifiedName(). A stored agent_name
-// is worker-writable, so a traversal such as "x/.." must not move the roots
-// (ga-6umo).
-func SafeAgentIdentity(a config.Agent, qualifiedName string) string {
+// SafeIdentityName reports whether every segment of qualifiedName is a plain
+// name ([A-Za-z0-9][A-Za-z0-9._-]*, never "." or ".."). A stored agent_name is
+// worker-writable and expands work_dir and startup templates, so a value that
+// fails this check must not be used as a session identity (ga-6umo).
+func SafeIdentityName(qualifiedName string) bool {
 	qualifiedName = strings.TrimSpace(qualifiedName)
 	if qualifiedName == "" {
-		return a.QualifiedName()
+		return false
 	}
-	segments := strings.Split(qualifiedName, "/")
-	for _, seg := range segments {
+	for _, seg := range strings.Split(qualifiedName, "/") {
 		if !safeIdentitySegment(seg) {
-			return a.QualifiedName()
+			return false
 		}
 	}
-	dir := strings.Join(segments[:len(segments)-1], "/")
-	if dir != strings.Trim(strings.TrimSpace(a.Dir), "/") {
+	return true
+}
+
+// SafeAgentIdentity returns qualifiedName when it can safely expand the
+// work_dir template of agent a: it passes SafeIdentityName and its directory
+// part is the agent dir or the rig the agent dir resolves to. Otherwise it
+// returns a.QualifiedName(), so a traversal such as "x/.." or another dir
+// prefix never moves the work_dir or its roots (ga-6umo).
+func SafeAgentIdentity(cityPath string, a config.Agent, rigs []config.Rig, qualifiedName string) string {
+	qualifiedName = strings.TrimSpace(qualifiedName)
+	if !SafeIdentityName(qualifiedName) {
 		return a.QualifiedName()
 	}
-	return qualifiedName
+	dir := ""
+	if i := strings.LastIndex(qualifiedName, "/"); i >= 0 {
+		dir = qualifiedName[:i]
+	}
+	agentDir := strings.Trim(strings.TrimSpace(a.Dir), "/")
+	if dir == agentDir {
+		return qualifiedName
+	}
+	if rig := ConfiguredRigName(cityPath, a, rigs); rig != "" && dir == rig {
+		return qualifiedName
+	}
+	return a.QualifiedName()
 }
 
 func safeIdentitySegment(seg string) bool {
@@ -147,7 +164,7 @@ func SessionLaunchWorkDir(candidate, cityPath string, cfg *config.City, a *confi
 	if cfg != nil {
 		rigs = cfg.Rigs
 	}
-	qualifiedName = SafeAgentIdentity(*a, qualifiedName)
+	qualifiedName = SafeAgentIdentity(cityPath, *a, rigs, qualifiedName)
 	cityName := CityName(cityPath, cfg)
 	if wd, ok := GuardMetadataWorkDir(candidate, cityPath, cityName, qualifiedName, *a, rigs); ok {
 		return wd, false

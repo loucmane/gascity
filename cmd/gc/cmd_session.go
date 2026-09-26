@@ -21,7 +21,6 @@ import (
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
-	"github.com/gastownhall/gascity/internal/shellquote"
 	"github.com/gastownhall/gascity/internal/telemetry"
 	workdirutil "github.com/gastownhall/gascity/internal/workdir"
 	"github.com/gastownhall/gascity/internal/worker"
@@ -1537,26 +1536,22 @@ func buildResumeCommand(cityPath string, cfg *config.City, info session.Info, se
 		resolvedInfo := info
 		// Build command with default args and settings, matching the
 		// reconciler's template_resolve.go command construction.
-		command := resolved.CommandString()
-		resumeCommand := resolved.ResumeCommand
-		appendDefaultArgs := func() {
-			if defaultArgs := resolved.ResolveDefaultArgs(); len(defaultArgs) > 0 {
-				command = command + " " + shellquote.Join(defaultArgs)
-			}
+		// ga-6umo: overrides and transport come from worker-writable
+		// metadata, so the build fails closed instead of falling back to a
+		// bare command that skipped the managed permission policy.
+		overrides, err := session.ParseTemplateOverrides(metadata)
+		if err != nil {
+			overrides = nil
 		}
-		if overrides, err := session.ParseTemplateOverrides(metadata); err == nil {
-			transport := strings.TrimSpace(info.Transport)
-			launchCommand, err := config.BuildProviderLaunchCommand(cityPath, resolved, overrides, transport)
-			if err == nil && strings.TrimSpace(launchCommand.Command) != "" {
-				command = launchCommand.Command
-			} else {
-				appendDefaultArgs()
-			}
-			if command, err := config.BuildProviderResumeCommand(resolved, overrides); err == nil && strings.TrimSpace(command) != "" {
-				resumeCommand = command
-			}
-		} else {
-			appendDefaultArgs()
+		launchCommand, err := config.BuildMetadataLaunchCommand(cityPath, resolved, overrides, strings.TrimSpace(info.Transport))
+		if err != nil || strings.TrimSpace(launchCommand.Command) == "" {
+			fmt.Fprintf(stderr, "gc session: refusing to resume %s: building launch command: %v\n", info.ID, err) //nolint:errcheck
+			return "", runtime.Config{}
+		}
+		command := launchCommand.Command
+		resumeCommand := resolved.ResumeCommand
+		if rc, err := config.BuildProviderResumeCommand(resolved, overrides); err == nil && strings.TrimSpace(rc) != "" {
+			resumeCommand = rc
 		}
 		// buildResumeCommand is best-effort: log projection failures and
 		// continue so `gc session attach` still starts the agent. The strict

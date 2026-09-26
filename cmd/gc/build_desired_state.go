@@ -3497,7 +3497,8 @@ func sessionBeadQualifiedNameInfo(cityPath string, cfgAgent *config.Agent, rigs 
 		strings.TrimSpace(info.Alias),
 		explicitName,
 	)
-	if qualifiedName != "" {
+	// ga-6umo: alias and session_name are worker-writable too.
+	if qualifiedName != "" && workdirutil.SafeIdentityName(qualifiedName) {
 		return qualifiedName
 	}
 	return cfgAgent.QualifiedName()
@@ -3509,6 +3510,12 @@ func normalizeSessionBeadQualifiedName(cfgAgent *config.Agent, identity string) 
 	}
 	identity = strings.TrimSpace(identity)
 	if identity == "" {
+		return ""
+	}
+	// ga-6umo: a persisted agent_name is worker-writable and becomes the
+	// session identity that expands work_dir and startup templates. A value
+	// with a traversal or non-plain segment is ignored.
+	if !workdirutil.SafeIdentityName(identity) {
 		return ""
 	}
 	if identity == cfgAgent.QualifiedName() || strings.Contains(identity, "/") {

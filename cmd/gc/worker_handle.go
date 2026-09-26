@@ -685,7 +685,10 @@ func resolvedWorkerRuntimeCommandForTransport(cityPath string, resolved *config.
 	if err != nil {
 		return "", fmt.Errorf("building launch command for provider %q: %w", resolved.Name, err)
 	}
-	return appendRuntimeProviderSettings(cityPath, resolved, firstNonEmptyGCString(launchCommand.Command, configuredCommand, resolved.Name)), nil
+	if strings.TrimSpace(launchCommand.Command) == "" {
+		return "", fmt.Errorf("building launch command for provider %q: empty command", resolved.Name)
+	}
+	return appendRuntimeProviderSettings(cityPath, resolved, launchCommand.Command), nil
 }
 
 func configuredWorkerRuntimeCommand(resolved *config.ResolvedProvider, transport string) string {
