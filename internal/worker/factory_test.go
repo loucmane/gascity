@@ -369,6 +369,11 @@ func TestFactorySessionByIDPreservesTemplateInWorkerOperationEvents(t *testing.T
 		Store:    store,
 		Provider: sp,
 		Recorder: recorder,
+		// ga-6umo: a handle rebuilt from a record launches only with a
+		// config-resolved runtime.
+		ResolveSessionRuntime: func(sessionpkg.Info, string, map[string]string) (*ResolvedRuntime, error) {
+			return &ResolvedRuntime{Command: "stub", Provider: "stub", Resume: sessionpkg.ProviderResume{SessionIDFlag: "--session-id"}}, nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)

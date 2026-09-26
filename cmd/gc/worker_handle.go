@@ -218,10 +218,7 @@ func resumeRuntimeMCPServersWithConfig(
 	if cfg == nil || resolved == nil {
 		return nil, nil
 	}
-	workDir := strings.TrimSpace(info.WorkDir)
-	if workDir == "" {
-		workDir = cityPath
-	}
+	workDir := guardedSessionInfoWorkDir(cityPath, cfg, info)
 	resumeMeta := make(map[string]string)
 	for key, value := range metadata {
 		resumeMeta[key] = value
@@ -571,15 +568,14 @@ func resolvedWorkerRuntimeWithConfigAndMetadata(cityPath string, cfg *config.Cit
 
 	command := resolvedWorkerRuntimeCommandForTransport(cityPath, resolved, transport, info.Command, info.Provider, metadata)
 
-	workDir := strings.TrimSpace(info.WorkDir)
-	if workDir == "" {
-		workDir = cityPath
-	}
+	workDir := guardedSessionInfoWorkDir(cityPath, cfg, info)
 	mcpServers, err := resumeRuntimeMCPServersWithConfig(cityPath, cfg, info, resolved, transport, metadata)
 	if err != nil {
 		return nil, err
 	}
-	resumeCommand := firstNonEmptyGCString(resolved.ResumeCommand, info.ResumeCommand)
+	// ga-6umo: the resume form comes from the resolved provider only, never
+	// from the session bead's stored resume_command.
+	resumeCommand := resolved.ResumeCommand
 	if overrides, err := session.ParseTemplateOverrides(metadata); err == nil && strings.TrimSpace(resumeCommand) != "" {
 		resumeProvider := *resolved
 		resumeProvider.ResumeCommand = resumeCommand
@@ -646,40 +642,41 @@ func resolvedWorkerRuntimeWithConfigAndMetadata(cityPath string, cfg *config.Cit
 		SessionEnv: sessionEnv,
 		Hints:      runtimeHints,
 		Resume: session.ProviderResume{
-			ResumeFlag:    firstNonEmptyGCString(resolved.ResumeFlag, info.ResumeFlag),
-			ResumeStyle:   firstNonEmptyGCString(resolved.ResumeStyle, info.ResumeStyle),
+			ResumeFlag:    resolved.ResumeFlag,
+			ResumeStyle:   resolved.ResumeStyle,
 			ResumeCommand: resumeCommand,
 			SessionIDFlag: resolved.SessionIDFlag,
 		},
 	}, nil
 }
 
-func resolvedWorkerRuntimeProviderLabel(resolved *config.ResolvedProvider, transport string, info session.Info) string {
-	if strings.TrimSpace(configuredWorkerRuntimeCommand(resolved, transport)) != "" {
-		return firstNonEmptyGCString(resolved.Name, info.Provider)
-	}
-	return firstNonEmptyGCString(info.Provider, resolved.Name)
+// resolvedWorkerRuntimeProviderLabel prefers the resolved provider name. The
+// stored provider is worker-writable and doubles as a launch-command fallback,
+// so it is used only when config names no provider (ga-6umo).
+func resolvedWorkerRuntimeProviderLabel(resolved *config.ResolvedProvider, _ string, info session.Info) string {
+	return firstNonEmptyGCString(resolved.Name, info.Provider)
 }
 
-func resolvedWorkerRuntimeCommandForTransport(cityPath string, resolved *config.ResolvedProvider, transport, storedCommand, fallbackProvider string, metadata map[string]string) string {
-	command := strings.TrimSpace(storedCommand)
+// resolvedWorkerRuntimeCommandForTransport rebuilds the launch command from the
+// resolved provider. ga-6umo: the stored command and provider name on the
+// session bead are worker-writable and never launched; tmux runs the command
+// as a shell line, so preserving a stored command let one metadata field run
+// arbitrary shell. The rebuilt command carries the provider settings file
+// (appendProviderSettings), which is what the old #799 preservation kept.
+func resolvedWorkerRuntimeCommandForTransport(cityPath string, resolved *config.ResolvedProvider, transport, storedCommand, _ string, metadata map[string]string) string {
+	transport = config.LegacyStoredCommandTransport(resolved, transport, storedCommand)
 	configuredCommand := configuredWorkerRuntimeCommand(resolved, transport)
 	if configuredCommand == "" {
-		return firstNonEmptyGCString(command, fallbackProvider, resolved.Name)
+		return resolved.Name
 	}
-	desiredCommand := configuredCommand
-	if optionOverrides, err := session.ParseTemplateOverrides(metadata); err == nil {
-		if launchCommand, err := config.BuildProviderLaunchCommand(cityPath, resolved, optionOverrides, transport); err == nil {
-			desiredCommand = firstNonEmptyGCString(launchCommand.Command, configuredCommand, resolved.Name)
-			if shouldPreserveStoredRuntimeCommandForTransport(command, desiredCommand, transport, optionOverrides) {
-				desiredCommand = command
-			}
-		}
+	optionOverrides, err := session.ParseTemplateOverrides(metadata)
+	if err != nil {
+		optionOverrides = nil
 	}
-	if !shouldPreserveStoredRuntimeCommand(command, desiredCommand) {
-		command = desiredCommand
+	if launchCommand, err := config.BuildProviderLaunchCommand(cityPath, resolved, optionOverrides, transport); err == nil {
+		return appendRuntimeProviderSettings(cityPath, resolved, firstNonEmptyGCString(launchCommand.Command, configuredCommand, resolved.Name))
 	}
-	return firstNonEmptyGCString(command, fallbackProvider, resolved.Name)
+	return appendRuntimeProviderSettings(cityPath, resolved, configuredCommand)
 }
 
 func configuredWorkerRuntimeCommand(resolved *config.ResolvedProvider, transport string) string {
@@ -809,7 +806,7 @@ func startedConfigHashProvesWorkerACPTransport(
 		info.Alias,
 		info.Template,
 		firstNonEmptyGCString(info.Provider, resolved.Name, info.Template),
-		firstNonEmptyGCString(info.WorkDir, cityPath),
+		guardedSessionInfoWorkDir(cityPath, cfg, info),
 		"acp",
 		metadata,
 	)

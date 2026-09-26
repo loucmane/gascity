@@ -172,6 +172,10 @@ func providerOptionArgs(resolved *ResolvedProvider, optionOverrides map[string]s
 	for key, value := range resolved.EffectiveDefaults {
 		mergedOptions[key] = value
 	}
+	// ga-6umo: option overrides reaching this builder come from session or
+	// work-bead metadata (template_overrides, opt_<key>), which workers can
+	// write. Only benign model/effort choices may override config defaults.
+	optionOverrides, _ = FilterMetadataOptionOverrides(resolved.OptionsSchema, optionOverrides)
 	for key, value := range optionOverrides {
 		if key == "initial_message" {
 			continue

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -515,7 +516,7 @@ func TestReconcileSessionBeads_UsesAssignedWorkSnapshotForTaskWorkDir(t *testing
 	session := env.createSessionBead("worker", "worker")
 	env.markSessionCreating(&session)
 
-	workDir := t.TempDir()
+	workDir := configuredTaskWorkDir(t, env)
 	task, err := env.store.Create(beads.Bead{
 		Title: "assigned task",
 		Type:  "task",
@@ -642,9 +643,25 @@ func newReconcilerTaskWorkDirTest(t *testing.T) (*reconcilerTestEnv, *taskWorkDi
 	env.addDesired("worker", "worker", false)
 	session := env.createSessionBead("worker", "worker")
 	env.markSessionCreating(&session)
-	workDir := t.TempDir()
+	workDir := configuredTaskWorkDir(t, env)
 	createInProgressTaskWithWorkDir(t, env.store, session.ID, workDir)
 	return env, store, session, workDir
+}
+
+// configuredTaskWorkDir gives the desired worker a configured work_dir and
+// returns an existing task work dir inside it: since ga-6umo a task work_dir
+// outside the allowed roots is ignored.
+func configuredTaskWorkDir(t *testing.T, env *reconcilerTestEnv) string {
+	t.Helper()
+	configured := t.TempDir()
+	tp := env.desiredState["worker"]
+	tp.WorkDir = configured
+	env.desiredState["worker"] = tp
+	workDir := filepath.Join(configured, "task-1")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return workDir
 }
 
 func createInProgressTaskWithWorkDir(t *testing.T, store beads.Store, assignee, workDir string) beads.Bead {
@@ -4931,8 +4948,9 @@ func TestReconcileSessionBeads_SyncsGCDirWithWorkDirOverride(t *testing.T) {
 		Env:          map[string]string{"GC_DIR": "/template/worktree"},
 	}
 	session := env.createSessionBead("worker", "worker")
-	_ = env.store.SetMetadata(session.ID, "work_dir", "/instance/worktree")
-	session.Metadata["work_dir"] = "/instance/worktree"
+	// ga-6umo: an instance work_dir must lie inside the configured one.
+	_ = env.store.SetMetadata(session.ID, "work_dir", "/template/worktree/instance")
+	session.Metadata["work_dir"] = "/template/worktree/instance"
 	env.markSessionCreating(&session)
 
 	woken := env.reconcile([]beads.Bead{session})
@@ -4951,11 +4969,11 @@ func TestReconcileSessionBeads_SyncsGCDirWithWorkDirOverride(t *testing.T) {
 	if !found {
 		t.Fatal("expected Start call for worker")
 	}
-	if startCfg.WorkDir != "/instance/worktree" {
-		t.Fatalf("WorkDir = %q, want %q", startCfg.WorkDir, "/instance/worktree")
+	if startCfg.WorkDir != "/template/worktree/instance" {
+		t.Fatalf("WorkDir = %q, want %q", startCfg.WorkDir, "/template/worktree/instance")
 	}
-	if got := startCfg.Env["GC_DIR"]; got != "/instance/worktree" {
-		t.Fatalf("GC_DIR = %q, want %q", got, "/instance/worktree")
+	if got := startCfg.Env["GC_DIR"]; got != "/template/worktree/instance" {
+		t.Fatalf("GC_DIR = %q, want %q", got, "/template/worktree/instance")
 	}
 	if got := env.desiredState["worker"].Env["GC_DIR"]; got != "/template/worktree" {
 		t.Fatalf("desiredState GC_DIR mutated to %q", got)

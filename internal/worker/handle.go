@@ -242,6 +242,12 @@ type SessionSpec struct {
 	Resume       sessionpkg.ProviderResume
 	Hints        runtime.Config
 	Metadata     map[string]string
+
+	// launchRefusal, when set, is returned by every start or resume of the
+	// handle (ga-6umo): the spec was built from stored session metadata
+	// without a config-resolved runtime, so it may observe, nudge or stop the
+	// session but never launch it.
+	launchRefusal error
 }
 
 // SessionHandleConfig configures a [SessionHandle].

@@ -1523,14 +1523,16 @@ func cmdSessionAttach(args []string, stdout, stderr io.Writer) int {
 // was created from a bare provider name, so agent-template lookup must be
 // skipped to avoid agent/provider name collisions.
 func buildResumeCommand(cityPath string, cfg *config.City, info session.Info, sessionKind string, metadata map[string]string, stderr io.Writer) (string, runtime.Config) {
-	cmd := session.BuildResumeCommand(info)
+	// ga-6umo: with no config-resolved provider there is nothing trustworthy to
+	// launch; the stored command and resume fields are worker-writable, so the
+	// empty command refuses rather than falling back to them.
 	if cfg == nil {
-		return cmd, runtime.Config{WorkDir: info.WorkDir}
+		return "", runtime.Config{}
 	}
 
 	buildResolved := func(resolved *config.ResolvedProvider) (string, runtime.Config) {
 		if resolved == nil {
-			return cmd, runtime.Config{WorkDir: info.WorkDir}
+			return "", runtime.Config{}
 		}
 		resolvedInfo := info
 		// Build command with default args and settings, matching the
@@ -1619,7 +1621,7 @@ func buildResumeCommand(cityPath string, cfg *config.City, info session.Info, se
 		}
 	}
 
-	return cmd, runtime.Config{WorkDir: info.WorkDir}
+	return "", runtime.Config{}
 }
 
 // newSessionSuspendCmd creates the "gc session suspend <id-or-alias>" command.

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -651,6 +652,12 @@ func (s *Server) updateSessionPermissionMode(idRef string, body SessionPermissio
 	mode := strings.TrimSpace(body.PermissionMode)
 	if _, optErr := config.ResolveExplicitOptions(resolved.OptionsSchema, map[string]string{sessionPermissionModeOptionKey: mode}); optErr != nil {
 		return nil, apierr.InvalidRequest.Msg(optErr.Error())
+	}
+	// ga-6umo: session template_overrides are worker-writable bead metadata, so
+	// launches ignore a permission_mode stored there. Refuse instead of
+	// accepting a change that would never take effect.
+	if !slices.Contains(config.MetadataOverridableOptionKeys, sessionPermissionModeOptionKey) {
+		return nil, apierr.NotImplemented.Msg("unsupported: permission_mode can no longer be changed per session, set it in the agent or provider config (ga-6umo)")
 	}
 
 	if _, err := mgr.UpdateTemplateOverrides(id, map[string]string{sessionPermissionModeOptionKey: mode}); err != nil {

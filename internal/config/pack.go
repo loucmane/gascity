@@ -2814,6 +2814,7 @@ func applyAgentOverride(a *Agent, ov *AgentOverride) {
 func (ov *AgentOverride) toAgentPatch() *AgentPatch {
 	return &AgentPatch{
 		WorkDir:                 ov.WorkDir,
+		WorkDirRoots:            ov.WorkDirRoots,
 		TmuxAlias:               ov.TmuxAlias,
 		Scope:                   ov.Scope,
 		Suspended:               ov.Suspended,

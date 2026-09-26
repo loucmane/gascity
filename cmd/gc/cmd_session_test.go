@@ -1101,10 +1101,12 @@ func TestBuildResumeCommandAppliesTemplateOverrides(t *testing.T) {
 				ResumeFlag: "--resume",
 				OptionsSchema: []config.ProviderOption{
 					{
-						Key: "permission_mode",
+						// ga-6umo: effort is overridable from metadata;
+						// permission_mode is not.
+						Key: "effort",
 						Choices: []config.OptionChoice{
-							{Value: "default", FlagArgs: []string{"--ask-for-approval", "on-request"}},
-							{Value: "plan", FlagArgs: []string{"--ask-for-approval", "never"}},
+							{Value: "low", FlagArgs: []string{"--effort", "low"}},
+							{Value: "high", FlagArgs: []string{"--effort", "high"}},
 						},
 					},
 				},
@@ -1113,16 +1115,16 @@ func TestBuildResumeCommandAppliesTemplateOverrides(t *testing.T) {
 	}
 	info := session.Info{
 		Template:   "worker",
-		Command:    "codex --ask-for-approval on-request",
+		Command:    "codex --effort low",
 		Provider:   "codex-provider",
 		WorkDir:    "/tmp/workdir",
 		SessionKey: "abc-123",
 	}
 
 	cmd, _ := buildResumeCommand(t.TempDir(), cfg, info, "", map[string]string{
-		"template_overrides": `{"permission_mode":"plan"}`,
+		"template_overrides": `{"effort":"high"}`,
 	}, io.Discard)
-	want := "codex --resume abc-123 --ask-for-approval never"
+	want := "codex --resume abc-123 --effort high"
 	if cmd != want {
 		t.Fatalf("resume command = %q, want %q", cmd, want)
 	}
@@ -1137,13 +1139,15 @@ func TestBuildResumeCommandAppliesTemplateOverridesToExplicitResumeCommand(t *te
 		Providers: map[string]config.ProviderSpec{
 			"codex-provider": {
 				Command:       "codex",
-				ResumeCommand: "codex resume {{.SessionKey}} --ask-for-approval on-request",
+				ResumeCommand: "codex resume {{.SessionKey}} --effort low",
 				OptionsSchema: []config.ProviderOption{
 					{
-						Key: "permission_mode",
+						// ga-6umo: effort is overridable from metadata;
+						// permission_mode is not.
+						Key: "effort",
 						Choices: []config.OptionChoice{
-							{Value: "default", FlagArgs: []string{"--ask-for-approval", "on-request"}},
-							{Value: "plan", FlagArgs: []string{"--ask-for-approval", "never"}},
+							{Value: "low", FlagArgs: []string{"--effort", "low"}},
+							{Value: "high", FlagArgs: []string{"--effort", "high"}},
 						},
 					},
 				},
@@ -1152,16 +1156,16 @@ func TestBuildResumeCommandAppliesTemplateOverridesToExplicitResumeCommand(t *te
 	}
 	info := session.Info{
 		Template:   "worker",
-		Command:    "codex --ask-for-approval on-request",
+		Command:    "codex --effort low",
 		Provider:   "codex-provider",
 		WorkDir:    "/tmp/workdir",
 		SessionKey: "abc-123",
 	}
 
 	cmd, _ := buildResumeCommand(t.TempDir(), cfg, info, "", map[string]string{
-		"template_overrides": `{"permission_mode":"plan"}`,
+		"template_overrides": `{"effort":"high"}`,
 	}, io.Discard)
-	want := "codex resume --ask-for-approval never abc-123"
+	want := "codex resume --effort high abc-123"
 	if cmd != want {
 		t.Fatalf("resume command = %q, want %q", cmd, want)
 	}
@@ -2900,7 +2904,7 @@ func TestResolvedSessionCommandIncludesDefaultsAndSettings(t *testing.T) {
 	}
 }
 
-func TestResolvedSessionCommandAppliesOverridesOverDefaults(t *testing.T) {
+func TestResolvedSessionCommandAppliesOnlyBenignOverridesOverDefaults(t *testing.T) {
 	cityPath := t.TempDir()
 	claude := config.BuiltinProviders()["claude"]
 	resolved := &config.ResolvedProvider{
@@ -2917,11 +2921,11 @@ func TestResolvedSessionCommandAppliesOverridesOverDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolvedSessionCommand: %v", err)
 	}
-	if strings.Contains(got, "--dangerously-skip-permissions") {
-		t.Fatalf("command %q should not keep unrestricted default when overridden", got)
-	}
-	if !strings.Contains(got, "--permission-mode plan") {
-		t.Fatalf("command %q should include plan permission override", got)
+	// ga-6umo: session option overrides are stored as worker-writable
+	// template_overrides, so only model and effort apply; permission_mode
+	// keeps the configured default.
+	if !strings.Contains(got, "--dangerously-skip-permissions") || strings.Contains(got, "--permission-mode plan") {
+		t.Fatalf("command %q should keep the configured permission default and ignore the permission_mode override", got)
 	}
 	if !strings.Contains(got, "--effort low") {
 		t.Fatalf("command %q should include effort=low override", got)

@@ -346,16 +346,16 @@ func (s *Server) resolveSessionTemplate(template string) (*config.ResolvedProvid
 }
 
 func (s *Server) buildSessionResume(info session.Info) (string, runtime.Config, error) {
-	cmd := session.BuildResumeCommand(info)
 	metadata := s.sessionMetadata(info.ID)
 	resolved, workDir, transport, ambiguous := s.resolveSessionRuntimeWithMetadata(info, metadata)
 	if resolved == nil {
-		return cmd, runtime.Config{WorkDir: info.WorkDir}, nil
+		// ga-6umo: never fall back to the worker-writable stored command.
+		return "", runtime.Config{}, fmt.Errorf("session %q has no config-resolved provider; refusing to launch stored metadata (ga-6umo)", info.ID)
 	}
 	if ambiguous {
 		return "", runtime.Config{}, fmt.Errorf("%w: recreate the stopped session or resume it while ACP metadata can still be persisted", errAmbiguousLegacyACPTransport)
 	}
-	mcpServers, err := s.resumeSessionMCPServers(info, metadata, resolved, firstNonEmptyString(workDir, info.WorkDir), transport)
+	mcpServers, err := s.resumeSessionMCPServers(info, metadata, resolved, workDir, transport)
 	if err != nil {
 		return "", runtime.Config{}, err
 	}
@@ -363,7 +363,7 @@ func (s *Server) buildSessionResume(info session.Info) (string, runtime.Config, 
 	if command, err := s.resolvedSessionRuntimeCommand(resolved, transport, info.Command, metadata); err == nil {
 		resolvedInfo.Command = command
 	} else {
-		resolvedInfo.Command = fallbackSessionRuntimeCommand(resolved, transport, info.Command, info.Provider)
+		resolvedInfo.Command = fallbackSessionRuntimeCommand(resolved, transport, "", "")
 	}
 	resumeCommand := resolved.ResumeCommand
 	if overrides, err := session.ParseTemplateOverrides(metadata); err == nil {
@@ -381,11 +381,12 @@ func (s *Server) buildSessionResume(info session.Info) (string, runtime.Config, 
 }
 
 func (s *Server) resolvedSessionRuntimeCommand(resolved *config.ResolvedProvider, transport, storedCommand string, metadata map[string]string) (string, error) {
+	// ga-6umo: the stored command on the session bead is worker-writable and
+	// tmux runs the command as a shell line, so it is never launched; the
+	// command is always rebuilt from the resolved provider.
+	transport = config.LegacyStoredCommandTransport(resolved, transport, storedCommand)
 	configuredCommand := configuredSessionRuntimeCommand(resolved, transport)
 	if configuredCommand == "" {
-		if command := strings.TrimSpace(storedCommand); command != "" {
-			return command, nil
-		}
 		return "", fmt.Errorf("resolved provider %q has no launch command", resolved.Name)
 	}
 	optionOverrides, err := session.ParseTemplateOverrides(metadata)
@@ -396,11 +397,7 @@ func (s *Server) resolvedSessionRuntimeCommand(resolved *config.ResolvedProvider
 	if err != nil {
 		return "", fmt.Errorf("building provider launch command: %w", err)
 	}
-	desiredCommand := firstNonEmptyString(launchCommand.Command, configuredCommand, resolved.Name)
-	if command := strings.TrimSpace(storedCommand); shouldPreserveStoredRuntimeCommandForTransport(command, desiredCommand, transport, optionOverrides) {
-		return command, nil
-	}
-	return desiredCommand, nil
+	return firstNonEmptyString(launchCommand.Command, configuredCommand, resolved.Name), nil
 }
 
 func configuredSessionRuntimeCommand(resolved *config.ResolvedProvider, transport string) string {
@@ -416,9 +413,11 @@ func configuredSessionRuntimeCommand(resolved *config.ResolvedProvider, transpor
 	return ""
 }
 
-func fallbackSessionRuntimeCommand(resolved *config.ResolvedProvider, transport, storedCommand, fallbackProvider string) string {
-	resolvedCommand := configuredSessionRuntimeCommand(resolved, transport)
-	return firstNonEmptyString(storedCommand, resolvedCommand, fallbackProvider, resolved.Name)
+// fallbackSessionRuntimeCommand returns the config-derived command when the
+// full launch build fails. ga-6umo: the stored command and provider name on the
+// session bead are worker-writable and are never used.
+func fallbackSessionRuntimeCommand(resolved *config.ResolvedProvider, transport, _, _ string) string {
+	return firstNonEmptyString(configuredSessionRuntimeCommand(resolved, transport), resolved.Name)
 }
 
 func shouldPreserveStoredRuntimeCommand(storedCommand, resolvedCommand string) bool {
@@ -480,15 +479,16 @@ func (s *Server) resolveWorkerSessionRuntimeWithMetadata(info session.Info, _ st
 	if ambiguous {
 		return nil, fmt.Errorf("%w: recreate the stopped session or resume it while ACP metadata can still be persisted", errAmbiguousLegacyACPTransport)
 	}
-	mcpServers, err := s.resumeSessionMCPServers(info, metadata, resolved, firstNonEmptyString(workDir, info.WorkDir), transport)
+	mcpServers, err := s.resumeSessionMCPServers(info, metadata, resolved, workDir, transport)
 	if err != nil {
 		return nil, err
 	}
 	command, err := s.resolvedSessionRuntimeCommand(resolved, transport, info.Command, metadata)
 	if err != nil {
-		command = fallbackSessionRuntimeCommand(resolved, transport, info.Command, info.Provider)
+		command = fallbackSessionRuntimeCommand(resolved, transport, "", "")
 	}
-	resumeCommand := firstNonEmptyString(resolved.ResumeCommand, info.ResumeCommand)
+	// ga-6umo: resume forms come from the resolved provider only.
+	resumeCommand := resolved.ResumeCommand
 	if overrides, err := session.ParseTemplateOverrides(metadata); err == nil {
 		if command, err := config.BuildProviderResumeCommand(resolved, overrides); err == nil && strings.TrimSpace(command) != "" {
 			resumeCommand = command
@@ -497,13 +497,13 @@ func (s *Server) resolveWorkerSessionRuntimeWithMetadata(info session.Info, _ st
 	sessionEnv := cityAnchoredSessionEnv(s.state.CityPath(), configuredWorkspaceSessionEnv(s.state.Config()), resolved.Env)
 	runtimeCfg, err := worker.NormalizeResolvedRuntime(worker.ResolvedRuntime{
 		Command:    command,
-		WorkDir:    firstNonEmptyString(info.WorkDir, workDir),
-		Provider:   firstNonEmptyString(info.Provider, resolved.Name),
+		WorkDir:    workDir,
+		Provider:   resolved.Name,
 		SessionEnv: sessionEnv,
-		Hints:      sessionResumeHints(resolved, firstNonEmptyString(workDir, info.WorkDir), sessionEnv, mcpServers, sessionResumeInteractive(metadata)),
+		Hints:      sessionResumeHints(resolved, workDir, sessionEnv, mcpServers, sessionResumeInteractive(metadata)),
 		Resume: session.ProviderResume{
-			ResumeFlag:    firstNonEmptyString(resolved.ResumeFlag, info.ResumeFlag),
-			ResumeStyle:   firstNonEmptyString(resolved.ResumeStyle, info.ResumeStyle),
+			ResumeFlag:    resolved.ResumeFlag,
+			ResumeStyle:   resolved.ResumeStyle,
 			ResumeCommand: resumeCommand,
 			SessionIDFlag: resolved.SessionIDFlag,
 		},
@@ -587,7 +587,7 @@ func (s *Server) startedConfigHashProvesACPTransport(
 		info.Template,
 		firstNonEmptyString(info.Provider, resolved.Name),
 		resumeSessionIdentity(info, metadata),
-		firstNonEmptyString(workDir, info.WorkDir),
+		workDir,
 		"acp",
 		sessionKind,
 		metadata,
@@ -650,7 +650,9 @@ func (s *Server) resolveSessionRuntimeWithMetadata(info session.Info, metadata m
 						resolved = candidate
 						workDir = candidateWorkDir
 						if info.WorkDir != "" {
-							workDir = info.WorkDir
+							// ga-6umo: the stored work_dir is worker-writable; keep it
+							// only inside the allowed roots of the template.
+							workDir, _ = workdirutil.SessionLaunchWorkDir(info.WorkDir, s.state.CityPath(), cfg, &agentCfg, agentCfg.QualifiedName())
 						}
 						configuredTransport = config.ResolveSessionCreateTransport(agentCfg.Session, resolved)
 					}
@@ -668,10 +670,8 @@ func (s *Server) resolveSessionRuntimeWithMetadata(info session.Info, metadata m
 			return nil, "", "", false
 		}
 		resolved = candidate
-		workDir = info.WorkDir
-		if workDir == "" {
-			workDir = s.state.CityPath()
-		}
+		// ga-6umo: a provider-kind session may only run in the city root.
+		workDir, _ = workdirutil.SessionLaunchWorkDir(info.WorkDir, s.state.CityPath(), cfg, nil, "")
 		configuredTransport = resolved.ProviderSessionCreateTransport()
 	}
 	transport := resolvedSessionTransport(info, resolved, configuredTransport, metadata, false)

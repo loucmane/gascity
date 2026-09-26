@@ -43,6 +43,8 @@ func TestBuildProviderLaunchCommandAppliesOptionOverrides(t *testing.T) {
 	spec := BuiltinProviders()["claude"]
 	rp := specToResolved("claude", &spec)
 
+	// ga-6umo: overrides reach this builder from worker-writable metadata, so
+	// only model/effort choices apply; permission_mode stays the config default.
 	got, err := BuildProviderLaunchCommand("", rp, map[string]string{
 		"permission_mode": "plan",
 		"effort":          "low",
@@ -51,7 +53,7 @@ func TestBuildProviderLaunchCommandAppliesOptionOverrides(t *testing.T) {
 		t.Fatalf("BuildProviderLaunchCommand: %v", err)
 	}
 
-	want := "claude --permission-mode plan --effort low"
+	want := "claude --dangerously-skip-permissions --effort low"
 	if got.Command != want {
 		t.Fatalf("Command = %q, want %q", got.Command, want)
 	}

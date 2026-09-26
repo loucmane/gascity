@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -270,12 +271,13 @@ func (h *SessionHandle) Message(ctx context.Context, req MessageRequest) (result
 	if err != nil {
 		return MessageResult{}, err
 	}
-	resumeCommand, err := h.startCommand(id)
+	resumeCommand, err := h.deliveryResumeCommand(id)
 	if err != nil {
 		return MessageResult{}, err
 	}
 	outcome, err := h.manager.Submit(ctx, id, req.Text, resumeCommand, h.runtimeHints(), submitIntent(req.Delivery))
 	if err != nil {
+		err = h.explainLaunchRefusal(err)
 		return MessageResult{}, err
 	}
 	result = MessageResult{Queued: outcome.Queued}
@@ -314,7 +316,7 @@ func (h *SessionHandle) Nudge(ctx context.Context, req NudgeRequest) (result Nud
 	if err != nil {
 		return NudgeResult{}, err
 	}
-	resumeCommand, err := h.startCommand(id)
+	resumeCommand, err := h.deliveryResumeCommand(id)
 	if err != nil {
 		return NudgeResult{}, err
 	}
@@ -329,6 +331,7 @@ func (h *SessionHandle) Nudge(ctx context.Context, req NudgeRequest) (result Nud
 			return result, nil
 		}
 		if err := h.manager.Send(ctx, id, req.Text, resumeCommand, h.runtimeHints()); err != nil {
+			err = h.explainLaunchRefusal(err)
 			return NudgeResult{}, err
 		}
 		result = NudgeResult{Delivered: true}
@@ -343,6 +346,7 @@ func (h *SessionHandle) Nudge(ctx context.Context, req NudgeRequest) (result Nud
 			return result, nil
 		}
 		if err := h.manager.SendImmediate(ctx, id, req.Text, resumeCommand, h.runtimeHints()); err != nil {
+			err = h.explainLaunchRefusal(err)
 			return NudgeResult{}, err
 		}
 		result = NudgeResult{Delivered: true}
@@ -358,6 +362,7 @@ func (h *SessionHandle) Nudge(ctx context.Context, req NudgeRequest) (result Nud
 		}
 		delivered, err := h.manager.TryWaitIdleNudge(ctx, id, req.Source, req.Text, resumeCommand, h.runtimeHints())
 		if err != nil {
+			err = h.explainLaunchRefusal(err)
 			return NudgeResult{}, err
 		}
 		result = NudgeResult{Delivered: delivered}
@@ -430,45 +435,58 @@ func (h *SessionHandle) currentSessionID() string {
 	return h.sessionID
 }
 
+// deliveryResumeCommand returns the command used when delivering a message
+// or nudge has to (re)start the session. A handle whose launch is refused
+// (ga-6umo) still delivers to a live session: it passes an empty command, and
+// the manager refuses to start a stopped one with ErrResumeRequired.
+func (h *SessionHandle) deliveryResumeCommand(id string) (string, error) {
+	if h.session.launchRefusal != nil {
+		return "", nil
+	}
+	return h.startCommand(id)
+}
+
+// explainLaunchRefusal reports the launch refusal instead of a bare
+// ErrResumeRequired when a delivery needed to start a refused handle.
+func (h *SessionHandle) explainLaunchRefusal(err error) error {
+	if h.session.launchRefusal != nil && errors.Is(err, sessionpkg.ErrResumeRequired) {
+		return fmt.Errorf("%w (%w)", h.session.launchRefusal, err)
+	}
+	return err
+}
+
 func (h *SessionHandle) startCommand(id string) (string, error) {
+	if h.session.launchRefusal != nil {
+		return "", h.session.launchRefusal
+	}
 	info, pr, err := sessionRecordViaManager(h.manager, id)
 	if err != nil {
 		return "", err
 	}
+	// ga-6umo: the launch command and resume form come from the handle's
+	// config-resolved spec only, never from the stored command or resume
+	// fields on the session bead, which workers can write.
+	command := strings.TrimSpace(h.session.Command)
+	if command == "" {
+		command = strings.TrimSpace(h.session.Provider)
+	}
+	if command == "" {
+		return "", fmt.Errorf("%w: command is required for start", ErrHandleConfig)
+	}
 	if firstProviderSessionStart(info.State, pr.Metadata) &&
 		h.session.Resume.SessionIDFlag != "" &&
 		strings.TrimSpace(info.SessionKey) != "" {
-		command := strings.TrimSpace(info.Command)
-		if command == "" {
-			command = strings.TrimSpace(h.session.Command)
-		}
-		if command == "" {
-			command = strings.TrimSpace(info.Provider)
-		}
-		if command == "" {
-			command = strings.TrimSpace(h.session.Provider)
-		}
-		if command == "" {
-			return "", fmt.Errorf("%w: command is required for first start", ErrHandleConfig)
+		if !sessionpkg.ValidSessionKey(info.SessionKey) {
+			return command, nil
 		}
 		return command + " " + h.session.Resume.SessionIDFlag + " " + info.SessionKey, nil
 	}
 	resumeInfo := info
-	if command := strings.TrimSpace(h.session.Command); command != "" {
-		resumeInfo.Command = command
-	}
-	if provider := strings.TrimSpace(h.session.Provider); provider != "" {
-		resumeInfo.Provider = provider
-	}
-	if resumeFlag := strings.TrimSpace(h.session.Resume.ResumeFlag); resumeFlag != "" {
-		resumeInfo.ResumeFlag = resumeFlag
-	}
-	if resumeStyle := strings.TrimSpace(h.session.Resume.ResumeStyle); resumeStyle != "" {
-		resumeInfo.ResumeStyle = resumeStyle
-	}
-	if resumeCommand := strings.TrimSpace(h.session.Resume.ResumeCommand); resumeCommand != "" {
-		resumeInfo.ResumeCommand = resumeCommand
-	}
+	resumeInfo.Command = command
+	resumeInfo.Provider = strings.TrimSpace(h.session.Provider)
+	resumeInfo.ResumeFlag = strings.TrimSpace(h.session.Resume.ResumeFlag)
+	resumeInfo.ResumeStyle = strings.TrimSpace(h.session.Resume.ResumeStyle)
+	resumeInfo.ResumeCommand = strings.TrimSpace(h.session.Resume.ResumeCommand)
 	return sessionpkg.BuildResumeCommand(resumeInfo), nil
 }
 

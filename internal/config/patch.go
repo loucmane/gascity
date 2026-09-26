@@ -28,6 +28,10 @@ type AgentPatch struct {
 	Name string `toml:"name" jsonschema:"required"`
 	// WorkDir overrides the agent's session working directory.
 	WorkDir *string `toml:"work_dir,omitempty"`
+	// WorkDirRoots replaces the agent's work_dir_roots. It is settable from
+	// TOML patches only: the HTTP patch API cannot widen where a session's
+	// metadata work_dir may point (ga-6umo).
+	WorkDirRoots []string `toml:"work_dir_roots,omitempty" json:"-"`
 	// TmuxAlias overrides the tmux session name template
 	// (see Agent.TmuxAlias for semantics).
 	TmuxAlias *string `toml:"tmux_alias,omitempty"`
@@ -450,6 +454,9 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 func applyAgentMutation(a *Agent, p *AgentPatch, sleepSource string) {
 	if p.WorkDir != nil {
 		a.WorkDir = *p.WorkDir
+	}
+	if len(p.WorkDirRoots) > 0 {
+		a.WorkDirRoots = append([]string(nil), p.WorkDirRoots...)
 	}
 	if p.TmuxAlias != nil {
 		a.TmuxAlias = *p.TmuxAlias

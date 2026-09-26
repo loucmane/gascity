@@ -251,6 +251,7 @@ func deepCopyAgent(src *config.Agent, name, dir string) config.Agent {
 		Description:       src.Description,
 		Dir:               dir,
 		WorkDir:           src.WorkDir,
+		WorkDirRoots:      append([]string(nil), src.WorkDirRoots...),
 		TmuxAlias:         src.TmuxAlias,
 		Scope:             src.Scope,
 		Session:           src.Session,

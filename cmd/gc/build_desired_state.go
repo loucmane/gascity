@@ -3208,7 +3208,9 @@ func poolTriggerWorkDir(bp *agentBuildParams, cfgAgent *config.Agent, qualifiedN
 	if err != nil || strings.TrimSpace(base) == "" {
 		return ""
 	}
-	if pack := strings.TrimSpace(request.WorkPack); pack != "" {
+	// ga-6umo: gc.pack is worker-writable bead metadata; only a single safe
+	// path segment may select the pack directory, like gc.pack_workspace.
+	if pack := safeWorkspaceName(request.WorkPack, 96); pack != "" {
 		packDir := filepath.Join(filepath.Dir(base), pack)
 		if workspace := packWorkspaceSlug(request); workspace != "" {
 			return filepath.Join(packDir, workspace)

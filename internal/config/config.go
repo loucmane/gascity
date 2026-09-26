@@ -670,6 +670,8 @@ type AgentOverride struct {
 	// WorkDir overrides the agent's working directory without changing
 	// its qualified identity or rig association.
 	WorkDir *string `toml:"work_dir,omitempty"`
+	// WorkDirRoots replaces the agent's work_dir_roots.
+	WorkDirRoots []string `toml:"work_dir_roots,omitempty"`
 	// TmuxAlias overrides the tmux session name template
 	// (see Agent.TmuxAlias for semantics).
 	TmuxAlias *string `toml:"tmux_alias,omitempty"`
@@ -3096,6 +3098,12 @@ type Agent struct {
 	// agent's qualified identity. Relative paths resolve against city root
 	// and may use the same template placeholders as session_setup.
 	WorkDir string `toml:"work_dir,omitempty"`
+	// WorkDirRoots are additional absolute roots under which a session of this
+	// agent may run when a work bead or session bead names its working
+	// directory (for example a worktree the worker created). A metadata
+	// work_dir outside the configured work_dir, the city worktree root for the
+	// agent's rig and these roots is ignored (ga-6umo). Default: none.
+	WorkDirRoots []string `toml:"work_dir_roots,omitempty"`
 	// TmuxAlias overrides the tmux session_name for pool and factory-created
 	// manual sessions of this agent. When unset, sessions fall back to the
 	// universal derivation ("s-<beadID>" for ad-hoc sessions,
@@ -3448,6 +3456,7 @@ type Agent struct {
 func (a Agent) Clone() Agent {
 	out := a
 	out.PreStart = append([]string(nil), a.PreStart...)
+	out.WorkDirRoots = append([]string(nil), a.WorkDirRoots...)
 	out.Args = append([]string(nil), a.Args...)
 	out.ProcessNames = append([]string(nil), a.ProcessNames...)
 	out.NamepoolNames = append([]string(nil), a.NamepoolNames...)

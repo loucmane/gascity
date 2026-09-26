@@ -37,6 +37,7 @@ func TestPrepareStartCandidateStagesScaffoldInResolvedTaskWorkDirWhenCWDIsShared
 		t.Fatalf("MkdirAll(%q): %v", sharedWorktree, err)
 	}
 	t.Chdir(sharedWorktree)
+	clearWorktreeRootEnv(t)
 
 	store := beads.NewMemStore()
 	session, err := store.Create(beads.Bead{
@@ -71,7 +72,10 @@ func TestPrepareStartCandidateStagesScaffoldInResolvedTaskWorkDirWhenCWDIsShared
 		tp: TemplateParams{
 			TemplateName: "gascity/builder",
 			SessionName:  "builder-ga-ajw1no",
-			WorkDir:      leakedWorkDir,
+			// ga-6umo: the rig makes <worktrees root>/gascity an allowed
+			// root for the task work_dir.
+			RigName: "gascity",
+			WorkDir: leakedWorkDir,
 			Env: map[string]string{
 				"GC_DIR": leakedWorkDir,
 			},

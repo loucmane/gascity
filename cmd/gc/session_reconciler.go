@@ -5172,6 +5172,9 @@ func applyTemplateOverridesToConfigInfo(agentCfg *runtime.Config, info sessionpk
 	for k, v := range tp.ResolvedProvider.EffectiveDefaults {
 		fullOptions[k] = v
 	}
+	// ga-6umo: the drift hash must apply the same filter as the launch, silently,
+	// so a rejected override causes neither drift nor a restart loop.
+	ovr, _ = config.FilterMetadataOptionOverrides(tp.ResolvedProvider.OptionsSchema, ovr)
 	for k, v := range ovr {
 		if k == "initial_message" {
 			continue
@@ -5558,6 +5561,12 @@ func workBeadOptionOverrides(b beads.Bead, rp *config.ResolvedProvider) (map[str
 		}
 		if _, err := config.ResolveExplicitOptions(rp.OptionsSchema, map[string]string{opt.Key: value}); err != nil {
 			log.Printf("work %s: ignoring %s=%q: %v", b.ID, metadataKey, value, err)
+			continue
+		}
+		// ga-6umo: a work bead is worker-writable; only benign model/effort
+		// choices may be selected from it.
+		if _, rejected := config.FilterMetadataOptionOverrides(rp.OptionsSchema, map[string]string{opt.Key: value}); len(rejected) > 0 {
+			log.Printf("work %s: ignoring %s=%q: %s (ga-6umo)", b.ID, metadataKey, boundedLogValue(value), rejected[0].Reason)
 			continue
 		}
 		overrides[opt.Key] = value
@@ -5988,6 +5997,16 @@ func resolveSessionCommand(command, sessionKey, parentSID string, rp *config.Res
 	// new" intent of wake_mode=fresh. validateForkLaunch already fails loud on a
 	// forceFresh fork upstream, but keeping the guard here means the function
 	// honors its own docstring in isolation and is not a trap for future callers.
+	// ga-6umo: sessionKey and parentSID come from worker-writable metadata and
+	// are never spliced outside the safe grammar. An invalid key yields the
+	// plain command (a fresh start); an invalid parent is refused loudly by
+	// validateForkLaunch upstream and is never spliced here.
+	if !sessionpkg.ValidSessionKey(sessionKey) {
+		return command
+	}
+	if firstStart && !forceFresh && parentSID != "" && !sessionpkg.ValidSessionKey(parentSID) {
+		return command
+	}
 	if firstStart && !forceFresh && parentSID != "" && rp.ForkFlag != "" && rp.SessionIDFlag != "" {
 		return command + " " + rp.ResumeFlag + " " + parentSID +
 			" " + rp.ForkFlag + " " + rp.SessionIDFlag + " " + sessionKey

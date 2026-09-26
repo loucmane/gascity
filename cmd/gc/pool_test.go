@@ -806,6 +806,7 @@ func TestDeepCopyAgentCoversAllFields(t *testing.T) {
 		Description:                  "test agent description",
 		Dir:                          "original-dir",
 		WorkDir:                      ".gc/agents/original",
+		WorkDirRoots:                 []string{"/srv/worktrees"},
 		Scope:                        "city",
 		Suspended:                    true,
 		PreStart:                     []string{"pre-cmd"},
