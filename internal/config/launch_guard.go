@@ -132,6 +132,27 @@ func benignValue(v string) bool {
 	return true
 }
 
+// BuildMetadataLaunchCommand builds a launch command from config for a session
+// whose option overrides and transport come from worker-writable metadata
+// (ga-6umo). An unknown transport means the provider default. When the
+// overrides make the build fail (for example an unknown option key), it
+// retries with no overrides. It never falls back to a bare command that skipped
+// the option defaults or ValidateManagedLaunchPermissionPolicy: a build that
+// still fails returns the error so the caller refuses the launch.
+func BuildMetadataLaunchCommand(cityPath string, resolved *ResolvedProvider, overrides map[string]string, transport string) (ProviderLaunchCommand, error) {
+	if !IsValidSessionTransport(transport) {
+		transport = ""
+	}
+	cmd, err := BuildProviderLaunchCommand(cityPath, resolved, overrides, transport)
+	if err == nil || len(overrides) == 0 {
+		return cmd, err
+	}
+	if retry, retryErr := BuildProviderLaunchCommand(cityPath, resolved, nil, transport); retryErr == nil {
+		return retry, nil
+	}
+	return ProviderLaunchCommand{}, err
+}
+
 // LegacyStoredCommandTransport returns "acp" when transport is unset and
 // storedCommand is exactly the configured ACP command line of the provider and
 // not also its default command line. Legacy sessions recorded no transport, so

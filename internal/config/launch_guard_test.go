@@ -113,3 +113,52 @@ func TestLegacyStoredCommandTransport(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildMetadataLaunchCommandKeepsConfiguredDefaults(t *testing.T) {
+	spec := BuiltinProviders()["claude"]
+	rp := specToResolved("claude", &spec)
+	want, err := BuildProviderLaunchCommand("", rp, nil, "")
+	if err != nil {
+		t.Fatalf("BuildProviderLaunchCommand: %v", err)
+	}
+	// An unknown override key or a bogus transport would make the plain
+	// builder fail; the metadata builder must still produce the configured
+	// defaults (including the permission flag), never a bare command.
+	for _, tc := range []struct {
+		name      string
+		overrides map[string]string
+		transport string
+	}{
+		{"unknown option key", map[string]string{"x": "1"}, ""},
+		{"bogus transport", nil, "bogus"},
+		{"both", map[string]string{"x": "1", "effort": "low"}, "bogus"},
+	} {
+		got, err := BuildMetadataLaunchCommand("", rp, tc.overrides, tc.transport)
+		if err != nil {
+			t.Fatalf("%s: BuildMetadataLaunchCommand: %v", tc.name, err)
+		}
+		if got.Command != want.Command {
+			t.Fatalf("%s: Command = %q, want the configured default %q", tc.name, got.Command, want.Command)
+		}
+	}
+	if got, err := BuildMetadataLaunchCommand("", rp, map[string]string{"effort": "low"}, ""); err != nil || got.Command != "claude --dangerously-skip-permissions --effort low" {
+		t.Fatalf("valid override: Command = %q, err = %v", got.Command, err)
+	}
+}
+
+func TestBuildMetadataLaunchCommandFailsClosed(t *testing.T) {
+	// A prompt-capable provider without a permission policy fails the managed
+	// policy check; the metadata builder returns the error instead of a bare
+	// command.
+	rp := &ResolvedProvider{
+		Name:                   "claude-custom",
+		Command:                "claude",
+		EmitsPermissionWarning: true,
+		PermissionModes:        map[string]string{"attended": "--permission-mode auto"},
+		OptionsSchema:          []ProviderOption{{Key: "model", Choices: []OptionChoice{{Value: "opus", FlagArgs: []string{"--model", "claude-opus-5"}}}}},
+		EffectiveDefaults:      map[string]string{"model": "opus"},
+	}
+	if _, err := BuildMetadataLaunchCommand("", rp, map[string]string{"x": "1"}, ""); err == nil {
+		t.Fatal("BuildMetadataLaunchCommand = nil error, want the permission policy refusal")
+	}
+}

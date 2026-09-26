@@ -108,6 +108,9 @@ func TestBuildSessionResumeIgnoresMetadataPermissionOverrideOnExplicitResumeComm
 				ResumeStyle:   "subcommand",
 				SessionIDFlag: "--session-id",
 				PathCheck:     "true",
+				// The inherited codex default ("unrestricted") is not a
+				// choice here; name a valid default so the launch builds.
+				OptionDefaults: map[string]string{"permission_mode": "default"},
 				OptionsSchema: []config.ProviderOption{{
 					Key: "permission_mode",
 					Choices: []config.OptionChoice{
@@ -137,7 +140,7 @@ func TestBuildSessionResumeIgnoresMetadataPermissionOverrideOnExplicitResumeComm
 	if err != nil {
 		t.Fatalf("buildSessionResume: %v", err)
 	}
-	want := "codex resume " + info.SessionKey + " --ask-for-approval on-request"
+	want := "codex resume --ask-for-approval on-request " + info.SessionKey
 	if cmd != want {
 		t.Fatalf("resume command = %q, want %q", cmd, want)
 	}

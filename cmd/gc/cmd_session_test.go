@@ -954,11 +954,15 @@ func TestBuildResumeCommandUsesResolvedProviderCommand(t *testing.T) {
 		WorkDir:  "/tmp/workdir",
 	}
 
-	cmd, hints := buildResumeCommand(t.TempDir(), cfg, info, "", nil, io.Discard)
+	cityPath := t.TempDir()
+	cmd, hints := buildResumeCommand(cityPath, cfg, info, "", nil, io.Discard)
 	if got, want := cmd, "aimux run gemini -- --approval-mode yolo"; got != want {
 		t.Fatalf("resume command = %q, want %q", got, want)
 	}
-	if got, want := hints.WorkDir, "/tmp/workdir"; got != want {
+	// ga-6umo: the stored work_dir lies outside the allowed roots of the
+	// mayor template (configured work_dir is the city root), so the
+	// configured work_dir is used.
+	if got, want := hints.WorkDir, cityPath; got != want {
 		t.Fatalf("hints.WorkDir = %q, want %q", got, want)
 	}
 	if got, want := hints.ReadyPromptPrefix, "> "; got != want {

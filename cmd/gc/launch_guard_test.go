@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,5 +197,41 @@ func TestPoolTriggerWorkDirRejectsUnsafePack(t *testing.T) {
 	}
 	if got, want := poolTriggerWorkDir(bp, &cfg.Agents[0], "worker", SessionRequest{WorkBeadID: "ga-1", WorkPack: "gascity"}), filepath.Join(bp.cityPath, ".gc", "workspaces", "gascity"); got != want {
 		t.Errorf("safe pack: work dir = %q, want %q", got, want)
+	}
+}
+
+// ga-6umo: an unknown override key or a bogus stored transport must not make
+// the worker-handle resume path fall back to a bare command without the
+// configured permission default.
+func TestResolvedWorkerRuntimeKeepsPermissionDefaultOnBadMetadata(t *testing.T) {
+	clearWorktreeRootEnv(t)
+	city := t.TempDir()
+	claude := config.BuiltinProviders()["claude"]
+	claude.PathCheck = "true"
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Agents:    []config.Agent{{Name: "worker", Provider: "claude"}},
+		Providers: map[string]config.ProviderSpec{"claude": claude},
+	}
+	for _, tc := range []struct {
+		name      string
+		transport string
+		metadata  map[string]string
+	}{
+		{"unknown override key", "", map[string]string{"template_overrides": `{"x":"1"}`}},
+		{"bogus transport", "bogus", nil},
+	} {
+		resolved, err := resolvedWorkerRuntimeWithConfigAndMetadata(city, cfg, session.Info{
+			ID:        "s-1",
+			Template:  "worker",
+			Transport: tc.transport,
+			Command:   "claude",
+		}, "", tc.metadata)
+		if err != nil {
+			t.Fatalf("%s: resolvedWorkerRuntimeWithConfigAndMetadata: %v", tc.name, err)
+		}
+		if resolved == nil || !strings.Contains(resolved.Command, "--dangerously-skip-permissions") {
+			t.Fatalf("%s: runtime = %+v, want the configured permission default", tc.name, resolved)
+		}
 	}
 }

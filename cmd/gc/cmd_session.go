@@ -1585,7 +1585,7 @@ func buildResumeCommand(cityPath string, cfg *config.City, info session.Info, se
 		resolvedInfo.ResumeStyle = resolved.ResumeStyle
 		resolvedInfo.ResumeCommand = resumeCommand
 		return session.BuildResumeCommand(resolvedInfo), runtime.Config{
-			WorkDir:                info.WorkDir,
+			WorkDir:                guardedSessionInfoWorkDir(cityPath, cfg, info),
 			Lifecycle:              runtime.Lifecycle(resolved.Lifecycle),
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 			ReadyDelayMs:           resolved.ReadyDelayMs,

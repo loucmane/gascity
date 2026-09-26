@@ -45,3 +45,78 @@ func TestSessionLaunchWorkDirAcceptsPackSibling(t *testing.T) {
 		t.Fatalf("SessionLaunchWorkDir(outside) = %q, refused=%v, want configured %q and refused", got, refused, want)
 	}
 }
+
+// ga-6umo: a worker-writable agent_name must not move the containment roots.
+func TestSafeAgentIdentity(t *testing.T) {
+	a := config.Agent{Name: "ant", Dir: "myrig"}
+	for _, tc := range []struct{ in, want string }{
+		{"myrig/ant-adhoc-123", "myrig/ant-adhoc-123"},
+		{"myrig/fenrir", "myrig/fenrir"},
+		{"", "myrig/ant"},
+		{"myrig/..", "myrig/ant"},
+		{"x/..", "myrig/ant"},
+		{"../../../../..", "myrig/ant"},
+		{"other/ant", "myrig/ant"},
+		{"myrig/a b", "myrig/ant"},
+		{"myrig/.hidden", "myrig/ant"},
+		{"myrig/ant/extra", "myrig/ant"},
+	} {
+		if got := SafeAgentIdentity(a, tc.in); got != tc.want {
+			t.Errorf("SafeAgentIdentity(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	city := config.Agent{Name: "dog"}
+	if got := SafeAgentIdentity(city, "x/.."); got != "dog" {
+		t.Errorf("SafeAgentIdentity(city agent, x/..) = %q, want dog", got)
+	}
+}
+
+func TestSessionLaunchWorkDirIgnoresAgentNameTraversal(t *testing.T) {
+	for _, key := range []string{"GC_WORKTREES_DIR", "T3CODE_WORKTREES_DIR", "T3CODE_HOME"} {
+		t.Setenv(key, "")
+	}
+	city := t.TempDir()
+	dog := config.Agent{Name: "dog", WorkDir: ".gc/agents/{{.AgentBase}}"}
+	cfg := &config.City{Agents: []config.Agent{dog}}
+	gcDir := filepath.Join(city, ".gc")
+	configured := filepath.Join(city, ".gc", "agents", "dog")
+	// "x/.." would expand the template to <city>/.gc: the session must not
+	// launch there, and the fallback is the configured dir of the real agent.
+	for _, name := range []string{"x/..", "../../../../../../..", ".."} {
+		got, refused := SessionLaunchWorkDir(gcDir, city, cfg, &dog, name)
+		if !refused || got != configured {
+			t.Errorf("agent_name %q: SessionLaunchWorkDir(.gc) = %q, refused=%v, want configured %q", name, got, refused, configured)
+		}
+		got, refused = SessionLaunchWorkDir("/", city, cfg, &dog, name)
+		if !refused || got != configured {
+			t.Errorf("agent_name %q: SessionLaunchWorkDir(/) = %q, refused=%v, want configured %q", name, got, refused, configured)
+		}
+	}
+	// A work_dir template on {{.Agent}} with a deep traversal must not
+	// widen the root to / either.
+	w := config.Agent{Name: "w", WorkDir: "worktrees/{{.Agent}}"}
+	if got, refused := SessionLaunchWorkDir("/home", city, &config.City{Agents: []config.Agent{w}}, &w, "../../../../../../../.."); !refused || got == "/home" {
+		t.Errorf("{{.Agent}} traversal: SessionLaunchWorkDir(/home) = %q, refused=%v, want refused", got, refused)
+	}
+}
+
+func TestUsableConfiguredRoot(t *testing.T) {
+	city := t.TempDir()
+	for _, tc := range []struct {
+		root string
+		want bool
+	}{
+		{filepath.Join(city, ".gc", "agents", "dog"), true},
+		{city, true},
+		{"/srv/worktrees", true},
+		{filepath.Join(city, ".gc"), false},
+		{filepath.Dir(city), false},
+		{"/", false},
+		{"relative/dir", false},
+		{filepath.Join(city, "a b"), false},
+	} {
+		if got := UsableConfiguredRoot(city, tc.root); got != tc.want {
+			t.Errorf("UsableConfiguredRoot(%q) = %v, want %v", tc.root, got, tc.want)
+		}
+	}
+}

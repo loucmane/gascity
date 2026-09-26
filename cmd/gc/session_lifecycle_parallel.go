@@ -1060,7 +1060,9 @@ func buildPreparedStartWithWorkDirResolver(
 	// transcript layer so each provider keeps its own resumability rules; for
 	// providers whose resume state we cannot probe on disk (codex/gemini/...)
 	// the probe reports !probeable and we leave their metadata untouched.
-	if sk := strings.TrimSpace(candidate.info.SessionKey); sk != "" && agentCfg.WorkDir != "" {
+	// ga-6umo: a key outside the session-key grammar is never probed as a
+	// transcript path component (nor spliced later).
+	if sk := strings.TrimSpace(candidate.info.SessionKey); sk != "" && sessionpkg.ValidSessionKey(sk) && agentCfg.WorkDir != "" {
 		provider := sessionTranscriptProvider(tp.ResolvedProvider, candidate.info)
 		if present, probeable := staleResumeKeyProbe(provider, agentCfg.WorkDir, sk); probeable && !present {
 			var sessFront *sessionpkg.Store
@@ -1116,7 +1118,9 @@ func buildPreparedStartWithWorkDirResolver(
 	parentSID := strings.TrimSpace(candidate.info.BrainParentSID)
 	if parentSID != "" {
 		parentStale := false
-		if firstStart && !forceFresh && tp.ResolvedProvider != nil && agentCfg.WorkDir != "" {
+		// ga-6umo: validateForkLaunch refuses a parent id outside the grammar;
+		// it is never probed as a transcript path component first.
+		if firstStart && !forceFresh && tp.ResolvedProvider != nil && agentCfg.WorkDir != "" && sessionpkg.ValidSessionKey(parentSID) {
 			provider := sessionTranscriptProvider(tp.ResolvedProvider, candidate.info)
 			if present, probeable := staleResumeKeyProbe(provider, agentCfg.WorkDir, parentSID); probeable && !present {
 				parentStale = true

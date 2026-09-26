@@ -31,6 +31,10 @@ func (h *SessionHandle) Start(ctx context.Context) (err error) {
 // command and hints. This is a migration bridge for higher layers that already
 // materialize provider-specific runtime config but should still delegate the
 // provider-specific runtime bring-up through the worker boundary.
+//
+// ga-6umo: the caller owns a non-empty startCommand and must build it from
+// config (the reconciler does); only an empty startCommand goes through
+// startCommand and its launch refusal.
 func (h *SessionHandle) StartResolved(ctx context.Context, startCommand string, hints runtime.Config) (err error) {
 	event := h.beginOperationEvent(ctx, workerOperationStartResolved)
 	defer func() { event.finish(err) }()

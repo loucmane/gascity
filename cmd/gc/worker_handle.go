@@ -566,7 +566,10 @@ func resolvedWorkerRuntimeWithConfigAndMetadata(cityPath string, cfg *config.Cit
 		return nil, fmt.Errorf("legacy session transport is ambiguous: recreate the stopped session or resume it while ACP metadata can still be persisted")
 	}
 
-	command := resolvedWorkerRuntimeCommandForTransport(cityPath, resolved, transport, info.Command, info.Provider, metadata)
+	command, err := resolvedWorkerRuntimeCommandForTransport(cityPath, resolved, transport, info.Command, info.Provider, metadata)
+	if err != nil {
+		return nil, err
+	}
 
 	workDir := guardedSessionInfoWorkDir(cityPath, cfg, info)
 	mcpServers, err := resumeRuntimeMCPServersWithConfig(cityPath, cfg, info, resolved, transport, metadata)
@@ -663,20 +666,26 @@ func resolvedWorkerRuntimeProviderLabel(resolved *config.ResolvedProvider, _ str
 // as a shell line, so preserving a stored command let one metadata field run
 // arbitrary shell. The rebuilt command carries the provider settings file
 // (appendProviderSettings), which is what the old #799 preservation kept.
-func resolvedWorkerRuntimeCommandForTransport(cityPath string, resolved *config.ResolvedProvider, transport, storedCommand, _ string, metadata map[string]string) string {
+func resolvedWorkerRuntimeCommandForTransport(cityPath string, resolved *config.ResolvedProvider, transport, storedCommand, _ string, metadata map[string]string) (string, error) {
+	if !config.IsValidSessionTransport(transport) {
+		transport = ""
+	}
 	transport = config.LegacyStoredCommandTransport(resolved, transport, storedCommand)
 	configuredCommand := configuredWorkerRuntimeCommand(resolved, transport)
 	if configuredCommand == "" {
-		return resolved.Name
+		return resolved.Name, nil
 	}
 	optionOverrides, err := session.ParseTemplateOverrides(metadata)
 	if err != nil {
 		optionOverrides = nil
 	}
-	if launchCommand, err := config.BuildProviderLaunchCommand(cityPath, resolved, optionOverrides, transport); err == nil {
-		return appendRuntimeProviderSettings(cityPath, resolved, firstNonEmptyGCString(launchCommand.Command, configuredCommand, resolved.Name))
+	// ga-6umo: never fall back to the bare configured command, which would
+	// skip the option defaults and the managed permission policy.
+	launchCommand, err := config.BuildMetadataLaunchCommand(cityPath, resolved, optionOverrides, transport)
+	if err != nil {
+		return "", fmt.Errorf("building launch command for provider %q: %w", resolved.Name, err)
 	}
-	return appendRuntimeProviderSettings(cityPath, resolved, configuredCommand)
+	return appendRuntimeProviderSettings(cityPath, resolved, firstNonEmptyGCString(launchCommand.Command, configuredCommand, resolved.Name)), nil
 }
 
 func configuredWorkerRuntimeCommand(resolved *config.ResolvedProvider, transport string) string {
@@ -798,8 +807,11 @@ func startedConfigHashProvesWorkerACPTransport(
 	if startedHash == "" {
 		return false
 	}
-	acpCommand := resolvedWorkerRuntimeCommandForTransport(cityPath, resolved, "acp", info.Command, info.Provider, metadata)
-	defaultCommand := resolvedWorkerRuntimeCommandForTransport(cityPath, resolved, "", info.Command, info.Provider, metadata)
+	acpCommand, acpErr := resolvedWorkerRuntimeCommandForTransport(cityPath, resolved, "acp", info.Command, info.Provider, metadata)
+	defaultCommand, defaultErr := resolvedWorkerRuntimeCommandForTransport(cityPath, resolved, "", info.Command, info.Provider, metadata)
+	if acpErr != nil || defaultErr != nil {
+		return false
+	}
 	mcpServers, err := resolvedRuntimeMCPServersWithConfig(
 		cityPath,
 		cfg,
@@ -831,7 +843,9 @@ func startedConfigHashProvesWorkerACPTransport(
 }
 
 func resolvedWorkerRuntimeTransport(info session.Info, resolved *config.ResolvedProvider, configuredTransport string, metadata map[string]string) string {
-	if transport := strings.TrimSpace(info.Transport); transport != "" {
+	// ga-6umo: the stored transport is worker-writable; an unknown value is
+	// ignored rather than passed to the launch builder.
+	if transport := strings.TrimSpace(info.Transport); transport != "" && config.IsValidSessionTransport(transport) {
 		return transport
 	}
 	if strings.TrimSpace(info.Provider) == "acp" {

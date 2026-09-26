@@ -360,11 +360,11 @@ func (s *Server) buildSessionResume(info session.Info) (string, runtime.Config, 
 		return "", runtime.Config{}, err
 	}
 	resolvedInfo := info
-	if command, err := s.resolvedSessionRuntimeCommand(resolved, transport, info.Command, metadata); err == nil {
-		resolvedInfo.Command = command
-	} else {
-		resolvedInfo.Command = fallbackSessionRuntimeCommand(resolved, transport, "", "")
+	command, err := s.resolvedSessionRuntimeCommand(resolved, transport, info.Command, metadata)
+	if err != nil {
+		return "", runtime.Config{}, err
 	}
+	resolvedInfo.Command = command
 	resumeCommand := resolved.ResumeCommand
 	if overrides, err := session.ParseTemplateOverrides(metadata); err == nil {
 		if command, err := config.BuildProviderResumeCommand(resolved, overrides); err == nil && strings.TrimSpace(command) != "" {
@@ -385,15 +385,21 @@ func (s *Server) resolvedSessionRuntimeCommand(resolved *config.ResolvedProvider
 	// tmux runs the command as a shell line, so it is never launched; the
 	// command is always rebuilt from the resolved provider.
 	transport = config.LegacyStoredCommandTransport(resolved, transport, storedCommand)
+	if !config.IsValidSessionTransport(transport) {
+		transport = ""
+	}
 	configuredCommand := configuredSessionRuntimeCommand(resolved, transport)
 	if configuredCommand == "" {
-		return "", fmt.Errorf("resolved provider %q has no launch command", resolved.Name)
+		// A provider without a configured command launches its own name.
+		return resolved.Name, nil
 	}
 	optionOverrides, err := session.ParseTemplateOverrides(metadata)
 	if err != nil {
-		return "", fmt.Errorf("parsing template overrides: %w", err)
+		optionOverrides = nil
 	}
-	launchCommand, err := config.BuildProviderLaunchCommand(s.state.CityPath(), resolved, optionOverrides, transport)
+	// ga-6umo: never fall back to the bare configured command, which would
+	// skip the option defaults and the managed permission policy.
+	launchCommand, err := config.BuildMetadataLaunchCommand(s.state.CityPath(), resolved, optionOverrides, transport)
 	if err != nil {
 		return "", fmt.Errorf("building provider launch command: %w", err)
 	}
@@ -411,13 +417,6 @@ func configuredSessionRuntimeCommand(resolved *config.ResolvedProvider, transpor
 		return strings.TrimSpace(resolved.CommandString())
 	}
 	return ""
-}
-
-// fallbackSessionRuntimeCommand returns the config-derived command when the
-// full launch build fails. ga-6umo: the stored command and provider name on the
-// session bead are worker-writable and are never used.
-func fallbackSessionRuntimeCommand(resolved *config.ResolvedProvider, transport, _, _ string) string {
-	return firstNonEmptyString(configuredSessionRuntimeCommand(resolved, transport), resolved.Name)
 }
 
 func shouldPreserveStoredRuntimeCommand(storedCommand, resolvedCommand string) bool {
@@ -485,7 +484,7 @@ func (s *Server) resolveWorkerSessionRuntimeWithMetadata(info session.Info, _ st
 	}
 	command, err := s.resolvedSessionRuntimeCommand(resolved, transport, info.Command, metadata)
 	if err != nil {
-		command = fallbackSessionRuntimeCommand(resolved, transport, "", "")
+		return nil, err
 	}
 	// ga-6umo: resume forms come from the resolved provider only.
 	resumeCommand := resolved.ResumeCommand
@@ -577,11 +576,11 @@ func (s *Server) startedConfigHashProvesACPTransport(
 	}
 	acpCommand, err := s.resolvedSessionRuntimeCommand(resolved, "acp", info.Command, metadata)
 	if err != nil {
-		acpCommand = fallbackSessionRuntimeCommand(resolved, "acp", info.Command, info.Provider)
+		return false
 	}
 	defaultCommand, err := s.resolvedSessionRuntimeCommand(resolved, "", info.Command, metadata)
 	if err != nil {
-		defaultCommand = fallbackSessionRuntimeCommand(resolved, "", info.Command, info.Provider)
+		return false
 	}
 	mcpServers, err := s.sessionMCPServers(
 		info.Template,
@@ -613,7 +612,9 @@ func (s *Server) startedConfigHashProvesACPTransport(
 }
 
 func resolvedSessionTransport(info session.Info, resolved *config.ResolvedProvider, configuredTransport string, metadata map[string]string, allowConfiguredTransportFallback bool) string {
-	if transport := strings.TrimSpace(info.Transport); transport != "" {
+	// ga-6umo: the stored transport is worker-writable; an unknown value is
+	// ignored rather than passed to the launch builder.
+	if transport := strings.TrimSpace(info.Transport); transport != "" && config.IsValidSessionTransport(transport) {
 		return transport
 	}
 	if strings.TrimSpace(info.Provider) == "acp" {

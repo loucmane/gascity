@@ -78,7 +78,7 @@ func filterMetadataOptionOverridesLogged(resolved *config.ResolvedProvider, sess
 // A configured work_dir equal to the city root allows only that exact
 // directory (ga-6umo).
 func templateLaunchWorkDirRoots(cityPath string, cfg *config.City, tp TemplateParams) (roots []string, exactRoot string) {
-	if configured := strings.TrimSpace(tp.WorkDir); configured != "" {
+	if configured := strings.TrimSpace(tp.WorkDir); configured != "" && workdirutil.UsableConfiguredRoot(cityPath, configured) {
 		if cityPath != "" && pathutil.SamePath(configured, cityPath) {
 			exactRoot = configured
 		} else {
