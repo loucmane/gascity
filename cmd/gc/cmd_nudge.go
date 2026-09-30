@@ -1686,23 +1686,40 @@ func terminalizeBlockedQueuedNudges(cityPath string, blocked map[string][]queued
 	return nil
 }
 
+var (
+	// nudgePollerExecutable resolves the binary the detached poller runs. Tests
+	// that need a real poller child point it at a non-test link to the binary.
+	nudgePollerExecutable = os.Executable
+	// startNudgePollerProcess starts the detached poller command. Tests replace
+	// it to inspect the command without spawning a poller.
+	startNudgePollerProcess = (*exec.Cmd).Start
+)
+
 func ensureNudgePoller(cityPath, agentName, sessionName string) error {
 	pidPath := nudgePollerPIDPath(cityPath, sessionName, agentName)
 	return withNudgePollerPIDLock(pidPath, func() error {
 		if running, _ := existingPollerPID(pidPath, cityPath, sessionName, agentName); running {
 			return nil
 		}
-		exe, err := os.Executable()
+		exe, err := nudgePollerExecutable()
 		if err != nil {
 			return err
 		}
+		// A Go test binary started as the poller runs the whole test suite
+		// instead, and the detached child outlives the test that started it.
+		if isGoTestExecutable(exe) {
+			return fmt.Errorf("refusing to start nudge poller with Go test binary %q", exe)
+		}
 		cmd := exec.Command(exe, nudgepoller.CommandArgs(cityPath, sessionName, agentName)...)
 		cmd.Env = os.Environ()
-		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
+		// Leave Stdout and Stderr nil so the poller gets /dev/null. Any other
+		// non-*os.File writer, io.Discard included, becomes a pipe drained by
+		// this short-lived process; once it exits, the poller's next write to
+		// fd 1 or 2 kills it with SIGPIPE before its lease release removes the
+		// pid marker.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		disableProductMetricsForChild(cmd)
-		if err := cmd.Start(); err != nil {
+		if err := startNudgePollerProcess(cmd); err != nil {
 			return err
 		}
 		if err := writeNudgePollerPID(pidPath, cmd.Process.Pid); err != nil {
@@ -1712,6 +1729,11 @@ func ensureNudgePoller(cityPath, agentName, sessionName string) error {
 		}
 		return cmd.Process.Release()
 	})
+}
+
+// isGoTestExecutable reports whether path names a Go test binary (*.test).
+func isGoTestExecutable(path string) bool {
+	return strings.HasSuffix(filepath.Base(path), ".test")
 }
 
 func formatNudgeInjectOutput(items []queuedNudge) string {

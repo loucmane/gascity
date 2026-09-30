@@ -2797,6 +2797,7 @@ func setupFreshManagedBdWaitTestCity(t *testing.T) string {
 	})
 
 	cityPath := shortSocketTempDir(t, "gc-bd-city-")
+	stopNudgePollersAtCleanup(t, cityPath)
 	if _, err := writeManagedBdWaitTestCityScaffold(cityPath); err != nil {
 		t.Fatalf("writeManagedBdWaitTestCityScaffold: %v", err)
 	}
@@ -2855,6 +2856,7 @@ func setupManagedBdWaitTestCity(t *testing.T) (string, string) {
 
 	templatePath := managedBdWaitTestTemplate(t, bdPath, doltPath)
 	cityPath := shortSocketTempDir(t, "gc-bd-city-")
+	stopNudgePollersAtCleanup(t, cityPath)
 	if err := overlay.CopyDir(templatePath, cityPath, io.Discard); err != nil {
 		t.Fatalf("overlay.CopyDir(template city): %v", err)
 	}

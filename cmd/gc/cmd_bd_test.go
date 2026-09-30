@@ -1416,6 +1416,7 @@ func TestBdRigWorktreeStoreConsistentAcrossRawBdGcBdAndProviderStore(t *testing.
 	})
 
 	cityPath := t.TempDir()
+	stopNudgePollersAtCleanup(t, cityPath)
 	rigPath, err := writeManagedBdWaitTestCityScaffold(cityPath)
 	if err != nil {
 		t.Fatalf("writeManagedBdWaitTestCityScaffold: %v", err)

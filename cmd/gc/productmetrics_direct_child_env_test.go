@@ -120,6 +120,12 @@ func TestProductMetricsDirectChildEnvGitHubNudge(t *testing.T) {
 }
 
 func TestProductMetricsDirectChildEnvNudgePoller(t *testing.T) {
+	// ensureNudgePoller refuses to launch a Go test binary. A gc-named link opts
+	// in to a real child, which exits once it writes the env snapshot.
+	pollerExecutable := reexecGCTestBinaryForTests(t)
+	prev := nudgePollerExecutable
+	nudgePollerExecutable = func() (string, error) { return pollerExecutable, nil }
+	t.Cleanup(func() { nudgePollerExecutable = prev })
 	entries := captureProductMetricsDirectChildEnv(t, func() error {
 		return ensureNudgePoller(t.TempDir(), "worker", "session-worker")
 	})
