@@ -1686,6 +1686,10 @@ func terminalizeBlockedQueuedNudges(cityPath string, blocked map[string][]queued
 	return nil
 }
 
+// startNudgePollerProcess starts the detached poller command. Tests replace it
+// to inspect the command without spawning a poller.
+var startNudgePollerProcess = (*exec.Cmd).Start
+
 func ensureNudgePoller(cityPath, agentName, sessionName string) error {
 	pidPath := nudgePollerPIDPath(cityPath, sessionName, agentName)
 	return withNudgePollerPIDLock(pidPath, func() error {
@@ -1698,11 +1702,14 @@ func ensureNudgePoller(cityPath, agentName, sessionName string) error {
 		}
 		cmd := exec.Command(exe, nudgepoller.CommandArgs(cityPath, sessionName, agentName)...)
 		cmd.Env = os.Environ()
-		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
+		// Leave Stdout and Stderr nil so the poller gets /dev/null. Any other
+		// non-*os.File writer, io.Discard included, becomes a pipe drained by
+		// this short-lived process; once it exits, the poller's next write to
+		// fd 1 or 2 kills it with SIGPIPE before its lease release removes the
+		// pid marker.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		disableProductMetricsForChild(cmd)
-		if err := cmd.Start(); err != nil {
+		if err := startNudgePollerProcess(cmd); err != nil {
 			return err
 		}
 		if err := writeNudgePollerPID(pidPath, cmd.Process.Pid); err != nil {

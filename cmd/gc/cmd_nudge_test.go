@@ -3577,6 +3577,30 @@ func TestNudgeTargetPollerKeyFallbackOrder(t *testing.T) {
 	}
 }
 
+func TestEnsureNudgePollerLaunchesWithNilStdio(t *testing.T) {
+	errStopLaunch := errors.New("stop before spawning poller")
+	var launched *exec.Cmd
+	prev := startNudgePollerProcess
+	startNudgePollerProcess = func(cmd *exec.Cmd) error {
+		launched = cmd
+		return errStopLaunch
+	}
+	t.Cleanup(func() { startNudgePollerProcess = prev })
+
+	if err := ensureNudgePoller(t.TempDir(), "worker", "session-worker"); !errors.Is(err, errStopLaunch) {
+		t.Fatalf("ensureNudgePoller error = %v, want %v", err, errStopLaunch)
+	}
+	if launched == nil {
+		t.Fatal("ensureNudgePoller did not launch a poller command")
+	}
+	// Nil stdio gives the detached poller /dev/null. A writer such as
+	// io.Discard becomes a pipe held by the short-lived parent, so the poller
+	// dies of SIGPIPE after the parent exits and leaves a stale pid marker.
+	if launched.Stdout != nil || launched.Stderr != nil {
+		t.Fatalf("poller Stdout, Stderr = %T, %T; want nil, nil", launched.Stdout, launched.Stderr)
+	}
+}
+
 func TestAcquireNudgePollerLeaseAllowsBootstrapPID(t *testing.T) {
 	t.Setenv("GC_BEADS", "file")
 	dir := t.TempDir()
