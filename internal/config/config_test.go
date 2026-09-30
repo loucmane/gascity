@@ -6113,6 +6113,20 @@ func TestNudgePollIntervalDurationUnsetOrInvalid(t *testing.T) {
 	}
 }
 
+func TestParseSessionNudgeQueueScope(t *testing.T) {
+	for _, mode := range []string{"", "global", "session-epoch"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg, err := Parse([]byte("[workspace]\nname = 'scoped-test'\n[session]\nnudge_queue_scope = '" + mode + "'\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Session.NudgeQueueScope != mode {
+				t.Fatalf("scope = %q, want %q", cfg.Session.NudgeQueueScope, mode)
+			}
+		})
+	}
+}
+
 func TestAPIConfigParsing(t *testing.T) {
 	toml := `
 [workspace]

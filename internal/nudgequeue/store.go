@@ -86,11 +86,25 @@ type NudgeShadow struct {
 // authority, so a missing shadow store must never panic a caller mid-transaction.
 type Store struct {
 	store beads.NudgesStore
+	scope Scope
 }
 
 // NewStore wraps a strongly-typed nudges-class store as the nudge front door.
 func NewStore(store beads.NudgesStore) *Store {
 	return &Store{store: store}
+}
+
+// NewScopedStore also checks shadow ownership before any scoped bead write.
+func NewScopedStore(store beads.NudgesStore, scope Scope) *Store {
+	return &Store{store: store, scope: scope}
+}
+
+func (s *Store) checkScopedBead(b beads.Bead, nudgeID string) error {
+	if s.scope.Strict() && (b.Metadata["nudge_id"] != nudgeID ||
+		b.Metadata["session_id"] != s.scope.sessionID || b.Metadata["continuation_epoch"] != s.scope.epoch) {
+		return fmt.Errorf("nudge shadow %q is outside the bound session scope", b.ID)
+	}
+	return nil
 }
 
 // decodeNudgeItem projects a nudge shadow bead onto a NudgeShadow view. It is
@@ -152,11 +166,28 @@ func (s *Store) Save(item Item) (beadID string, created bool, err error) {
 	if s == nil || s.store.Store == nil {
 		return "", false, nil
 	}
+	if !s.scope.Matches(item) {
+		return "", false, fmt.Errorf("nudge save is outside the bound session scope")
+	}
+	if s.scope.Strict() {
+		b, ok, err := s.find(item.ID, true)
+		if err != nil {
+			return "", false, err
+		}
+		if ok {
+			if err := s.checkScopedBead(b, item.ID); err != nil {
+				return "", false, err
+			}
+		}
+	}
 	existing, ok, err := s.find(item.ID, false)
 	if err != nil {
 		return "", false, err
 	}
 	if ok {
+		if err := s.checkScopedBead(existing, item.ID); err != nil {
+			return "", false, err
+		}
 		return existing.ID, false, nil
 	}
 	meta := map[string]string{
@@ -203,6 +234,9 @@ func (s *Store) Terminalize(item Item, state, reason, commitBoundary string, now
 	if s == nil || s.store.Store == nil {
 		return nil
 	}
+	if !s.scope.Matches(item) {
+		return fmt.Errorf("nudge terminalization is outside the bound session scope")
+	}
 	update := map[string]string{
 		"state":           state,
 		"last_attempt_at": formatOptionalTime(item.LastAttemptAt),
@@ -216,6 +250,15 @@ func (s *Store) Terminalize(item Item, state, reason, commitBoundary string, now
 	tryTerminalize := func(beadID string) error {
 		if beadID == "" {
 			return beads.ErrNotFound
+		}
+		if s.scope.Strict() {
+			b, err := s.store.Get(beadID)
+			if err != nil {
+				return err
+			}
+			if err := s.checkScopedBead(b, item.ID); err != nil {
+				return err
+			}
 		}
 		if err := s.store.SetMetadataBatch(beadID, update); err != nil {
 			if isMissingNudgeBeadErr(err, beadID) {

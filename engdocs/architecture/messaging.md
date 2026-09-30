@@ -45,6 +45,37 @@ is a thin composition layer proving the primitives are sufficient.
   implementations: beadmail (default, backed by `beads.Store`) and
   exec (user-supplied script).
 
+### Scoped queued delivery
+
+The queued delivery path is distinct from the immediate nudge above. Ordinary
+queue maintenance remains global by default. An isolated session window may opt
+in through `[session] nudge_queue_scope = "session-epoch"`. The bound identity is
+the resolved session ID and continuation epoch, not the agent alias or a message
+ID. Missing identities and unknown scope values refuse; they do not fall back to
+global maintenance.
+
+Scoped enqueue, claim, status, acknowledgement, release, failure and rollback
+partition the queue under its existing lock before maintenance runs. Unfenced,
+other-session and old-epoch entries retain every field and bucket membership;
+their backing Beads are not changed by these operations. Supersession is also
+restricted to the selected generation. Cross-generation ID collisions refuse
+before creating a shadow Bead, and shadow writes independently check identity.
+Queue serialization may reorder entries; byte-identical JSON is not promised.
+
+A scoped sidecar binds and reports its scope before its first tick, revalidates
+the configured mode every tick, and refuses downgrade. It requires current
+runtime session and epoch metadata before delivery. Missing-session and
+observation-error grace paths use the same scoped status operation. A successful
+transport call produces the existing durable `injected` / `provider-nudge-return`
+receipt; this proves transport acceptance, not that the model acted on the text.
+
+This is **not** a city-wide maintenance lock or authorization to start a worker.
+Other sessions and explicit broad maintenance still have their ordinary
+authority. A preservation window must separately exclude foreign dispatch and
+broad maintenance, install the option before any sidecar starts, and compare
+foreign tuples and backing Beads on exit. No live configuration is changed by
+adding this capability to source.
+
 ## Architecture
 
 ```
