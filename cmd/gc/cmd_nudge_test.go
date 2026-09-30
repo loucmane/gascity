@@ -3586,6 +3586,10 @@ func TestEnsureNudgePollerLaunchesWithNilStdio(t *testing.T) {
 		return errStopLaunch
 	}
 	t.Cleanup(func() { startNudgePollerProcess = prev })
+	pollerExecutable := filepath.Join(t.TempDir(), "gc")
+	prevExecutable := nudgePollerExecutable
+	nudgePollerExecutable = func() (string, error) { return pollerExecutable, nil }
+	t.Cleanup(func() { nudgePollerExecutable = prevExecutable })
 
 	if err := ensureNudgePoller(t.TempDir(), "worker", "session-worker"); !errors.Is(err, errStopLaunch) {
 		t.Fatalf("ensureNudgePoller error = %v, want %v", err, errStopLaunch)
@@ -3598,6 +3602,26 @@ func TestEnsureNudgePollerLaunchesWithNilStdio(t *testing.T) {
 	// dies of SIGPIPE after the parent exits and leaves a stale pid marker.
 	if launched.Stdout != nil || launched.Stderr != nil {
 		t.Fatalf("poller Stdout, Stderr = %T, %T; want nil, nil", launched.Stdout, launched.Stderr)
+	}
+}
+
+func TestEnsureNudgePollerRefusesGoTestBinary(t *testing.T) {
+	launched := false
+	prev := startNudgePollerProcess
+	startNudgePollerProcess = func(*exec.Cmd) error {
+		launched = true
+		return errors.New("stop before spawning poller")
+	}
+	t.Cleanup(func() { startNudgePollerProcess = prev })
+
+	// This test binary would run the whole suite as the detached poller and
+	// keep writing into the test city after the test that started it ends.
+	err := ensureNudgePoller(t.TempDir(), "worker", "session-worker")
+	if err == nil || !strings.Contains(err.Error(), "Go test binary") {
+		t.Fatalf("ensureNudgePoller error = %v, want Go test binary refusal", err)
+	}
+	if launched {
+		t.Fatal("ensureNudgePoller launched a poller from the Go test binary")
 	}
 }
 

@@ -1686,9 +1686,14 @@ func terminalizeBlockedQueuedNudges(cityPath string, blocked map[string][]queued
 	return nil
 }
 
-// startNudgePollerProcess starts the detached poller command. Tests replace it
-// to inspect the command without spawning a poller.
-var startNudgePollerProcess = (*exec.Cmd).Start
+var (
+	// nudgePollerExecutable resolves the binary the detached poller runs. Tests
+	// that need a real poller child point it at a non-test link to the binary.
+	nudgePollerExecutable = os.Executable
+	// startNudgePollerProcess starts the detached poller command. Tests replace
+	// it to inspect the command without spawning a poller.
+	startNudgePollerProcess = (*exec.Cmd).Start
+)
 
 func ensureNudgePoller(cityPath, agentName, sessionName string) error {
 	pidPath := nudgePollerPIDPath(cityPath, sessionName, agentName)
@@ -1696,9 +1701,14 @@ func ensureNudgePoller(cityPath, agentName, sessionName string) error {
 		if running, _ := existingPollerPID(pidPath, cityPath, sessionName, agentName); running {
 			return nil
 		}
-		exe, err := os.Executable()
+		exe, err := nudgePollerExecutable()
 		if err != nil {
 			return err
+		}
+		// A Go test binary started as the poller runs the whole test suite
+		// instead, and the detached child outlives the test that started it.
+		if isGoTestExecutable(exe) {
+			return fmt.Errorf("refusing to start nudge poller with Go test binary %q", exe)
 		}
 		cmd := exec.Command(exe, nudgepoller.CommandArgs(cityPath, sessionName, agentName)...)
 		cmd.Env = os.Environ()
@@ -1719,6 +1729,11 @@ func ensureNudgePoller(cityPath, agentName, sessionName string) error {
 		}
 		return cmd.Process.Release()
 	})
+}
+
+// isGoTestExecutable reports whether path names a Go test binary (*.test).
+func isGoTestExecutable(path string) bool {
+	return strings.HasSuffix(filepath.Base(path), ".test")
 }
 
 func formatNudgeInjectOutput(items []queuedNudge) string {
