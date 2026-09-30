@@ -1195,7 +1195,11 @@ func dispatchReadyWaitNudgesWithSnapshot(cityPath string, cfg *config.City, sess
 			ContinuationEpoch: wait.RegisteredEpoch,
 			Reference:         &nudgeReference{Kind: "bead", ID: wait.ID},
 		})
-		if err := enqueueQueuedNudgeWithStore(cityPath, nudges, item); err != nil {
+		scope, err := (nudgeTarget{cfg: cfg, sessionID: sessionID, continuationEpoch: wait.RegisteredEpoch}).queueScope()
+		if err != nil {
+			return err
+		}
+		if err := enqueueQueuedNudgeWithStore(cityPath, nudges, item, scope); err != nil {
 			return err
 		}
 		if err := sessFront.SetWaitNudgeID(wait.ID, nudgeID); err != nil {

@@ -1579,6 +1579,10 @@ type SessionConfig struct {
 	// longer interval trades nudge-delivery latency for less standing load.
 	// Duration string. Unset means the poller's built-in default (2s).
 	NudgePollInterval string `toml:"nudge_poll_interval,omitempty" jsonschema:"default=2s"`
+	// NudgeQueueScope opts into strict session-generation queue isolation.
+	// Empty/global preserves ordinary maintenance; session-epoch requires both
+	// identity fields and never maintains, claims or supersedes foreign entries.
+	NudgeQueueScope string `toml:"nudge_queue_scope,omitempty" jsonschema:"default=global,enum=global,enum=session-epoch"`
 	// NudgeLockTimeout is how long to wait to acquire the per-session nudge lock.
 	// Duration string. Defaults to "30s".
 	NudgeLockTimeout string `toml:"nudge_lock_timeout,omitempty" jsonschema:"default=30s"`
