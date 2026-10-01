@@ -117,6 +117,7 @@ cmd_gc_integration_tests=(
   TestHybridLocalConformance
   TestHybridRemoteConformance
   TestManagedBdRigProviderStoreRecoversAfterHardKillPortRebind
+  TestManagedBeadsNativeCLICompatibility
   TestPhase2WorkerCoreRealTransportProof
   TestPlatformCanaryRunnerRoundTripsSelectedProfile
   TestRigAddIncludeResolvesScopedRegistryPackName
