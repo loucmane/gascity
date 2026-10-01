@@ -43,19 +43,22 @@ func bdReadyPoolDemandShell(limitFlag string, includeEphemeralReady bool) string
 }
 
 // bdReadyPoolDemandMigrationShell is a temporary raw compatibility probe for
-// graph.v2 workflow roots created before gc.routed_to root stamping shipped.
-// It is scoped to workflow roots so gc.run_target remains an authoring hint
+// workflow roots created before gc.routed_to root stamping shipped. It is
+// scoped to workflow roots so gc.run_target remains an authoring hint
 // everywhere else. Callers must pass its output through
-// poolDemandMigrationFilterJQ so a stale divergent gc.run_target cannot remain
-// visible once a root carries gc.routed_to. This retirement-window fallback
-// requires jq in the default worker/reconciler environment; remove it with the
-// Go-side legacy candidates after the backfill completion tracked by ga-dhf44.
+// poolDemandMigrationFilterJQ, which keeps only roots without gc.routed_to (so a
+// stale divergent gc.run_target cannot remain visible once a root carries
+// gc.routed_to) and drops graph.v2 workflow roots, which are controller-owned
+// under either routing key; only legacy workflow roots without the graph.v2
+// contract remain. This retirement-window fallback requires jq in the default
+// worker/reconciler environment; remove it with the Go-side legacy candidates
+// after the backfill completion tracked by ga-dhf44.
 func bdReadyPoolDemandMigrationShell(limitFlag string, includeEphemeralReady bool) string {
 	return `bd ready` + bdReadyIncludeEphemeralArg(includeEphemeralReady) + ` --metadata-field "` + beadmeta.RunTargetMetadataKey + `=$target" --metadata-field "` + beadmeta.KindMetadataKey + `=` + beadmeta.KindWorkflow + `" --unassigned --exclude-type=epic --json --sort oldest ` + limitFlag
 }
 
 func poolDemandMigrationFilterJQ(limit int) string {
-	filter := `[.[] | select(` + jqMeta(beadmeta.RoutedToMetadataKey) + ` == "")]`
+	filter := `[.[] | select(` + jqMeta(beadmeta.RoutedToMetadataKey) + ` == "" and (` + graphV2WorkflowRootJQ() + ` | not))]`
 	if limit > 0 {
 		filter += ` | .[:` + strconv.Itoa(limit) + `]`
 	}
@@ -63,16 +66,20 @@ func poolDemandMigrationFilterJQ(limit int) string {
 }
 
 // graphV2WorkflowRootJQ is the jq form of the graph.v2 workflow-root predicate
-// (isGraphV2WorkflowRoot in cmd/gc). The root is controller-owned: it stays
-// ready and routed to its pool while the workflow runs, behind a non-blocking
-// tracks edge to its finalizer, but the worker claim gate never claims it.
+// (isGraphV2WorkflowRoot in cmd/gc). Both forms compare the metadata exactly,
+// since jq 1.7 has no trim builtin, so the shell and Go read sides classify
+// every row alike. The root is controller-owned: it stays ready and routed to
+// its pool while the workflow runs, behind a non-blocking tracks edge to its
+// finalizer, so the work query drops it before cutting rows, the count form
+// drops it before counting, and the worker claim gate never claims it.
 func graphV2WorkflowRootJQ() string {
 	return `(` + jqMeta(beadmeta.KindMetadataKey) + ` == "` + beadmeta.KindWorkflow + `" and ` +
 		jqMeta(beadmeta.FormulaContractMetadataKey) + ` == "` + beadmeta.FormulaContractGraphV2 + `")`
 }
 
 // poolDemandCountJQ unions the count-form probe arrays, dedups them by bead id,
-// drops graph.v2 workflow roots, and prints the demand count.
+// drops graph.v2 workflow roots (the canonical ready array is not filtered
+// before this point), and prints the demand count.
 func poolDemandCountJQ() string {
 	return shellquote.Join([]string{"jq", "-s", `(add // []) | unique_by(.id) | map(select(` + graphV2WorkflowRootJQ() + ` | not)) | length`})
 }
@@ -104,7 +111,8 @@ func legacyEphemeralPoolDemandShell(limit int, includeEphemeralReady, quiet bool
 	}
 	filter := legacyEphemeralReadyFilterJQ(
 		`select((.assignee // "") == "")`+
-			` | select((`+jqMeta(beadmeta.RoutedToMetadataKey)+` == $target) or ((`+jqMeta(beadmeta.RoutedToMetadataKey)+` == "") and (`+jqMeta(beadmeta.RunTargetMetadataKey)+` == $target) and (`+jqMeta(beadmeta.KindMetadataKey)+` == "`+beadmeta.KindWorkflow+`")))`,
+			` | select((`+jqMeta(beadmeta.RoutedToMetadataKey)+` == $target) or ((`+jqMeta(beadmeta.RoutedToMetadataKey)+` == "") and (`+jqMeta(beadmeta.RunTargetMetadataKey)+` == $target) and (`+jqMeta(beadmeta.KindMetadataKey)+` == "`+beadmeta.KindWorkflow+`")))`+
+			` | select(`+graphV2WorkflowRootJQ()+` | not)`,
 		limit,
 	)
 	query := bdQueryEphemeralStatusShell("open")
@@ -119,18 +127,22 @@ func legacyEphemeralPoolDemandShell(limit int, includeEphemeralReady, quiet bool
 }
 
 // poolDemandFirstRowFunctionScript emits the work_query Tier 3 function: it
-// reads the first ready, unassigned, routed bead for the supplied target,
-// prints it, and exits 0. A failure of the canonical routed-ready probe exits
-// the generated query non-zero so the hook can emit an operational failure;
-// only a successful empty result reaches the caller's terminal `printf "[]"`.
-// Legacy migration probes remain best-effort after that authoritative read.
+// reads the ready, unassigned, routed beads for the supplied target oldest
+// first, drops graph.v2 workflow roots, prints the first routedReadyWindow
+// rows, and exits 0. A failure of the canonical routed-ready probe or of its
+// window filter exits the generated query non-zero so the hook can emit an
+// operational failure; only a successful empty result reaches the caller's
+// terminal `printf "[]"`. Legacy migration probes remain best-effort after that
+// authoritative read; they also read without a bd row limit and drop graph.v2
+// workflow roots before keeping their first row.
 func poolDemandFirstRowFunctionScript(includeEphemeralReady bool) string {
 	return `probe_pool_demand() { ` +
 		`target="$1"; ` +
 		`[ -z "$target" ] && return 1; ` +
-		`r=$(` + routedReadyTierCommand(includeEphemeralReady) + `) || exit $?; ` +
+		`ready_json=$(` + routedReadyTierCommand(includeEphemeralReady) + `) || exit $?; ` +
+		`r=$(printf "%s" "$ready_json" | ` + routedReadyWindowJQ() + `) || exit $?; ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
-		`legacy_candidates=$(` + bdReadyPoolDemandMigrationShell("--limit=20", includeEphemeralReady) + ` 2>/dev/null); ` +
+		`legacy_candidates=$(` + bdReadyPoolDemandMigrationShell("--limit 0", includeEphemeralReady) + ` 2>/dev/null); ` +
 		`r=$(printf "%s" "$legacy_candidates" | ` + poolDemandMigrationFilterJQ(1) + ` 2>/dev/null); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 		`legacy_ephemeral_candidates=$(` + legacyEphemeralPoolDemandShell(20, includeEphemeralReady, true) + `); ` +
@@ -140,14 +152,28 @@ func poolDemandFirstRowFunctionScript(includeEphemeralReady bool) string {
 		`}; `
 }
 
+// routedReadyWindow is how many routed rows the work-query routed tier hands
+// the hook. The tier is widened past a single row so a self-blocked head
+// (is_blocked / status==blocked) has Ready routed work behind it to fall
+// through to instead of idle-exiting; the hook layer
+// (filterUnreadyHookCandidates) strips the blocked head from the result.
+const routedReadyWindow = 20
+
 func routedReadyTierCommand(includeEphemeralReady bool) string {
 	// The shared predicate stays order-free so the count-form does no wasted
 	// sorting; the worker first-row path asks bd for the oldest candidates.
-	// The tier is widened past a single row (limit=20, not limit=1) so a
-	// self-blocked head (is_blocked / status==blocked) has Ready routed work
-	// behind it to fall through to instead of idle-exiting; the hook layer
-	// (filterUnreadyHookCandidates) strips the blocked head from the result.
-	return bdReadyPoolDemandShell("--sort oldest --limit=20", includeEphemeralReady)
+	// bd returns every row (--limit 0) because routedReadyWindowJQ must drop
+	// graph.v2 workflow roots before cutting the window: an open
+	// order-dispatched root is older than its own steps, so a cut in bd could
+	// fill the window with roots the claim gate refuses while the count form
+	// still counts the steps behind them.
+	return bdReadyPoolDemandShell("--sort oldest --limit 0", includeEphemeralReady)
+}
+
+// routedReadyWindowJQ drops graph.v2 workflow roots from the oldest-first
+// routed rows and keeps the first routedReadyWindow of them on one line.
+func routedReadyWindowJQ() string {
+	return shellquote.Join([]string{"jq", "-c", `[.[] | select(` + graphV2WorkflowRootJQ() + ` | not)] | .[:` + strconv.Itoa(routedReadyWindow) + `]`})
 }
 
 // poolDemandCountShell emits the reconciler count-form for target: it counts
@@ -155,8 +181,8 @@ func routedReadyTierCommand(includeEphemeralReady bool) string {
 // canonical and migration predicates with poolDemandFirstRowFunctionScript so
 // the reconciler's spawn decision and the worker's claim decision read the
 // same demand shape. Graph.v2 workflow roots are dropped before counting
-// because the worker claim gate skips them; counting one would spawn a session
-// for work no worker may claim.
+// because the work query drops them and the worker claim gate skips them;
+// counting one would spawn a session for work no worker may claim.
 //
 // Unlike the work_query probe, this form must NOT redirect bd stderr or default
 // to zero: a failed `bd ready` has to surface as an error rather than

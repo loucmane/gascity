@@ -560,12 +560,13 @@ func DecorateGraphWorkflowRecipeWithDefaultBinding(recipe *formula.Recipe, route
 			step.Metadata[beadmeta.RootStoreRefMetadataKey] = rootStoreRef
 		}
 		if step.IsRoot {
-			// gc.routed_to is the canonical (and sole) persisted delivery key
-			// every runtime demand/claim/scale reader consults; the workflow root
-			// must carry it to be claimable, exactly like its own child steps and
-			// every legacy bead. Without it a pool-routed root is spawned-for by
-			// scale_check but never claimed by the worker, then idle-reaped
-			// (fixes #2763; gc.run_target retired as a wire field — ga-eld2x).
+			// gc.routed_to is the canonical (and sole) persisted routing key
+			// (gc.run_target retired as a wire field — ga-eld2x, #2763), so the
+			// root records its workflow's route here, where run projections
+			// read the run target. A graph.v2 root is still controller-owned:
+			// workflow-finalize closes it, and the work query, the worker claim
+			// gate and pool demand all skip it (ga-8v11), so only its steps
+			// wake and occupy pool workers.
 			step.Metadata[beadmeta.RoutedToMetadataKey] = routedTo
 			delete(step.Metadata, beadmeta.RunTargetMetadataKey)
 			if rootSessionName != "" {

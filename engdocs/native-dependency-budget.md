@@ -31,19 +31,20 @@ OpenAPI code-generation and YAML tooling:
 
 `github.com/wk8/go-ordered-map/v2` left the graph. None of the added modules is
 linked into `gc`: `go version -m` on a `-trimpath`, `CGO_ENABLED=0` build of
-`./cmd/gc` lists 107 dependencies and none of them
-(`github.com/oapi-codegen/runtime` is a separate, pre-existing module). That
-build is 166,298,546 bytes; the guard's own default build measured
-264,708,360 bytes at the re-baseline, under the 270,000,000-byte limit. The
-AWS, Azure, DoltHub and Google API family counts are unchanged (25, 9, 15 and
-1).
+`./cmd/gc` lists 107 dependencies, and none of the eight is among them. The
+one `oapi-codegen` module it does list, `github.com/oapi-codegen/runtime`, is a
+separate module that was already in the graph. That build is 166,298,546
+bytes; the guard's own default build measured 264,708,360 bytes at the
+re-baseline, under the 270,000,000-byte limit. The AWS, Azure, DoltHub and
+Google API family counts are unchanged (25, 9, 15 and 1).
 
-Local before/after inventories are preserved under
-`/var/tmp/ga-t4dx-inventory-20261001/`:
+Both inventories are in-repo fixtures:
 
-- `before.txt`: `f82b9e2da7735ad7d914ce98c0aa9c95f93ac0004063ac735b665c9f2ffbd4c8`
-  (the gRPC 1.83.2 fixture).
-- `after.txt`: same SHA-256 as the committed fixture.
+- Before: the former `scripts/testdata/native-dependencies/grpc-1.83.2.txt`,
+  SHA-256 `f82b9e2da7735ad7d914ce98c0aa9c95f93ac0004063ac735b665c9f2ffbd4c8`,
+  in git history at `d553b3fde06398972f0f56788783d8ce01d441e7`.
+- After: the committed `scripts/testdata/native-dependencies/beads-1.3.0.txt`
+  named above.
 
 ## gRPC 1.83.2 baseline (730)
 

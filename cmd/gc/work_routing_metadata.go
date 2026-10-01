@@ -12,10 +12,12 @@ import (
 // its pool's gc.routed_to and, behind its non-blocking tracks edge to the
 // finalizer, stays Ready() while the workflow runs. Claim and pool-demand
 // readers skip it; legacy workflow roots without the graph.v2 contract are
-// unaffected.
+// unaffected. The metadata is compared exactly, without trimming, like the jq
+// form the shell work query and count form use (graphV2WorkflowRootJQ in
+// internal/config), so every read side classifies a row the same way.
 func isGraphV2WorkflowRoot(b beads.Bead) bool {
-	return strings.TrimSpace(b.Metadata[beadmeta.KindMetadataKey]) == beadmeta.KindWorkflow &&
-		strings.TrimSpace(b.Metadata[beadmeta.FormulaContractMetadataKey]) == beadmeta.FormulaContractGraphV2
+	return b.Metadata[beadmeta.KindMetadataKey] == beadmeta.KindWorkflow &&
+		b.Metadata[beadmeta.FormulaContractMetadataKey] == beadmeta.FormulaContractGraphV2
 }
 
 func legacyWorkflowRunTarget(b beads.Bead) string {
