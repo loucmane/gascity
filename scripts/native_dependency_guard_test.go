@@ -15,9 +15,9 @@ func TestNativeDependencyGuard(t *testing.T) {
 		t.Skip("the native dependency shell guard runs on Unix")
 	}
 	root := repoRoot(t)
-	reviewed := readFile(t, root, "scripts/testdata/native-dependencies/grpc-1.83.2.txt")
-	if got := len(strings.FieldsFunc(reviewed, func(r rune) bool { return r == '\n' })); got != 730 {
-		t.Fatalf("reviewed graph has %d modules, want 730", got)
+	reviewed := readFile(t, root, "scripts/testdata/native-dependencies/beads-1.3.0.txt")
+	if got := len(strings.FieldsFunc(reviewed, func(r rune) bool { return r == '\n' })); got != 737 {
+		t.Fatalf("reviewed graph has %d modules, want 737", got)
 	}
 	type fixture struct {
 		name, modules, symbol, literal, help, size, want string
@@ -25,9 +25,9 @@ func TestNativeDependencyGuard(t *testing.T) {
 	}
 	cases := []fixture{
 		{name: "reviewed_graph", modules: reviewed},
-		{name: "unrelated_growth", modules: reviewed + "example.invalid/unrelated v1.0.0\n", want: "module graph has 731 modules; max is 730", beforeBuild: true},
+		{name: "unrelated_growth", modules: reviewed + "example.invalid/unrelated v1.0.0\n", want: "module graph has 738 modules; max is 737", beforeBuild: true},
 	}
-	// Each family probe stays at 730 total: it must reach the family guard,
+	// Each family probe stays at 737 total: it must reach the family guard,
 	// not accidentally pass because the total-count check rejected it first.
 	for _, family := range []struct {
 		name, prefix string
@@ -111,7 +111,7 @@ fi
 				"GC_GUARD_FIXTURE_SIZE="+tc.size, "GC_GUARD_FIXTURE_WC="+realWC)
 			out, err := cmd.CombinedOutput()
 			if tc.want == "" {
-				if err != nil || !strings.Contains(string(out), "native dependency guard: modules=730 ") {
+				if err != nil || !strings.Contains(string(out), "native dependency guard: modules=737 ") {
 					t.Fatalf("guard should pass: %v\n%s", err, out)
 				}
 			} else if err == nil || !strings.Contains(string(out), tc.want) {
@@ -142,7 +142,7 @@ func nativeGuardModules(prefix string, count, beads, google int) string {
 	for i := 0; i < count; i++ {
 		lines = append(lines, fmt.Sprintf("%s%d v1.0.0", prefix, i))
 	}
-	for i := len(lines); i < 730; i++ {
+	for i := len(lines); i < 737; i++ {
 		lines = append(lines, fmt.Sprintf("example.invalid/neutral%d v1.0.0", i))
 	}
 	return strings.Join(lines, "\n") + "\n"
