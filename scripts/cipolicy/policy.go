@@ -20,9 +20,9 @@ const (
 	// policy review, while workflow, job, step, and input descriptions remain
 	// free to change. A failure prints the projection and candidate digest.
 	expectedCITriggersHash       = "d1a8bcd089019589658d8f154af9c26a70877285d84a384c2dcea299efc9554a"
-	expectedCIExecutionHash      = "901ee4e069dde79ca5fb36f2916198a29f4aa29b5bfab9831b83b26bddb5d225" // reviewed delta: provision the pinned Herdr conformance dependency
+	expectedCIExecutionHash      = "c2bcaae87d79bbce5c3f628eca81f32f49dff1206cd2056695695dc7f9acd266" // reviewed delta: BD_VERSION v1.2.2 -> v1.3.0 in the matrix env blocks (beads pin hotfix)
 	expectedNightlyTriggersHash  = "0a4400a09ac567e90adf8be1232eef1f14e36efd8dba3e143aa6e36f5b7a36f5"
-	expectedNightlyExecutionHash = "4b17e6d5c9c6c13c0935051aff0c50ddbbc6b6c5aa10947ed4447d25c29a2a23" // reviewed delta: BD_VERSION v1.1.0 -> v1.2.2 (beads pin hotfix)
+	expectedNightlyExecutionHash = "bb189242fe7f197de366d1b3a6a42227a8ee55f7a8b14c5f9cc3c9387830755f" // reviewed delta: BD_VERSION v1.2.2 -> v1.3.0 (beads pin hotfix)
 	expectedSetupActionHash      = "0c3d55d12e64d807ee9dbf2320f89542e0231f3e4965b2ca0ebdadcb65663a29" // reviewed delta: Go 1.26.6 -> 1.26.7 custody toolchain
 )
 
