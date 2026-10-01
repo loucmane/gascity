@@ -50,11 +50,13 @@ func bdReadyPoolDemandShell(limitFlag string, includeEphemeralReady bool) string
 // stale divergent gc.run_target cannot remain visible once a root carries
 // gc.routed_to) and drops graph.v2 workflow roots, which are controller-owned
 // under either routing key; only legacy workflow roots without the graph.v2
-// contract remain. This retirement-window fallback requires jq in the default
-// worker/reconciler environment; remove it with the Go-side legacy candidates
-// after the backfill completion tracked by ga-dhf44.
-func bdReadyPoolDemandMigrationShell(limitFlag string, includeEphemeralReady bool) string {
-	return `bd ready` + bdReadyIncludeEphemeralArg(includeEphemeralReady) + ` --metadata-field "` + beadmeta.RunTargetMetadataKey + `=$target" --metadata-field "` + beadmeta.KindMetadataKey + `=` + beadmeta.KindWorkflow + `" --unassigned --exclude-type=epic --json --sort oldest ` + limitFlag
+// contract remain. bd returns every row (--limit 0) because that filter must
+// run before the work query keeps its first row. This retirement-window
+// fallback requires jq in the default worker/reconciler environment; remove it
+// with the Go-side legacy candidates after the backfill completion tracked by
+// ga-dhf44.
+func bdReadyPoolDemandMigrationShell(includeEphemeralReady bool) string {
+	return `bd ready` + bdReadyIncludeEphemeralArg(includeEphemeralReady) + ` --metadata-field "` + beadmeta.RunTargetMetadataKey + `=$target" --metadata-field "` + beadmeta.KindMetadataKey + `=` + beadmeta.KindWorkflow + `" --unassigned --exclude-type=epic --json --sort oldest --limit 0`
 }
 
 func poolDemandMigrationFilterJQ(limit int) string {
@@ -142,7 +144,7 @@ func poolDemandFirstRowFunctionScript(includeEphemeralReady bool) string {
 		`ready_json=$(` + routedReadyTierCommand(includeEphemeralReady) + `) || exit $?; ` +
 		`r=$(printf "%s" "$ready_json" | ` + routedReadyWindowJQ() + `) || exit $?; ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
-		`legacy_candidates=$(` + bdReadyPoolDemandMigrationShell("--limit 0", includeEphemeralReady) + ` 2>/dev/null); ` +
+		`legacy_candidates=$(` + bdReadyPoolDemandMigrationShell(includeEphemeralReady) + ` 2>/dev/null); ` +
 		`r=$(printf "%s" "$legacy_candidates" | ` + poolDemandMigrationFilterJQ(1) + ` 2>/dev/null); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 		`legacy_ephemeral_candidates=$(` + legacyEphemeralPoolDemandShell(20, includeEphemeralReady, true) + `); ` +
@@ -192,7 +194,7 @@ func routedReadyWindowJQ() string {
 func poolDemandCountShell(target string, includeEphemeralReady bool) string {
 	script := `target="$1"; ` +
 		`ready_json=$(` + bdReadyPoolDemandShell("--limit 0", includeEphemeralReady) + `) || exit $?; ` +
-		`legacy_candidates=$(` + bdReadyPoolDemandMigrationShell("--limit 0", includeEphemeralReady) + `) || exit $?; ` +
+		`legacy_candidates=$(` + bdReadyPoolDemandMigrationShell(includeEphemeralReady) + `) || exit $?; ` +
 		`legacy_json=$(printf "%s" "$legacy_candidates" | ` + poolDemandMigrationFilterJQ(0) + `) || exit $?; ` +
 		`legacy_ephemeral_json=$(` + legacyEphemeralPoolDemandShell(0, includeEphemeralReady, false) + `); ` +
 		`printf "%s\n%s\n%s\n" "$ready_json" "$legacy_json" "$legacy_ephemeral_json" | ` + poolDemandCountJQ()
