@@ -19,10 +19,10 @@ ARG BASE_IMAGE=gc-agent-base:latest
 
 FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS bd-builder
 
-ARG BD_VERSION=v1.2.2
-ARG BD_SOURCE_REF=6c124203e771433a3550c348771a5b5e27fd3c21
-ARG BD_SOURCE_SHA256=99bd5f50226590b5ce4978d117f481c7d4d5718bd3152568a983d2683f62779f
-ARG BD_BUILD=6c124203e
+ARG BD_VERSION=v1.3.0
+ARG BD_SOURCE_REF=f45b249ce6b40ba62aecc03949e6371e8f7c79d8
+ARG BD_SOURCE_SHA256=51689f2a4d9f3437334d6e9f91e3b18c0793fb9cc8cf988ce511ef1f39b13214
+ARG BD_BUILD=f45b249ce
 ARG BD_BRANCH=HEAD
 ARG GRPC_VERSION=1.83.2
 ARG XCRYPTO_VERSION=0.55.0
@@ -30,10 +30,11 @@ ARG XNET_VERSION=0.58.0
 ARG XTEXT_VERSION=0.41.0
 ARG THRIFT_VERSION=0.24.0
 
-# The published bd binary and the pinned v1.2.2 source embed vulnerable grpc-go
-# and golang.org/x modules plus Thrift. Rebuild the exact source with its production
-# CGO/pure-Go-regex configuration and release identity, forcing only the patched
-# dependency versions forward.
+# The pinned v1.3.0 source selects grpc-go 1.83.0 and Thrift 0.23.0, below the
+# patched versions forced here; its golang.org/x modules already match these
+# pins, which stay as verified floors. Rebuild the exact source with its
+# production CGO/pure-Go-regex configuration and release identity, forcing only
+# the patched dependency versions forward.
 RUN mkdir -p /src/bd /out \
     && curl -fsSL --retry 3 \
        "https://github.com/gastownhall/beads/archive/${BD_SOURCE_REF}.tar.gz" \

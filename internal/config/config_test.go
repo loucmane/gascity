@@ -1831,13 +1831,13 @@ func TestEffectiveWorkQueryDefault(t *testing.T) {
 	if strings.Contains(got, `--include-ephemeral`) {
 		t.Errorf("EffectiveWorkQuery() default must be bd 1.0.4-compatible without --include-ephemeral: %q", got)
 	}
-	if !strings.Contains(got, `bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20`) {
+	if !strings.Contains(got, `bd ready --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit 0`) {
 		t.Errorf("EffectiveWorkQuery() missing tier 3 pool-demand probe: %q", got)
 	}
 	if !strings.Contains(got, "-- mayor") {
 		t.Errorf("EffectiveWorkQuery() missing tier 3 target argument: %q", got)
 	}
-	if !strings.Contains(got, `bd ready --metadata-field "gc.run_target=$target" --metadata-field "gc.kind=workflow" --unassigned --exclude-type=epic --json --sort oldest --limit=20`) {
+	if !strings.Contains(got, `bd ready --metadata-field "gc.run_target=$target" --metadata-field "gc.kind=workflow" --unassigned --exclude-type=epic --json --sort oldest --limit 0`) {
 		t.Errorf("EffectiveWorkQuery() missing run_target migration fallback: %q", got)
 	}
 	for _, want := range []string{`.metadata`, `.[:1]`} {
@@ -1853,7 +1853,7 @@ func TestEffectiveWorkQueryDefault(t *testing.T) {
 func TestEffectiveWorkQueryBD105CompatibilityOptIn(t *testing.T) {
 	a := Agent{Name: "mayor"}
 	got := a.EffectiveWorkQueryForBeads(BeadsConfig{BDCompatibility: BeadsBDCompatibility105})
-	if !strings.Contains(got, `bd ready --include-ephemeral --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20`) {
+	if !strings.Contains(got, `bd ready --include-ephemeral --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit 0`) {
 		t.Errorf("EffectiveWorkQueryForBeads(bd-1.0.5) missing include-ephemeral routed probe: %q", got)
 	}
 	if !strings.Contains(got, `bd ready --include-ephemeral --assignee="$id" --json --limit=1`) {
@@ -2238,13 +2238,13 @@ func TestEffectiveWorkQueryControlDispatcherClaimsLegacyUnassignedRoute(t *testi
 	out := runEffectiveWorkQuery(t, a, nil, `#!/bin/sh
 set -eu
 case "$*" in
-  *"ready --include-ephemeral"*"--metadata-field gc.routed_to=gascity/control-dispatcher"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit=20"*)
+  *"ready --include-ephemeral"*"--metadata-field gc.routed_to=gascity/control-dispatcher"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit 0"*)
     printf '[]'
     ;;
-  *"ready --metadata-field gc.routed_to=gascity/control-dispatcher"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit=20"*)
+  *"ready --metadata-field gc.routed_to=gascity/control-dispatcher"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit 0"*)
     printf '[]'
     ;;
-  *"ready --metadata-field gc.routed_to=gascity/workflow-control"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit=20"*)
+  *"ready --metadata-field gc.routed_to=gascity/workflow-control"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit 0"*)
     printf '[{"id":"ga-legacy-route"}]'
     ;;
   *)
@@ -2273,7 +2273,7 @@ func TestEffectiveWorkQueryRoutedQueueUsesNativeOldestSortAcrossReadyTiers(t *te
 	}, `#!/bin/sh
 set -eu
 case "$*" in
-  "ready --metadata-field gc.routed_to=hello-world/worker --unassigned --exclude-type=epic --json --sort oldest --limit=20")
+  "ready --metadata-field gc.routed_to=hello-world/worker --unassigned --exclude-type=epic --json --sort oldest --limit 0")
     printf '[{"id":"older-no-history","priority":2,"created_at":"2026-05-20T06:09:30Z","no_history":true}]'
     ;;
   *)
@@ -2318,7 +2318,7 @@ func TestEffectiveWorkQueryRoutedQueueUsesOldestBeforePriority(t *testing.T) {
 	}, `#!/bin/sh
 set -eu
 case "$*" in
-  *"ready --metadata-field gc.routed_to=hello-world/worker"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit=20"*)
+  *"ready --metadata-field gc.routed_to=hello-world/worker"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit 0"*)
     printf '[{"id":"older-p2","priority":2,"created_at":"2026-05-20T06:09:30Z"}]'
     ;;
   *)
@@ -2341,10 +2341,10 @@ func TestEffectiveWorkQueryRoutedFallbackUsesNativeOldestSort(t *testing.T) {
 	}, `#!/bin/sh
 set -eu
 case "$*" in
-  *"ready --metadata-field gc.routed_to=hello-world/worker"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit=20"*)
+  *"ready --metadata-field gc.routed_to=hello-world/worker"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit 0"*)
     printf '[]'
     ;;
-  *"ready --metadata-field gc.run_target=hello-world/worker"*"--metadata-field gc.kind=workflow"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit=20"*)
+  *"ready --metadata-field gc.run_target=hello-world/worker"*"--metadata-field gc.kind=workflow"*"--unassigned"*"--exclude-type=epic"*"--json"*"--sort oldest"*"--limit 0"*)
     printf '[{"id":"older-fallback","priority":2,"created_at":"2026-05-20T06:09:30Z","metadata":{"gc.kind":"workflow","gc.run_target":"hello-world/worker"}}]'
     ;;
   *)
@@ -2669,6 +2669,204 @@ esac
 	}
 }
 
+// TestEffectivePoolDemandQueryIgnoresGraphV2WorkflowRoots pins the count-form
+// side of the graph.v2 root guard (ga-8v11): an open graph.v2 root is ready and
+// routed to its pool while the workflow runs (its finalize edge is a
+// non-blocking tracks edge), but it is controller-owned under either routing
+// key. Only the routed step and the legacy workflow root count as demand,
+// matching the worker claim gate in cmd/gc.
+func TestEffectivePoolDemandQueryIgnoresGraphV2WorkflowRoots(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available; count-form exercises a jq pipeline")
+	}
+	a := Agent{Name: "worker", Dir: "hello-world"}
+	out := runShellWithFakeBd(t, a.EffectivePoolDemandQuery(), nil, `#!/bin/sh
+set -eu
+case "$*" in
+  *"--metadata-field gc.routed_to=hello-world/worker"*)
+    printf '[{"id":"wf-root","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.routed_to":"hello-world/worker"}},{"id":"wf-step","metadata":{"gc.routed_to":"hello-world/worker","gc.root_bead_id":"wf-root"}}]'
+    ;;
+  *"--metadata-field gc.run_target=hello-world/worker"*"--metadata-field gc.kind=workflow"*)
+    printf '[{"id":"wf-old-root","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.run_target":"hello-world/worker"}},{"id":"legacy-root","metadata":{"gc.kind":"workflow","gc.run_target":"hello-world/worker"}}]'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`)
+	if strings.TrimSpace(out) != "2" {
+		t.Fatalf("EffectivePoolDemandQuery() count = %q, want 2 (routed step + legacy workflow root; graph.v2 workflow roots are controller-owned)", strings.TrimSpace(out))
+	}
+}
+
+// limitHonoringFakeBd returns a fake bd that answers the canonical routed ready
+// probe for route with routedRows and the gc.run_target workflow-root migration
+// probe with migrationRows, in order. Like real bd it honors --limit=N and
+// --limit N (0 keeps every row), so a query that cuts its rows in bd sees only
+// the head of the queue. Every other call prints [].
+func limitHonoringFakeBd(route string, routedRows, migrationRows []string) string {
+	var b strings.Builder
+	b.WriteString(`#!/bin/sh
+set -eu
+limit=0
+prev=""
+for arg in "$@"; do
+  case "$arg" in
+    --limit=*) limit=${arg#--limit=} ;;
+  esac
+  if [ "$prev" = "--limit" ]; then
+    limit=$arg
+  fi
+  prev=$arg
+done
+count=0
+emit_row() {
+  if [ "$limit" -gt 0 ] && [ "$count" -ge "$limit" ]; then
+    return 0
+  fi
+  if [ "$count" -gt 0 ]; then
+    printf ','
+  fi
+  printf '%s' "$1"
+  count=$((count + 1))
+}
+case "$*" in
+`)
+	writeCase := func(pattern string, rows []string) {
+		b.WriteString("  " + pattern + ")\n    printf '['\n")
+		for _, row := range rows {
+			b.WriteString("    emit_row '" + row + "'\n")
+		}
+		b.WriteString("    printf ']'\n    ;;\n")
+	}
+	writeCase(`ready*"--metadata-field gc.routed_to=`+route+`"*`, routedRows)
+	writeCase(`ready*"--metadata-field gc.run_target=`+route+`"*"--metadata-field gc.kind=workflow"*`, migrationRows)
+	b.WriteString("  *)\n    printf '[]'\n    ;;\nesac\n")
+	return b.String()
+}
+
+// graphV2RootRows returns n open graph.v2 workflow roots, oldest first, that
+// carry route under routingKey.
+func graphV2RootRows(idPrefix, routingKey, route string, n int) []string {
+	rows := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		rows = append(rows, fmt.Sprintf(`{"id":"%s%02d","issue_type":"task","status":"open","created_at":"2026-10-01T08:%02d:00Z","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","%s":"%s"}}`, idPrefix, i, i, routingKey, route))
+	}
+	return rows
+}
+
+// workQueryRowIDs decodes a work-query JSON array and returns its bead ids.
+func workQueryRowIDs(t *testing.T, out string) []string {
+	t.Helper()
+	var rows []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &rows); err != nil {
+		t.Fatalf("work query output is not a JSON array: %v (%q)", err, out)
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
+}
+
+// TestEffectiveWorkQueryRoutedWindowSkipsGraphV2WorkflowRoots is the ga-8v11
+// row-cut regression. Order-dispatched graph.v2 roots stay open and routed to
+// their pool while their workflows run, and each is older than its steps, so 20
+// of them sort ahead of a ready step on the oldest-first routed queue. A bd-side
+// --limit=20 cut returned only roots, which the claim gate rejects, so the
+// worker drained no_work while the count form still counted the step. The work
+// query and the routed-pool query must drop the roots before the row cut and
+// surface the step the count form counts.
+func TestEffectiveWorkQueryRoutedWindowSkipsGraphV2WorkflowRoots(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available; the routed tier filters graph.v2 workflow roots with jq")
+	}
+	const route = "hello-world/worker"
+	routed := append(graphV2RootRows("wf-root-", "gc.routed_to", route, 20),
+		`{"id":"wf-step","issue_type":"task","status":"open","created_at":"2026-10-01T09:00:00Z","metadata":{"gc.routed_to":"`+route+`","gc.root_bead_id":"wf-root-01"}}`)
+	bdScript := limitHonoringFakeBd(route, routed, nil)
+	a := Agent{Name: "worker", Dir: "hello-world"}
+	for _, compat := range []struct {
+		name  string
+		beads BeadsConfig
+	}{
+		{"bd104", BeadsConfig{}},
+		{"bd105", BeadsConfig{BDCompatibility: BeadsBDCompatibility105}},
+	} {
+		t.Run(compat.name, func(t *testing.T) {
+			for _, q := range []struct{ name, command string }{
+				{"EffectiveWorkQuery", a.EffectiveWorkQueryForBeads(compat.beads)},
+				{"EffectiveRoutedPoolQuery", a.EffectiveRoutedPoolQueryForBeads(compat.beads)},
+			} {
+				ids := workQueryRowIDs(t, runShellWithFakeBd(t, q.command, nil, bdScript))
+				if !reflect.DeepEqual(ids, []string{"wf-step"}) {
+					t.Errorf("%s() row ids = %v, want [wf-step]: the ready step queued behind 20 open graph.v2 workflow roots, and no root", q.name, ids)
+				}
+			}
+			demand := strings.TrimSpace(runShellWithFakeBd(t, a.EffectivePoolDemandQueryForBeads(compat.beads), nil, bdScript))
+			if demand != "1" {
+				t.Errorf("EffectivePoolDemandQuery() count = %q, want 1 (the step the work query surfaces)", demand)
+			}
+		})
+	}
+}
+
+// TestEffectiveWorkQueryMigrationTierSkipsGraphV2WorkflowRoots covers the
+// gc.run_target migration tier. Graph.v2 roots that predate root gc.routed_to
+// stamping are controller-owned too: the tier must not surface them, and 20 of
+// them must not hide a legacy workflow root without the graph.v2 contract
+// behind the tier's row cut.
+func TestEffectiveWorkQueryMigrationTierSkipsGraphV2WorkflowRoots(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available; the migration tier filters with jq")
+	}
+	const route = "hello-world/worker"
+	migration := append(graphV2RootRows("wf-old-root-", "gc.run_target", route, 20),
+		`{"id":"legacy-root","issue_type":"task","status":"open","created_at":"2026-10-01T09:00:00Z","metadata":{"gc.kind":"workflow","gc.run_target":"`+route+`"}}`)
+	bdScript := limitHonoringFakeBd(route, nil, migration)
+	a := Agent{Name: "worker", Dir: "hello-world"}
+	for _, q := range []struct{ name, command string }{
+		{"EffectiveWorkQuery", a.EffectiveWorkQuery()},
+		{"EffectiveRoutedPoolQuery", a.EffectiveRoutedPoolQuery()},
+	} {
+		ids := workQueryRowIDs(t, runShellWithFakeBd(t, q.command, nil, bdScript))
+		if !reflect.DeepEqual(ids, []string{"legacy-root"}) {
+			t.Errorf("%s() row ids = %v, want [legacy-root]: the legacy workflow root queued behind 20 run_target-only graph.v2 roots, and no graph.v2 root", q.name, ids)
+		}
+	}
+	if demand := strings.TrimSpace(runShellWithFakeBd(t, a.EffectivePoolDemandQuery(), nil, bdScript)); demand != "1" {
+		t.Errorf("EffectivePoolDemandQuery() count = %q, want 1 (the legacy workflow root)", demand)
+	}
+}
+
+// TestGraphV2WorkflowRootPredicateMatchesExactly pins the jq form of the
+// graph.v2 root predicate to exact metadata values. isGraphV2WorkflowRoot in
+// cmd/gc compares the same way: jq 1.7 has no trim builtin, and the shell and
+// Go read sides must classify every row alike or a row counted as demand could
+// be refused by the claim gate.
+func TestGraphV2WorkflowRootPredicateMatchesExactly(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available; count-form exercises a jq pipeline")
+	}
+	a := Agent{Name: "worker", Dir: "hello-world"}
+	out := runShellWithFakeBd(t, a.EffectivePoolDemandQuery(), nil, `#!/bin/sh
+set -eu
+case "$*" in
+  *"--metadata-field gc.routed_to=hello-world/worker"*)
+    printf '[{"id":"exact","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.routed_to":"hello-world/worker"}},{"id":"padded-kind","metadata":{"gc.kind":" workflow","gc.formula_contract":"graph.v2","gc.routed_to":"hello-world/worker"}},{"id":"padded-contract","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2 ","gc.routed_to":"hello-world/worker"}}]'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`)
+	if strings.TrimSpace(out) != "2" {
+		t.Fatalf("EffectivePoolDemandQuery() count = %q, want 2 (only the exact graph.v2 workflow root is dropped)", strings.TrimSpace(out))
+	}
+}
+
 func TestEffectivePoolDemandQueryTreatsEmptyReadyOutputAsZero(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("jq not available; count-form exercises a jq pipeline")
@@ -2724,9 +2922,10 @@ func TestDefaultPoolCheckUsesBdReady(t *testing.T) {
 // "is there work on this routed queue?" predicate from the same
 // bdReadyPoolDemandShell helper. Adding a tier to one without updating
 // the other re-introduces the spawn-storm bug — this test ensures both
-// reference the same predicate helpers for the canonical routing key and the
-// temporary migration fallback. The worker first-row path bounds its migration
-// scan, while the reconciler count path keeps the unbounded count form.
+// reference the same predicate helpers for the canonical routing key, the
+// temporary migration fallback and the graph.v2 workflow-root exclusion. Both
+// paths read bd without a row limit; only the worker path then cuts its rows,
+// in jq, after the graph.v2 workflow roots are dropped (ga-8v11).
 func TestPoolDemandPredicateSharedWithWorkQuery(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -2752,11 +2951,11 @@ func TestPoolDemandPredicateSharedWithWorkQuery(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			wq := tt.agent.EffectiveWorkQuery()
 			demand := tt.agent.EffectivePoolDemandQuery()
-			workPredicate := bdReadyPoolDemandShell("--sort oldest --limit=20", false)
+			workPredicate := bdReadyPoolDemandShell("--sort oldest --limit 0", false)
 			if !strings.Contains(wq, workPredicate) {
 				t.Errorf("EffectiveWorkQuery() missing shared predicate %q in %q", workPredicate, wq)
 			}
-			migrationWorkPredicate := bdReadyPoolDemandMigrationShell("--limit=20", false)
+			migrationWorkPredicate := bdReadyPoolDemandMigrationShell(false)
 			if !strings.Contains(wq, migrationWorkPredicate) {
 				t.Errorf("EffectiveWorkQuery() missing shared migration predicate %q in %q", migrationWorkPredicate, wq)
 			}
@@ -2765,11 +2964,19 @@ func TestPoolDemandPredicateSharedWithWorkQuery(t *testing.T) {
 					t.Errorf("EffectiveWorkQuery() missing migration filter fragment %q in %q", want, wq)
 				}
 			}
+			rootPredicate := graphV2WorkflowRootJQ()
+			window := `[.[] | select(` + rootPredicate + ` | not)] | .[:20]`
+			if !strings.Contains(wq, window) {
+				t.Errorf("EffectiveWorkQuery() missing routed window %q (graph.v2 workflow roots dropped before the row cut) in %q", window, wq)
+			}
+			if !strings.Contains(demand, rootPredicate) {
+				t.Errorf("EffectivePoolDemandQuery() missing shared graph.v2 workflow-root predicate %q in %q", rootPredicate, demand)
+			}
 			countPredicate := bdReadyPoolDemandShell("--limit 0", false)
 			if !strings.Contains(demand, countPredicate) {
 				t.Errorf("EffectivePoolDemandQuery() missing shared predicate %q in %q", countPredicate, demand)
 			}
-			migrationCountPredicate := bdReadyPoolDemandMigrationShell("--limit 0", false)
+			migrationCountPredicate := bdReadyPoolDemandMigrationShell(false)
 			if !strings.Contains(demand, migrationCountPredicate) {
 				t.Errorf("EffectivePoolDemandQuery() missing shared migration predicate %q in %q", migrationCountPredicate, demand)
 			}

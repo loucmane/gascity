@@ -159,13 +159,16 @@ resolution and predicates: `bdReadyPoolDemandShell(limitFlag)` reads the
 canonical `gc.routed_to=<target>` route with `--include-ephemeral`, and
 the temporary migration predicate reads `gc.run_target=<target>` only on
 `gc.kind=workflow` roots that predate root `gc.routed_to` stamping. The
-work-query form appends `--sort oldest --limit=1` to the canonical probe
-and prints the first match, then filters the migration probe to roots with
-empty `gc.routed_to`. That is an intentional routed-queue policy:
+work-query form reads the canonical probe oldest first with no bd row limit
+(`--sort oldest --limit 0`), drops graph.v2 workflow roots in `jq`, and
+prints the first 20 remaining rows; it filters the migration probe the same
+way, and to roots with empty `gc.routed_to`, before printing the first
+match. That is an intentional routed-queue policy:
 unassigned routed pool work is FIFO before priority, so newer
 high-priority work does not jump ahead of older ready work already queued
 for the same target. The count form unions canonical and migration
-probes and deduplicates by bead ID before piping through `jq 'length'`.
+probes, deduplicates by bead ID and drops graph.v2 workflow roots before
+printing the length.
 Targets resolve to `Agent.PoolName` when set and
 `Agent.QualifiedName()` otherwise, so pool instances and pool templates
 land on the same routed queue.
@@ -177,11 +180,26 @@ ready work with `assignee=<named-session-identity>` and no generic route
 metadata, so the reconciler does not also treat the handoff as generic pool
 demand.
 
+A graph.v2 workflow root (`gc.kind=workflow` with
+`gc.formula_contract=graph.v2`, both matched exactly) is never pool demand.
+The root is controller-owned (its `workflow-finalize` control closes it), but
+it carries its pool's `gc.routed_to` and reaches the finalizer through a
+non-blocking `tracks` edge, so an open root (an order-dispatched root is never
+promoted to `in_progress`) is ready while its workflow runs. Both shell forms
+drop such roots with the shared `jq` predicate: the work query before its
+20-row cut, because an open root is older than its own steps and roots that
+filled the window would hide the ready steps behind them, and the count form
+before counting. The controller's in-process demand reader and the worker's
+claim gate (`hookCandidateClaimable`) apply the same predicate in Go, so every
+side agrees that only the root's steps are pool work. Legacy workflow roots
+without the graph.v2 contract keep their routed and `gc.run_target` claim.
+
 The shared predicate is the agreement substrate. Both failure envelopes keep
 the authoritative canonical read observable: the worker path exits non-zero
-with the `bd ready` diagnostic so `gc hook --claim` emits a work-query failure
-instead of draining as healthy `no_work`; the count form propagates the failure
-to `evaluatePool`, which records telemetry and falls back to the pool minimum.
+with the `bd ready` (or window-filter `jq`) diagnostic so `gc hook --claim`
+emits a work-query failure instead of draining as healthy `no_work`; the count
+form propagates the failure to `evaluatePool`, which records telemetry and
+falls back to the pool minimum.
 Only a successful empty canonical read may become `[]`. The worker's temporary
 legacy migration probes remain best-effort after that successful read.
 
@@ -261,8 +279,9 @@ regressions.
     `bdReadyPoolDemandShell` helper in `internal/config/config.go`. The
     worker and reconciler must also share the temporary migration predicate
     for `gc.run_target=<target>` on `gc.kind=workflow` roots with empty
-    `gc.routed_to`; only the worker's first-row form adds native
-    `bd ready --sort oldest --limit=1` selection to the canonical probe.
+    `gc.routed_to`, and the graph.v2 workflow-root exclusion; only the
+    worker's first-row form adds `bd ready --sort oldest` ordering and cuts
+    its rows in `jq` after that exclusion.
     Any pool-demand predicate change to one (added filter, modified target
     resolution, new state) MUST be reflected in the other. Diverging the two
     re-introduces the protocol-mismatch class — the reconciler
@@ -374,8 +393,9 @@ name = "coder"
 pool = { min = 1, max = 3, check = "echo 2" }
 # Default sling_query: bd update {} --set-metadata gc.routed_to=coder
 # Default work_query: bd ready --include-ephemeral --metadata-field gc.routed_to=coder
-#   --unassigned --exclude-type=epic --json --sort oldest --limit=1,
-#   then a temporary gc.run_target workflow-root migration fallback
+#   --unassigned --exclude-type=epic --json --sort oldest --limit 0, minus
+#   graph.v2 workflow roots, first 20 rows; then a temporary gc.run_target
+#   workflow-root migration fallback
 ```
 
 System formulas are embedded in the `gc` binary and materialized to

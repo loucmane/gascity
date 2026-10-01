@@ -720,6 +720,275 @@ func TestDoHookClaimClaimsLegacyRunTargetWorkflowRoot(t *testing.T) {
 	}
 }
 
+// TestHookCandidateClaimableSkipsGraphV2WorkflowRoot pins the claim side of the
+// graph.v2 root guard (ga-8v11). The root reaches workflow-finalize through a
+// non-blocking tracks edge, so an order-dispatched root stays open, ready and
+// routed to its pool while the workflow runs. The root is controller-owned, so
+// no routing key makes it claimable; legacy workflow roots without the graph.v2
+// contract and ordinary routed work stay claimable. The predicate matches the
+// metadata exactly, like the shell work query and count form
+// (graphV2WorkflowRootJQ), so padded values are ordinary routed work on both
+// read sides.
+func TestHookCandidateClaimableSkipsGraphV2WorkflowRoot(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata map[string]string
+		want     bool
+	}{
+		{
+			name:     "routed graph.v2 workflow root",
+			metadata: map[string]string{"gc.kind": "workflow", "gc.formula_contract": "graph.v2", "gc.routed_to": "worker"},
+			want:     false,
+		},
+		{
+			name:     "run_target-only graph.v2 workflow root",
+			metadata: map[string]string{"gc.kind": "workflow", "gc.formula_contract": "graph.v2", "gc.run_target": "worker"},
+			want:     false,
+		},
+		{
+			name:     "legacy run_target workflow root",
+			metadata: map[string]string{"gc.kind": "workflow", "gc.run_target": "worker"},
+			want:     true,
+		},
+		{
+			name:     "legacy routed workflow root",
+			metadata: map[string]string{"gc.kind": "workflow", "gc.routed_to": "worker"},
+			want:     true,
+		},
+		{
+			name:     "routed graph.v2 step",
+			metadata: map[string]string{"gc.routed_to": "worker", "gc.root_bead_id": "wf-root"},
+			want:     true,
+		},
+		{
+			name:     "ordinary routed task",
+			metadata: map[string]string{"gc.routed_to": "worker"},
+			want:     true,
+		},
+		{
+			name:     "padded kind is not the exact graph.v2 root shape",
+			metadata: map[string]string{"gc.kind": " workflow", "gc.formula_contract": "graph.v2", "gc.routed_to": "worker"},
+			want:     true,
+		},
+		{
+			name:     "padded contract is not the exact graph.v2 root shape",
+			metadata: map[string]string{"gc.kind": "workflow", "gc.formula_contract": "graph.v2 ", "gc.routed_to": "worker"},
+			want:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate := beads.Bead{ID: "hw-1", Status: "open", Metadata: tt.metadata}
+			if got := hookCandidateClaimable(candidate, []string{"worker"}); got != tt.want {
+				t.Fatalf("hookCandidateClaimable(%v) = %v, want %v", tt.metadata, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDoHookClaimSkipsGraphV2WorkflowRoot drives the claim loop with the
+// oldest-first routed queue a pool worker sees for a running order workflow:
+// the open graph.v2 root sorts ahead of its ready step. The worker must claim
+// the step without attempting the root, and a queue holding only the root must
+// drain as no_work.
+func TestDoHookClaimSkipsGraphV2WorkflowRoot(t *testing.T) {
+	const (
+		root = `{"id":"wf-root","status":"open","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.routed_to":"worker"}}`
+		step = `{"id":"wf-step","status":"open","metadata":{"gc.routed_to":"worker","gc.root_bead_id":"wf-root"}}`
+	)
+	tests := []struct {
+		name       string
+		queue      string
+		wantAction string
+		wantBead   string
+	}{
+		{name: "root ahead of its step", queue: "[" + root + "," + step + "]", wantAction: "work", wantBead: "wf-step"},
+		{name: "root only", queue: "[" + root + "]", wantAction: "drain"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var attempts []string
+			ops := hookClaimOps{
+				Runner: func(string, string) (string, error) { return tt.queue, nil },
+				Claim: func(_ context.Context, _ string, _ []string, beadID, assignee string) (beads.Bead, bool, error) {
+					attempts = append(attempts, beadID)
+					return beads.Bead{ID: beadID, Status: "in_progress", Assignee: assignee, Metadata: map[string]string{"gc.routed_to": "worker"}}, true, nil
+				},
+				ListContinuation: func(context.Context, string, []string, string, string) ([]beads.Bead, error) {
+					return nil, nil
+				},
+				DrainAck:          func(io.Writer) error { return nil },
+				ResolveWorkBranch: func(string) string { return "" },
+			}
+			opts := hookClaimOptions{
+				Assignee:           "worker-1",
+				IdentityCandidates: []string{"worker-1"},
+				RouteTargets:       []string{"worker"},
+				DrainAck:           true,
+				JSON:               true,
+			}
+
+			var stdout, stderr bytes.Buffer
+			if code := doHookClaim("bd ready --json", "/tmp/work", opts, ops, &stdout, &stderr); code != 0 {
+				t.Fatalf("doHookClaim = %d, want 0; stderr=%s", code, stderr.String())
+			}
+			for _, id := range attempts {
+				if id == "wf-root" {
+					t.Fatalf("claim attempts = %v, must never include the graph.v2 workflow root", attempts)
+				}
+			}
+			var result hookClaimJSONResult
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+				t.Fatalf("stdout is not JSON: %v\nraw: %s", err, stdout.String())
+			}
+			if result.Action != tt.wantAction || result.BeadID != tt.wantBead {
+				t.Fatalf("claim result = %+v, want action %q bead %q", result, tt.wantAction, tt.wantBead)
+			}
+			if tt.wantAction == "drain" && result.Reason != "no_work" {
+				t.Fatalf("drain reason = %q, want no_work", result.Reason)
+			}
+		})
+	}
+}
+
+// writeGraphV2RootQueueFakeBd writes a fake bd whose oldest-first routed queue
+// for route holds 20 open graph.v2 workflow roots ahead of one ready step, the
+// shape a pool sees while many order workflows run. Like real bd it honors
+// --limit=N and --limit N (0 keeps every row), so a query that cuts its rows in
+// bd sees only the roots. It returns the directory that holds the fake.
+func writeGraphV2RootQueueFakeBd(t *testing.T, route string) string {
+	t.Helper()
+	var rows strings.Builder
+	for i := 1; i <= 20; i++ {
+		fmt.Fprintf(&rows, "    emit_row '{\"id\":\"wf-root-%02d\",\"issue_type\":\"task\",\"status\":\"open\",\"metadata\":{\"gc.kind\":\"workflow\",\"gc.formula_contract\":\"graph.v2\",\"gc.routed_to\":\"%s\"}}'\n", i, route)
+	}
+	fmt.Fprintf(&rows, "    emit_row '{\"id\":\"wf-step\",\"issue_type\":\"task\",\"status\":\"open\",\"metadata\":{\"gc.routed_to\":\"%s\",\"gc.root_bead_id\":\"wf-root-01\"}}'\n", route)
+	script := `#!/bin/sh
+set -eu
+limit=0
+prev=""
+for arg in "$@"; do
+  case "$arg" in
+    --limit=*) limit=${arg#--limit=} ;;
+  esac
+  if [ "$prev" = "--limit" ]; then
+    limit=$arg
+  fi
+  prev=$arg
+done
+count=0
+emit_row() {
+  if [ "$limit" -gt 0 ] && [ "$count" -ge "$limit" ]; then
+    return 0
+  fi
+  if [ "$count" -gt 0 ]; then
+    printf ','
+  fi
+  printf '%s' "$1"
+  count=$((count + 1))
+}
+case "$*" in
+  ready*"--metadata-field gc.routed_to=` + route + `"*)
+    printf '['
+` + rows.String() + `    printf ']'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+	return dir
+}
+
+// TestClaimHookWorkGeneratedQueryClaimsStepBehindGraphV2Roots is the ga-8v11
+// row-cut regression on the real generated work query and shell runner. When
+// the routed tier cut its rows in bd, 20 open graph.v2 roots filled the claim
+// window ahead of their ready step; the claim gate rejected every root, so the
+// worker drained no_work while pool demand still counted the step and the
+// reconciler kept spawning sessions for it.
+func TestClaimHookWorkGeneratedQueryClaimsStepBehindGraphV2Roots(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available; the routed tier filters graph.v2 workflow roots with jq")
+	}
+	fakeBin := writeGraphV2RootQueueFakeBd(t, "worker")
+	query := (&config.Agent{Name: "worker"}).EffectiveWorkQuery()
+	store := hookStore{
+		dir: fakeBin,
+		env: []string{"PATH=" + fakeBin + string(os.PathListSeparator) + os.Getenv("PATH")},
+	}
+	var attempts []string
+	ops := hookClaimOps{
+		Claim: func(_ context.Context, _ string, _ []string, beadID, assignee string) (beads.Bead, bool, error) {
+			attempts = append(attempts, beadID)
+			return beads.Bead{ID: beadID, Status: "in_progress", Assignee: assignee, Metadata: map[string]string{"gc.routed_to": "worker"}}, true, nil
+		},
+		ListContinuation: func(context.Context, string, []string, string, string) ([]beads.Bead, error) {
+			return nil, nil
+		},
+		DrainAck:          func(io.Writer) error { return nil },
+		ResolveWorkBranch: func(string) string { return "" },
+	}
+	opts := hookClaimOptions{
+		Assignee:           "worker-1",
+		IdentityCandidates: []string{"worker-1"},
+		RouteTargets:       []string{"worker"},
+		DrainAck:           true,
+		JSON:               true,
+	}
+	emitted := false
+	var stdout, stderr bytes.Buffer
+	code := claimHookWorkWithRunner(query, fakeBin, store.env, []hookStore{store}, opts, ops, shellWorkQueryWithEnv,
+		func(string, error) { emitted = true }, &stdout, &stderr)
+
+	if code != 0 || emitted {
+		t.Fatalf("claimHookWorkWithRunner = %d (failure emitted %v), want 0; stderr=%s", code, emitted, stderr.String())
+	}
+	var result hookClaimJSONResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not JSON: %v\nraw: %s", err, stdout.String())
+	}
+	if result.Action != "work" || result.BeadID != "wf-step" {
+		t.Fatalf("claim result = %+v, want work on wf-step (claim attempts %v)", result, attempts)
+	}
+	if len(attempts) != 1 || attempts[0] != "wf-step" {
+		t.Fatalf("claim attempts = %v, want only wf-step", attempts)
+	}
+}
+
+// TestDoHookGeneratedQueryDoesNotSurfaceGraphV2Roots pins plain gc hook, whose
+// output gc agent-script and the Copilot overlay claim from, to the same rule:
+// graph.v2 workflow roots are not work, and the step queued behind 20 of them is
+// what the hook prints.
+func TestDoHookGeneratedQueryDoesNotSurfaceGraphV2Roots(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available; the routed tier filters graph.v2 workflow roots with jq")
+	}
+	fakeBin := writeGraphV2RootQueueFakeBd(t, "worker")
+	query := (&config.Agent{Name: "worker"}).EffectiveWorkQuery()
+	env := []string{"PATH=" + fakeBin + string(os.PathListSeparator) + os.Getenv("PATH")}
+	runner := func(command, dir string) (string, error) { return shellWorkQueryWithEnv(command, dir, env) }
+
+	var stdout, stderr bytes.Buffer
+	code := doHook(query, fakeBin, false, runner, &stdout, &stderr)
+	var rows []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
+		t.Fatalf("gc hook stdout is not a JSON array: %v (code %d, stdout %q, stderr %s)", err, code, stdout.String(), stderr.String())
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	if code != 0 || len(ids) != 1 || ids[0] != "wf-step" {
+		t.Fatalf("gc hook = %d with row ids %v, want 0 with [wf-step]: the step queued behind 20 open graph.v2 workflow roots, and no root; stderr=%s", code, ids, stderr.String())
+	}
+}
+
 func TestDoHookClaimRejectsNonJSONWorkQueryOutput(t *testing.T) {
 	runner := func(string, string) (string, error) { return "hw-1  open  Fix the bug\n", nil }
 	ops := hookClaimOps{Runner: runner}
@@ -1625,12 +1894,13 @@ esac
 	}
 }
 
-// TestCmdHookClaimsRoutedToRoot is the #2763 end-to-end regression (writer-side
-// fix; ga-eld2x): a graph.v2 workflow root routed to a pool stamps gc.routed_to
-// — the sole persisted routing key — and `gc hook <pool>` must surface it via
-// the worker claim query. Before the writer fix the root stamped only
-// gc.run_target, which the claim query does not read, so the routed root was
-// never claimed and the spawned worker idle-reaped with the work orphaned.
+// TestCmdHookClaimsRoutedToRoot is the #2763 end-to-end regression for the
+// routing key (writer-side fix; ga-eld2x): `gc hook <pool>` surfaces routed work
+// through gc.routed_to, the sole persisted routing key, because the claim query
+// does not read gc.run_target. The fixture row carries no workflow metadata. A
+// graph.v2 workflow root (gc.kind=workflow, gc.formula_contract=graph.v2) is
+// controller-owned and the routed tier drops it instead (ga-8v11, see
+// TestDoHookGeneratedQueryDoesNotSurfaceGraphV2Roots).
 func TestCmdHookClaimsRoutedToRoot(t *testing.T) {
 	disableManagedDoltRecoveryForTest(t)
 	clearInheritedCityRoutingEnv(t)

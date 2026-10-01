@@ -50,7 +50,8 @@ func TestHerdrDependencyIsOnlyCIExecutionDelta(t *testing.T) {
 		t.Fatal(err)
 	}
 	integration["steps"] = append(append([]any(nil), steps[:found]...), steps[found+1:]...)
-	const priorExecution = "436f26c0dd69e133aacbea94cecf51dfc0b89c553515e82a6d5b9955fbeca11c"
+	// Prior projection re-pinned for the reviewed BD_VERSION v1.2.2 -> v1.3.0 env delta.
+	const priorExecution = "f79914b93a5215e70421fa2aa7b1dadc73cf823dabf0a7779653528cd181f23a"
 	if err := assertWorkflowExecution("CI without only the Herdr step", docs.ci, priorExecution); err != nil {
 		t.Fatal(err)
 	}

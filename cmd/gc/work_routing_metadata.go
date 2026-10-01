@@ -7,6 +7,19 @@ import (
 	"github.com/gastownhall/gascity/internal/beads"
 )
 
+// isGraphV2WorkflowRoot reports whether b is a graph.v2 workflow root. The root
+// is controller-owned (its workflow-finalize control closes it), yet it carries
+// its pool's gc.routed_to and, behind its non-blocking tracks edge to the
+// finalizer, stays Ready() while the workflow runs. Claim and pool-demand
+// readers skip it; legacy workflow roots without the graph.v2 contract are
+// unaffected. The metadata is compared exactly, without trimming, like the jq
+// form the shell work query and count form use (graphV2WorkflowRootJQ in
+// internal/config), so every read side classifies a row the same way.
+func isGraphV2WorkflowRoot(b beads.Bead) bool {
+	return b.Metadata[beadmeta.KindMetadataKey] == beadmeta.KindWorkflow &&
+		b.Metadata[beadmeta.FormulaContractMetadataKey] == beadmeta.FormulaContractGraphV2
+}
+
 func legacyWorkflowRunTarget(b beads.Bead) string {
 	if strings.TrimSpace(b.Metadata[beadmeta.KindMetadataKey]) != beadmeta.KindWorkflow {
 		return ""

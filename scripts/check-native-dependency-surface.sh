@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# gRPC 1.83.2 requires exactly three additional module paths. Reviewed graph,
+# Beads v1.3.0's reviewed transitive graph contains 737 modules. Reviewed graph,
 # attribution and retained limits: engdocs/native-dependency-budget.md.
-max_modules="${GC_NATIVE_DEP_MAX_MODULES:-730}"
+max_modules="${GC_NATIVE_DEP_MAX_MODULES:-737}"
 max_binary_bytes="${GC_NATIVE_DEP_MAX_BINARY_BYTES:-270000000}"
 max_aws_modules="${GC_NATIVE_DEP_MAX_AWS_MODULES:-25}"
 max_azure_modules="${GC_NATIVE_DEP_MAX_AZURE_MODULES:-9}"
