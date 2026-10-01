@@ -282,11 +282,14 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 }
 
 // hookCandidateClaimable reports whether a work-query candidate is eligible for a
-// fresh claim: it has an id, is currently unassigned, and matches one of this
-// session's route targets.
+// fresh claim: it has an id, is currently unassigned, is not a controller-owned
+// graph.v2 workflow root (isGraphV2WorkflowRoot), and matches one of this
+// session's route targets. Legacy workflow roots without the graph.v2 contract
+// keep their gc.run_target claim in hookClaimMatchesRoute.
 func hookCandidateClaimable(candidate beads.Bead, routeTargets []string) bool {
 	return strings.TrimSpace(candidate.ID) != "" &&
 		strings.TrimSpace(candidate.Assignee) == "" &&
+		!isGraphV2WorkflowRoot(candidate) &&
 		hookClaimMatchesRoute(candidate, routeTargets)
 }
 

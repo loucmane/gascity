@@ -720,6 +720,124 @@ func TestDoHookClaimClaimsLegacyRunTargetWorkflowRoot(t *testing.T) {
 	}
 }
 
+// TestHookCandidateClaimableSkipsGraphV2WorkflowRoot pins the claim side of the
+// graph.v2 root guard (ga-8v11). The root reaches workflow-finalize through a
+// non-blocking tracks edge, so an order-dispatched root stays open, ready and
+// routed to its pool while the workflow runs. The root is controller-owned, so
+// no routing key makes it claimable; legacy workflow roots without the graph.v2
+// contract and ordinary routed work stay claimable.
+func TestHookCandidateClaimableSkipsGraphV2WorkflowRoot(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata map[string]string
+		want     bool
+	}{
+		{
+			name:     "routed graph.v2 workflow root",
+			metadata: map[string]string{"gc.kind": "workflow", "gc.formula_contract": "graph.v2", "gc.routed_to": "worker"},
+			want:     false,
+		},
+		{
+			name:     "run_target-only graph.v2 workflow root",
+			metadata: map[string]string{"gc.kind": "workflow", "gc.formula_contract": "graph.v2", "gc.run_target": "worker"},
+			want:     false,
+		},
+		{
+			name:     "legacy run_target workflow root",
+			metadata: map[string]string{"gc.kind": "workflow", "gc.run_target": "worker"},
+			want:     true,
+		},
+		{
+			name:     "legacy routed workflow root",
+			metadata: map[string]string{"gc.kind": "workflow", "gc.routed_to": "worker"},
+			want:     true,
+		},
+		{
+			name:     "routed graph.v2 step",
+			metadata: map[string]string{"gc.routed_to": "worker", "gc.root_bead_id": "wf-root"},
+			want:     true,
+		},
+		{
+			name:     "ordinary routed task",
+			metadata: map[string]string{"gc.routed_to": "worker"},
+			want:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate := beads.Bead{ID: "hw-1", Status: "open", Metadata: tt.metadata}
+			if got := hookCandidateClaimable(candidate, []string{"worker"}); got != tt.want {
+				t.Fatalf("hookCandidateClaimable(%v) = %v, want %v", tt.metadata, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDoHookClaimSkipsGraphV2WorkflowRoot drives the claim loop with the
+// oldest-first routed queue a pool worker sees for a running order workflow:
+// the open graph.v2 root sorts ahead of its ready step. The worker must claim
+// the step without attempting the root, and a queue holding only the root must
+// drain as no_work.
+func TestDoHookClaimSkipsGraphV2WorkflowRoot(t *testing.T) {
+	const (
+		root = `{"id":"wf-root","status":"open","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.routed_to":"worker"}}`
+		step = `{"id":"wf-step","status":"open","metadata":{"gc.routed_to":"worker","gc.root_bead_id":"wf-root"}}`
+	)
+	tests := []struct {
+		name       string
+		queue      string
+		wantAction string
+		wantBead   string
+	}{
+		{name: "root ahead of its step", queue: "[" + root + "," + step + "]", wantAction: "work", wantBead: "wf-step"},
+		{name: "root only", queue: "[" + root + "]", wantAction: "drain"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var attempts []string
+			ops := hookClaimOps{
+				Runner: func(string, string) (string, error) { return tt.queue, nil },
+				Claim: func(_ context.Context, _ string, _ []string, beadID, assignee string) (beads.Bead, bool, error) {
+					attempts = append(attempts, beadID)
+					return beads.Bead{ID: beadID, Status: "in_progress", Assignee: assignee, Metadata: map[string]string{"gc.routed_to": "worker"}}, true, nil
+				},
+				ListContinuation: func(context.Context, string, []string, string, string) ([]beads.Bead, error) {
+					return nil, nil
+				},
+				DrainAck:          func(io.Writer) error { return nil },
+				ResolveWorkBranch: func(string) string { return "" },
+			}
+			opts := hookClaimOptions{
+				Assignee:           "worker-1",
+				IdentityCandidates: []string{"worker-1"},
+				RouteTargets:       []string{"worker"},
+				DrainAck:           true,
+				JSON:               true,
+			}
+
+			var stdout, stderr bytes.Buffer
+			if code := doHookClaim("bd ready --json", "/tmp/work", opts, ops, &stdout, &stderr); code != 0 {
+				t.Fatalf("doHookClaim = %d, want 0; stderr=%s", code, stderr.String())
+			}
+			for _, id := range attempts {
+				if id == "wf-root" {
+					t.Fatalf("claim attempts = %v, must never include the graph.v2 workflow root", attempts)
+				}
+			}
+			var result hookClaimJSONResult
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+				t.Fatalf("stdout is not JSON: %v\nraw: %s", err, stdout.String())
+			}
+			if result.Action != tt.wantAction || result.BeadID != tt.wantBead {
+				t.Fatalf("claim result = %+v, want action %q bead %q", result, tt.wantAction, tt.wantBead)
+			}
+			if tt.wantAction == "drain" && result.Reason != "no_work" {
+				t.Fatalf("drain reason = %q, want no_work", result.Reason)
+			}
+		})
+	}
+}
+
 func TestDoHookClaimRejectsNonJSONWorkQueryOutput(t *testing.T) {
 	runner := func(string, string) (string, error) { return "hw-1  open  Fix the bug\n", nil }
 	ops := hookClaimOps{Runner: runner}

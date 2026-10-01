@@ -2669,6 +2669,36 @@ esac
 	}
 }
 
+// TestEffectivePoolDemandQueryIgnoresGraphV2WorkflowRoots pins the count-form
+// side of the graph.v2 root guard (ga-8v11): an open graph.v2 root is ready and
+// routed to its pool while the workflow runs (its finalize edge is a
+// non-blocking tracks edge), but it is controller-owned under either routing
+// key. Only the routed step and the legacy workflow root count as demand,
+// matching the worker claim gate in cmd/gc.
+func TestEffectivePoolDemandQueryIgnoresGraphV2WorkflowRoots(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available; count-form exercises a jq pipeline")
+	}
+	a := Agent{Name: "worker", Dir: "hello-world"}
+	out := runShellWithFakeBd(t, a.EffectivePoolDemandQuery(), nil, `#!/bin/sh
+set -eu
+case "$*" in
+  *"--metadata-field gc.routed_to=hello-world/worker"*)
+    printf '[{"id":"wf-root","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.routed_to":"hello-world/worker"}},{"id":"wf-step","metadata":{"gc.routed_to":"hello-world/worker","gc.root_bead_id":"wf-root"}}]'
+    ;;
+  *"--metadata-field gc.run_target=hello-world/worker"*"--metadata-field gc.kind=workflow"*)
+    printf '[{"id":"wf-old-root","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.run_target":"hello-world/worker"}},{"id":"legacy-root","metadata":{"gc.kind":"workflow","gc.run_target":"hello-world/worker"}}]'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`)
+	if strings.TrimSpace(out) != "2" {
+		t.Fatalf("EffectivePoolDemandQuery() count = %q, want 2 (routed step + legacy workflow root; graph.v2 workflow roots are controller-owned)", strings.TrimSpace(out))
+	}
+}
+
 func TestEffectivePoolDemandQueryTreatsEmptyReadyOutputAsZero(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("jq not available; count-form exercises a jq pipeline")

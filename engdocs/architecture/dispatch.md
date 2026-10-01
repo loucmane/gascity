@@ -177,6 +177,18 @@ ready work with `assignee=<named-session-identity>` and no generic route
 metadata, so the reconciler does not also treat the handoff as generic pool
 demand.
 
+A graph.v2 workflow root (`gc.kind=workflow` with
+`gc.formula_contract=graph.v2`) is never pool demand. The root is
+controller-owned (its `workflow-finalize` control closes it), but it carries
+its pool's `gc.routed_to` and reaches the finalizer through a non-blocking
+`tracks` edge, so an open root (an order-dispatched root is never promoted to
+`in_progress`) is ready while its workflow runs. The count form and the
+controller's in-process demand reader drop such roots before counting. The
+work query still lists them, and the worker's claim gate
+(`hookCandidateClaimable`) skips them, so both sides agree that only the
+root's steps are pool work. Legacy workflow roots without the graph.v2
+contract keep their routed and `gc.run_target` claim.
+
 The shared predicate is the agreement substrate. Both failure envelopes keep
 the authoritative canonical read observable: the worker path exits non-zero
 with the `bd ready` diagnostic so `gc hook --claim` emits a work-query failure

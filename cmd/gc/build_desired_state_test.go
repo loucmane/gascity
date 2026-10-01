@@ -1335,6 +1335,84 @@ func TestDefaultScaleCheckCountsCountsRunTargetOnlyWorkflowDuringMigration(t *te
 	}
 }
 
+// TestDefaultScaleCheckCountsIgnoresGraphV2WorkflowRoots pins the in-process
+// demand side of the graph.v2 root guard (ga-8v11). A graph.v2 root reaches its
+// workflow-finalize through a non-blocking tracks edge, so while the workflow
+// runs an order-dispatched root is open, Ready() and routed to the pool. The
+// root is controller-owned under either routing key, so only its routed step
+// is pool demand.
+func TestDefaultScaleCheckCountsIgnoresGraphV2WorkflowRoots(t *testing.T) {
+	const template = "gascity/reviewer"
+	backing := beads.NewMemStore()
+	root, err := backing.Create(beads.Bead{
+		Title:  "graph.v2 workflow root",
+		Type:   "task",
+		Status: "open",
+		Metadata: map[string]string{
+			"gc.kind":             "workflow",
+			"gc.formula_contract": "graph.v2",
+			"gc.routed_to":        template,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create graph.v2 workflow root: %v", err)
+	}
+	finalize, err := backing.Create(beads.Bead{
+		Title:  "Finalize workflow",
+		Type:   "task",
+		Status: "open",
+		Metadata: map[string]string{
+			"gc.kind":         "workflow-finalize",
+			"gc.root_bead_id": root.ID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create workflow-finalize: %v", err)
+	}
+	if err := backing.DepAdd(root.ID, finalize.ID, "tracks"); err != nil {
+		t.Fatalf("root tracks finalize: %v", err)
+	}
+	if _, err := backing.Create(beads.Bead{
+		Title:  "pre-ga-eld2x graph.v2 workflow root",
+		Type:   "task",
+		Status: "open",
+		Metadata: map[string]string{
+			"gc.kind":             "workflow",
+			"gc.formula_contract": "graph.v2",
+			"gc.run_target":       template,
+		},
+	}); err != nil {
+		t.Fatalf("create run_target-only graph.v2 workflow root: %v", err)
+	}
+	if _, err := backing.Create(beads.Bead{
+		Title:  "routed graph.v2 step",
+		Type:   "task",
+		Status: "open",
+		Metadata: map[string]string{
+			"gc.routed_to":    template,
+			"gc.root_bead_id": root.ID,
+		},
+	}); err != nil {
+		t.Fatalf("create routed step: %v", err)
+	}
+	cache := beads.NewCachingStoreForTest(backing, nil)
+	if err := cache.PrimeActive(); err != nil {
+		t.Fatalf("PrimeActive: %v", err)
+	}
+
+	counts, _, errs := defaultScaleCheckCounts([]defaultScaleCheckTarget{{
+		template: template,
+		storeKey: "rig:gascity",
+		store:    cache,
+	}})
+	if len(errs) != 0 {
+		t.Fatalf("defaultScaleCheckCounts errs = %v", errs)
+	}
+	if got := counts[template]; got != 1 {
+		t.Fatalf("defaultScaleCheckCounts[%q] = %d, want 1 (the routed step; graph.v2 workflow roots are controller-owned)", template, got)
+	}
+}
+
 func TestDefaultScaleCheckCountsIgnoresRunTargetOnNonWorkflowDivergentWork(t *testing.T) {
 	const (
 		entryTarget = "gascity/controller"

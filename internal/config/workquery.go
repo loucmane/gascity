@@ -62,6 +62,21 @@ func poolDemandMigrationFilterJQ(limit int) string {
 	return shellquote.Join([]string{"jq", filter})
 }
 
+// graphV2WorkflowRootJQ is the jq form of the graph.v2 workflow-root predicate
+// (isGraphV2WorkflowRoot in cmd/gc). The root is controller-owned: it stays
+// ready and routed to its pool while the workflow runs, behind a non-blocking
+// tracks edge to its finalizer, but the worker claim gate never claims it.
+func graphV2WorkflowRootJQ() string {
+	return `(` + jqMeta(beadmeta.KindMetadataKey) + ` == "` + beadmeta.KindWorkflow + `" and ` +
+		jqMeta(beadmeta.FormulaContractMetadataKey) + ` == "` + beadmeta.FormulaContractGraphV2 + `")`
+}
+
+// poolDemandCountJQ unions the count-form probe arrays, dedups them by bead id,
+// drops graph.v2 workflow roots, and prints the demand count.
+func poolDemandCountJQ() string {
+	return shellquote.Join([]string{"jq", "-s", `(add // []) | unique_by(.id) | map(select(` + graphV2WorkflowRootJQ() + ` | not)) | length`})
+}
+
 func bdQueryEphemeralStatusShell(status string) string {
 	return `bd query --json ` + shellquote.Quote("ephemeral=true AND status="+status) + ` --limit=0`
 }
@@ -139,7 +154,9 @@ func routedReadyTierCommand(includeEphemeralReady bool) string {
 // ready, unassigned, routed demand and prints the array length. It shares the
 // canonical and migration predicates with poolDemandFirstRowFunctionScript so
 // the reconciler's spawn decision and the worker's claim decision read the
-// same demand shape.
+// same demand shape. Graph.v2 workflow roots are dropped before counting
+// because the worker claim gate skips them; counting one would spawn a session
+// for work no worker may claim.
 //
 // Unlike the work_query probe, this form must NOT redirect bd stderr or default
 // to zero: a failed `bd ready` has to surface as an error rather than
@@ -152,7 +169,7 @@ func poolDemandCountShell(target string, includeEphemeralReady bool) string {
 		`legacy_candidates=$(` + bdReadyPoolDemandMigrationShell("--limit 0", includeEphemeralReady) + `) || exit $?; ` +
 		`legacy_json=$(printf "%s" "$legacy_candidates" | ` + poolDemandMigrationFilterJQ(0) + `) || exit $?; ` +
 		`legacy_ephemeral_json=$(` + legacyEphemeralPoolDemandShell(0, includeEphemeralReady, false) + `); ` +
-		`printf "%s\n%s\n%s\n" "$ready_json" "$legacy_json" "$legacy_ephemeral_json" | jq -s "(add // []) | unique_by(.id) | length"`
+		`printf "%s\n%s\n%s\n" "$ready_json" "$legacy_json" "$legacy_ephemeral_json" | ` + poolDemandCountJQ()
 	return shellquote.Join([]string{"sh", "-c", script, "--", target})
 }
 

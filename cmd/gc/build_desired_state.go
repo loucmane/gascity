@@ -1670,6 +1670,12 @@ func defaultScaleCheckCountsAndDemand(cfg *config.City, targets []defaultScaleCh
 			if strings.TrimSpace(b.Assignee) != "" {
 				continue
 			}
+			// A graph.v2 workflow root is Ready() and routed to its pool while
+			// the workflow runs, but no worker may claim it
+			// (hookCandidateClaimable), so it is not pool demand.
+			if isGraphV2WorkflowRoot(b) {
+				continue
+			}
 			template := controllerDemandRouteTarget(cfg, b, group.templates)
 			if _, ok := group.templates[template]; !ok {
 				continue
