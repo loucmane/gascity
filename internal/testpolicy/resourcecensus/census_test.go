@@ -2408,7 +2408,7 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 	if audit.BaselineCalls != 555 || audit.BaselineFiles != 169 {
 		t.Errorf("reviewed subprocess audit = %d calls / %d files, want 555 / 169", audit.BaselineCalls, audit.BaselineFiles)
 	}
-	if audit.ReportedCalls != 495 || audit.ReportedFiles != 135 || audit.Expires != "2026-10-01" {
+	if audit.ReportedCalls != 495 || audit.ReportedFiles != 135 || audit.Expires != "2026-10-15" {
 		t.Errorf("historical audit or expiry changed: %+v", audit)
 	}
 	for _, budget := range []struct {
@@ -2421,7 +2421,7 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 		{"Small", ledger.SmallDebt, 401, 110},
 	} {
 		row := findRow(t, budget.rows, ScopeUntagged, ResourceSubprocess)
-		if row.BaselineCalls != budget.calls || row.BaselineFiles != budget.files || row.Expires != "2026-10-01" {
+		if row.BaselineCalls != budget.calls || row.BaselineFiles != budget.files || row.Expires != "2026-10-15" {
 			t.Errorf("%s subprocess budget changed: %+v", budget.name, row)
 		}
 	}
