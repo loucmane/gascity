@@ -3,12 +3,12 @@
 mcp-agent-mail @ https://github.com/Dicklesworthstone/mcp_agent_mail/archive/32783f6848bd63c425c4b5004cee3350016635fb.tar.gz
 
 # Security floor: GitPython < 3.1.58 has multiple HIGH-severity command
-# injection and path traversal advisories reported by the image gate.
-# Pinning the floor ensures the resolver picks the patched version even if
-# mcp-agent-mail's transitive constraint allows older. The 3.1.58 floor also
-# closes the 2026 option-forwarding and configuration-injection advisories.
-# Drop this line once upstream carries the same floor itself.
-gitpython>=3.1.58
+# injection and path traversal advisories reported by the image gate, and the
+# gate flags 3.1.59 as well. Pinning the floor ensures the resolver picks the
+# patched version even if mcp-agent-mail's transitive constraint allows older.
+# The floor also closes the 2026 option-forwarding and configuration-injection
+# advisories. Drop this line once upstream carries the same floor itself.
+gitpython>=3.1.60
 
 # Security floor: CVE-2026-69244 (HIGH, malformed-response denial of service)
 # in aiohttp < 3.14.3. Drop once transitive constraints carry the patched
@@ -23,9 +23,10 @@ pillow>=12.3.0
 # Security floor: urllib3 < 2.7.0 has GHSA-mf9v-mfxr-j63j (HIGH,
 # decompression-bomb safeguards bypassed in parts of the streaming API)
 # and GHSA-qccp-gfcp-xxvc (HIGH, sensitive headers forwarded across
-# origins in proxied low-level redirects). Pinning floor at 2.7.0 until
-# transitive constraints pull a patched version on their own.
-urllib3>=2.7.0
+# origins in proxied low-level redirects), and the image gate flags 2.7.0
+# as well. Pinning floor at 2.8.0 until transitive constraints pull a
+# patched version on their own.
+urllib3>=2.8.0
 
 # Security floor: idna < 3.15 has GHSA-65pc-fj4g-8rjx (MEDIUM, IDNA
 # bypass of the CVE-2024-3651 fix). Drop once transitive constraints
@@ -51,6 +52,11 @@ joserfc>=1.6.8
 # fastmcp-slim (mcp<2.0,>=1.24.0); floor at 1.28.1 to clear all three. Drop
 # once fastmcp-slim's transitive constraint carries the patched version itself.
 mcp>=1.28.1
+
+# Security floor: CVE-2026-63374 (CRITICAL) in anyio < 4.14.2. anyio arrives
+# transitively via httpx, mcp, openai, starlette and others. Drop once their
+# transitive constraints carry the patched version themselves.
+anyio>=4.14.2
 
 # Authlib and FastMCP security floors live in
 # .github/requirements/mcp-agent-mail.overrides.txt because mcp-agent-mail
