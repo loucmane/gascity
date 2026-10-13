@@ -84,7 +84,7 @@ func TestTeardownServerTreatsAlreadyGoneServerAsSuccess(t *testing.T) {
 }
 
 func TestCloseSessionArmsNativeExitEmptyAroundExactStop(t *testing.T) {
-	fe := &fakeExecutor{}
+	fe := &fakeExecutor{out: "42\t1"} // already-dead pane; no host process snapshot
 	p := NewProviderWithConfig(DefaultConfig())
 	p.tm.exec = fe
 

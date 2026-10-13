@@ -11,9 +11,10 @@ import (
 )
 
 // AttemptWorkStoreAccess resolves configured store identities, never paths from
-// task metadata. The owner closes any newly opened handle after use returns;
+// task metadata. id selects an authoritative class binding when the driving
+// task has moved off its logical city/rig ledger. The owner closes any newly opened handle after use returns;
 // borrowed controller handles remain owned by the controller.
-type AttemptWorkStoreAccess func(ref string, use func(beads.Store) error) error
+type AttemptWorkStoreAccess func(ref, id string, use func(beads.Store) error) error
 
 // WithAttemptWorkStoreAccess supplies the configured driving-task authority.
 func WithAttemptWorkStoreAccess(access AttemptWorkStoreAccess) ManagerOption {
@@ -54,7 +55,7 @@ func (m *Manager) startRuntime(ctx context.Context, id, name string, cfg runtime
 	}
 	switch {
 	case m.attemptWorkStore != nil:
-		err = m.attemptWorkStore(ref, use)
+		err = m.attemptWorkStore(ref, trigger, use)
 	case ref == "" || ref == "city":
 		err = use(m.store) // Legacy same-store task associations only.
 	default:

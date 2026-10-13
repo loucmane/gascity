@@ -19,22 +19,29 @@ ARG BASE_IMAGE=gc-agent-base:latest
 
 FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS bd-builder
 
-ARG BD_VERSION=v1.3.0
-ARG BD_SOURCE_REF=f45b249ce6b40ba62aecc03949e6371e8f7c79d8
-ARG BD_SOURCE_SHA256=51689f2a4d9f3437334d6e9f91e3b18c0793fb9cc8cf988ce511ef1f39b13214
-ARG BD_BUILD=f45b249ce
+# BD_VERSION here is the version the source at BD_SOURCE_REF declares, i.e.
+# deps.env BD_CURRENT_VERSION -- not deps.env BD_VERSION, which is the published
+# tarball CI installs and may lag. The `grep Version = "${bd_version}"` below
+# fails the build if this drifts from the fetched source.
+ARG BD_VERSION=v1.3.1
+ARG BD_SOURCE_REF=c1c4b642ac1c08d8c828007a1c2f96e47e43ef7c
+ARG BD_SOURCE_SHA256=1c836ff4c4e021d0774d3fd0f972bc2d7bf552a8355fbf10a368199c93df1cc8
+ARG BD_BUILD=c1c4b642ac1
 ARG BD_BRANCH=HEAD
 ARG GRPC_VERSION=1.83.2
+ARG THRIFT_VERSION=0.24.0
 ARG XCRYPTO_VERSION=0.55.0
 ARG XNET_VERSION=0.58.0
 ARG XTEXT_VERSION=0.41.0
-ARG THRIFT_VERSION=0.24.0
 
-# The pinned v1.3.0 source selects grpc-go 1.83.0 and Thrift 0.23.0, below the
-# patched versions forced here; its golang.org/x modules already match these
-# pins, which stay as verified floors. Rebuild the exact source with its
-# production CGO/pure-Go-regex configuration and release identity, forcing only
-# the patched dependency versions forward.
+# Rebuild the exact released source with its production CGO/pure-Go-regex
+# configuration and release identity. GRPC_VERSION and THRIFT_VERSION override
+# the source's own requirements with the current security floor. Keep each
+# `go get` and its trailing `go version -m` check: together they fail the
+# build if a future beads release regresses below these versions instead of
+# silently shipping it. Raise them with the upstream requirement -- never
+# leave either behind, or the `go get` downgrades the release while the check
+# still passes.
 RUN mkdir -p /src/bd /out \
     && curl -fsSL --retry 3 \
        "https://github.com/gastownhall/beads/archive/${BD_SOURCE_REF}.tar.gz" \

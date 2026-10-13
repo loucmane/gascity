@@ -93,7 +93,7 @@ func RetryFailedDrainItem(ctx context.Context, store beads.Store, controlID, mem
 		return result, retryDrainRefusal("drain item root %s already succeeded", oldRoot.ID)
 	}
 
-	oldWorkflow, err := listByWorkflowRoot(store, oldRoot.ID)
+	oldWorkflow, err := beads.DirectMembers(store, oldRoot.ID)
 	if err != nil {
 		return result, retryDrainRefusal("listing workflow %s: %v", oldRoot.ID, err)
 	}
@@ -161,6 +161,9 @@ func RetryFailedDrainItem(ctx context.Context, store beads.Store, controlID, mem
 	if err != nil {
 		return result, retryDrainRefusal("projecting blockers for member %s: %v", memberID, err)
 	}
+	if len(blockerIDs.Unprojectable) != 0 {
+		return result, retryDrainRefusal("member %s has unprojectable blockers: %v", memberID, blockerIDs.Unprojectable)
+	}
 	dependents, err := store.DepList(oldRoot.ID, "up")
 	if err != nil {
 		return result, retryDrainRefusal("listing dependents of old root %s: %v", oldRoot.ID, err)
@@ -207,7 +210,7 @@ func RetryFailedDrainItem(ctx context.Context, store beads.Store, controlID, mem
 
 		created, err := molecule.InstantiateTx(tx, recipe, molecule.Options{
 			Vars:             runtimeVars,
-			ExternalDeps:     drainWorkflowExternalDeps(recipe, blockerIDs),
+			ExternalDeps:     drainWorkflowExternalDeps(recipe, blockerIDs.BlockerIDs),
 			PriorityOverride: member.Priority,
 		})
 		if err != nil {

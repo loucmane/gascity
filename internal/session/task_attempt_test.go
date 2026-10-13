@@ -40,7 +40,7 @@ func boundedSessionFixture(t *testing.T) (*Manager, *beads.MemStore, *runtime.Fa
 		t.Fatal(err)
 	}
 	sp := runtime.NewFake()
-	m := NewManagerWithOptions(sessions, sp, WithAttemptWorkStoreAccess(func(ref string, use func(beads.Store) error) error {
+	m := NewManagerWithOptions(sessions, sp, WithAttemptWorkStoreAccess(func(ref, id string, use func(beads.Store) error) error {
 		if ref != "rig:fixture" {
 			return errors.New("unknown fixture store")
 		}

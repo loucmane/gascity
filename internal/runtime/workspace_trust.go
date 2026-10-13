@@ -5,6 +5,28 @@ import (
 	"strings"
 )
 
+// Strip only terminal decoration and scrollback. The complete two-option
+// Claude menu must still validate before a move or confirmation is sent.
+func normalizedWorkspaceTrustMenu(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = stripLeadingBoxBorder(strings.TrimSpace(line))
+	}
+	content = strings.Join(lines, "\n")
+	if start := strings.LastIndex(content, "Accessing workspace:"); start >= 0 {
+		content = content[start:]
+	}
+	return content
+}
+
+func validateWorkspaceTrustMenu(content string) error {
+	if strings.Contains(content, "Quick safety check") || strings.Contains(content, "trust this folder") {
+		_, err := workspaceTrustKeys(normalizedWorkspaceTrustMenu(content))
+		return err
+	}
+	return nil
+}
+
 // workspaceTrustKeys recognizes the complete Claude menu before sending any
 // input. Selection order is provider UI state, not an authorization signal:
 // newer Claude clients default to "No, exit". Other providers retain their

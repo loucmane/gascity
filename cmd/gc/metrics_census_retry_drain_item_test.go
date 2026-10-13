@@ -48,7 +48,8 @@ func TestRetryDrainItemCensusAllocationSurvivesPlatformCanary(t *testing.T) {
 			t.Errorf("census %q = id %d, want %d", path, id, want)
 		}
 	}
-	if want := uint16(203); manifest.NextID != want {
+	// v1.5.0 adds twelve commands after the permanent fork allocations.
+	if want := uint16(215); manifest.NextID != want {
 		t.Errorf("census next_id = %d, want %d", manifest.NextID, want)
 	}
 }

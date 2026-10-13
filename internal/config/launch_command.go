@@ -128,6 +128,22 @@ func BuildProviderResumeCommand(resolved *ResolvedProvider, optionOverrides map[
 	// ga-6umo: overrides come from worker-writable metadata; decide on the
 	// filtered set so a rejected override never triggers the flag rewrite.
 	optionOverrides, _ = FilterMetadataOptionOverrides(resolved.OptionsSchema, optionOverrides)
+	// Unlike the launch-side gate above, this deliberately checks explicit
+	// overrides only. For a provider-supplied resume_command, resolve.go has
+	// already run completeResumeCommandDefaults, inserting the missing
+	// EffectiveDefaults flags around the template's own tokens. Gating on
+	// EffectiveDefaults here too would take the path below instead, which
+	// strips the schema's declared flags and aliases (an undeclared alias
+	// survives) and re-emits the merged set in schema order,
+	// reordering a template whose flags were already positioned deliberately
+	// and replacing a declared short alias with its canonical spelling.
+	//
+	// That resolve-time completion is skipped when the agent supplies its own
+	// resume_command (resolve.go's agent.ResumeCommand == "" guard). Such a
+	// template still picks up EffectiveDefaults here when an explicit override
+	// is present, since providerOptionArgs merges defaults with overrides, but
+	// with no override it keeps none of them. Widening this gate is not the fix
+	// for that, for the reason above; see issue #5659.
 	if command == "" || len(resolved.OptionsSchema) == 0 || !hasSchemaOptionOverrides(optionOverrides) {
 		return command, nil
 	}
@@ -216,6 +232,10 @@ func hasSchemaOptionOverrides(optionOverrides map[string]string) bool {
 
 func replaceResumeSchemaFlags(command, resumeFlag, resumeStyle string, schema []ProviderOption, overrideArgs []string) string {
 	stripped := StripFlags(command, CollectAllSchemaFlags(schema))
+	// Same gap as ReplaceSchemaFlags: exact matching misses a value rendered
+	// through an open option's FlagTemplate, which would then be re-emitted
+	// alongside the override instead of replaced (ga-fyh).
+	stripped = stripShapes(stripped, CollectOpenOptionShapes(schema))
 	if len(overrideArgs) == 0 {
 		return unquoteSessionKeyTemplate(stripped)
 	}

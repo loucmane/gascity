@@ -46,8 +46,8 @@ func TestNativeDependencyGuard(t *testing.T) {
 		fixture{name: "google_over_limit", modules: nativeGuardModules("", 0, 1, 2), want: "google.golang.org/api count 2 exceeds 1", beforeBuild: true},
 		fixture{name: "missing_beads", modules: nativeGuardModules("", 0, 0, 0), want: "expected exactly one github.com/steveyegge/beads module, got 0", beforeBuild: true},
 		fixture{name: "duplicate_beads", modules: nativeGuardModules("", 0, 2, 0), want: "expected exactly one github.com/steveyegge/beads module, got 2", beforeBuild: true},
-		fixture{name: "binary_at_limit", modules: reviewed, size: "270000000"},
-		fixture{name: "binary_over_limit", modules: reviewed, size: "270000001", want: "gc binary is 270000001 bytes; max is 270000000"},
+		fixture{name: "binary_at_limit", modules: reviewed, size: "180000000"},
+		fixture{name: "binary_over_limit", modules: reviewed, size: "180000001", want: "gc binary is 180000001 bytes; max is 180000000"},
 		fixture{name: "help_failure", modules: reviewed, helpFails: true, want: "normal gc metrics --help failed"},
 		fixture{name: "help_testhook", modules: reviewed, help: "__testhook-record-help", want: "metrics --help exposes the product-metrics testhook command"},
 	)
@@ -74,10 +74,10 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$GC_GUARD_FIXTURE_DIR/calls"
 case "$*" in
   "list -m all") cat "$GC_GUARD_FIXTURE_DIR/modules" ;;
-  "build -o "*" ./cmd/gc")
-    test "$#" = 4
-    cp "$GC_GUARD_FIXTURE_DIR/fake-gc" "$3"
-    chmod 0755 "$3" ;;
+  "build -trimpath -o "*" ./cmd/gc")
+    test "$#" = 5
+    cp "$GC_GUARD_FIXTURE_DIR/fake-gc" "$4"
+    chmod 0755 "$4" ;;
   "tool nm "*) printf '%s\n' "$GC_GUARD_FIXTURE_SYMBOL" ;;
   *) exit 97 ;;
 esac
@@ -121,7 +121,7 @@ fi
 			if err != nil {
 				t.Fatal(err)
 			}
-			built := strings.Contains(string(calls), "build -o ")
+			built := strings.Contains(string(calls), "build -trimpath -o ")
 			if built == tc.beforeBuild {
 				t.Fatalf("build reached=%t, want %t; calls:\n%s", built, !tc.beforeBuild, calls)
 			}

@@ -18,7 +18,7 @@ func TestMetadataToolchainIsOnlySetupExecutionDelta(t *testing.T) {
 	// Reverting only the reviewed default must recover the complete prior
 	// execution projection; no other setup mutation is silently accepted.
 	input(t, docs.action, "go-version")["default"] = "1.26.6"
-	const prior = "6a7fa725afa5cdf18cc459ea401a74bbd83cef757bf4e5d0dcd131a010df6ac0"
+	const prior = "3ad86798f871dd57a9d36f42bb9f18540fc38ff372c54652d599612fa61fad1a"
 	if err := assertSemanticHash("setup without only custody Go alignment", projectAction(docs.action), prior); err != nil {
 		t.Fatal(err)
 	}

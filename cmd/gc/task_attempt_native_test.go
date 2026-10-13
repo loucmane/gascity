@@ -110,7 +110,7 @@ func TestTaskAttemptConfiguredNativeStore(t *testing.T) {
 	access := attemptWorkStoreAccess(cityPath, cfg)
 	var id, policy, token string
 	var owned *beads.NativeDoltStore
-	err = access("rig:frontend", func(s beads.Store) error {
+	err = access("rig:frontend", "", func(s beads.Store) error {
 		base, _, _ := unwrapBeadPolicyStore(s)
 		var ok bool
 		owned, ok = base.(*beads.NativeDoltStore)
@@ -141,14 +141,14 @@ func TestTaskAttemptConfiguredNativeStore(t *testing.T) {
 	// A fresh resolver/handle must see the durable reservation, not the
 	// session store or an in-process counter. It may authorize one start only.
 	access = attemptWorkStoreAccess(cityPath, cfg)
-	if err := access("rig:frontend", func(s beads.Store) error {
+	if err := access("rig:frontend", "", func(s beads.Store) error {
 		_, err := taskattempt.Reserve(s, id, "rig:frontend", "frontend/worker")
 		return err
 	}); !errors.Is(err, taskattempt.ErrRefused) {
 		t.Fatalf("reopened reservation: %v", err)
 	}
 	for i := range 2 {
-		err := attemptWorkStoreAccess(cityPath, cfg)("rig:frontend", func(s beads.Store) error {
+		err := attemptWorkStoreAccess(cityPath, cfg)("rig:frontend", "", func(s beads.Store) error {
 			return taskattempt.Start(s, id, "rig:frontend", "frontend/worker", token, "synthetic-session")
 		})
 		if i == 0 && err != nil || i == 1 && !errors.Is(err, taskattempt.ErrRefused) {
@@ -156,7 +156,7 @@ func TestTaskAttemptConfiguredNativeStore(t *testing.T) {
 		}
 	}
 	var startedPolicy string
-	if err := access("rig:frontend", func(s beads.Store) error {
+	if err := access("rig:frontend", "", func(s beads.Store) error {
 		b, err := s.Get(id)
 		if err == nil && b.Metadata["sibling"] != "preserved" {
 			return errors.New("metadata CAS changed sibling key")
@@ -182,7 +182,7 @@ func TestTaskAttemptConfiguredNativeStore(t *testing.T) {
 	if err != nil || preflight.NativeStoreEligible {
 		t.Fatalf("identity-mismatch fixture did not refuse native preflight: %+v, %v", preflight, err)
 	}
-	err = access("rig:frontend", func(s beads.Store) error {
+	err = access("rig:frontend", "", func(s beads.Store) error {
 		base, _, _ := unwrapBeadPolicyStore(s)
 		if _, ok := base.(*beads.NativeDoltStore); ok {
 			t.Fatal("identity mismatch bypassed native preflight")
@@ -209,7 +209,7 @@ func TestTaskAttemptConfiguredNativeStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	callbackErr := errors.New("fixture callback refusal")
-	err = access("rig:frontend", func(s beads.Store) error {
+	err = access("rig:frontend", "", func(s beads.Store) error {
 		base, _, _ := unwrapBeadPolicyStore(s)
 		owned = base.(*beads.NativeDoltStore)
 		b, err := s.Get(id)

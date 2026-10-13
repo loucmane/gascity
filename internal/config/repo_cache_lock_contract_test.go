@@ -45,6 +45,10 @@ func TestRepoCacheLockPlatformImplementationsUseSharedOpenPolicy(t *testing.T) {
 					return true
 				}
 				mode, modeOK := comparison.X.(*ast.Ident)
+				if selected, ok := comparison.X.(*ast.SelectorExpr); ok {
+					owner, ok := selected.X.(*ast.Ident)
+					mode, modeOK = selected.Sel, ok && owner.Name == "opts"
+				}
 				exclusive, exclusiveOK := comparison.Y.(*ast.Ident)
 				matched = comparison.Op == token.EQL && modeOK && exclusiveOK && mode.Name == "mode" && exclusive.Name == "repoCacheLockExclusive"
 				return true

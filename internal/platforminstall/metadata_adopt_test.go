@@ -256,7 +256,7 @@ func metadataOnlyPackFixture(t *testing.T) (Manifest, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := builtinpacks.MaterializeSyntheticRepo(cachePath, commit); err != nil {
+	if err := builtinpacks.MaterializeSyntheticRepo(cachePath, builtinpacks.Repository, commit); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(filepath.Dir(cachePath), ".packman-cache.lock"), nil, 0o400); err != nil {

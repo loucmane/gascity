@@ -151,7 +151,7 @@ func TestConfigureManagedWorkerTypedLaunchBindsResolvedContract(t *testing.T) {
 				t.Fatal("no production preflight installed")
 			}
 			sp := runtime.NewFake()
-			started, err := startPreparedStartCandidate(context.Background(), item, cityPath, nil, sp, cfg, nil, nil)
+			started, err := startPreparedStartCandidate(context.Background(), item, cityPath, nil, sp, cfg, nil, nil, nil)
 			starts := sp.CountCalls("Start", "synthetic-typed")
 			if tc.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantError) || started || starts != 0 || providers != 0 || readiness != 0 || signers != 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -13,13 +14,31 @@ func claudeTrustScreen(menu string) string {
 }
 
 func runWorkspaceTrustPath(ctx context.Context, stream bool, content string, send func(...string) error) error {
+	// Model the actual UI acknowledging a move. Confirmation now requires
+	// two fresh selected frames; a static fixture would model dropped keys.
+	sendAndRender := func(keys ...string) error {
+		if err := send(keys...); err != nil {
+			return err
+		}
+		for _, key := range keys {
+			if key == "Down" || key == "Up" {
+				content = strings.Replace(content, "❯", "", 1)
+				content = strings.Replace(content, "Yes, I trust this folder", "❯ Yes, I trust this folder", 1)
+				content = strings.Replace(content, "2. ❯", "❯ 2.", 1)
+			}
+		}
+		return nil
+	}
 	if !stream {
-		return acceptWorkspaceTrustDialog(ctx, time.Second, func(int) (string, error) { return content, nil }, send)
+		return acceptWorkspaceTrustDialog(ctx, newStartupDialogBudget(time.Second), func(int) (string, error) { return content, nil }, sendAndRender)
 	}
 	snapshots := make(chan string, 1)
 	snapshots <- content
 	close(snapshots)
-	_, err := acceptWorkspaceTrustDialogFromStream(ctx, time.Second, newReplayableSnapshotCursor(snapshots), send)
+	_, err := acceptWorkspaceTrustDialogFromStream(ctx, time.Second, newReplayableSnapshotCursor(snapshots), sendAndRender)
+	if errors.Is(err, errStartupDialogStreamInconclusive) {
+		return acceptWorkspaceTrustDialog(ctx, newStartupDialogBudget(time.Second), func(int) (string, error) { return content, nil }, sendAndRender)
+	}
 	return err
 }
 

@@ -16,10 +16,13 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_ClearsOpenUnassigne
 
 	reconciled := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
 		store,
+		beads.SessionStore{Store: store},
 		continuationGroupTestConfig(),
 		"",
 		nil,
 		continuationGroupSnapshotResult(store, first, second),
+		nil,
+		nil,
 		nil,
 	)
 	if len(reconciled) != 2 {
@@ -61,10 +64,13 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_FreshRoutedWorkerCl
 
 	reconciled := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
 		store,
+		beads.SessionStore{Store: store},
 		continuationGroupTestConfig(),
 		"",
 		nil,
 		continuationGroupSnapshotResult(store, work),
+		nil,
+		nil,
 		nil,
 	)
 	if len(reconciled) != 1 || reconciled[0].ID != work.ID {
@@ -156,7 +162,7 @@ func TestContinuationGroupHasLiveSession_CatchesOwnerCreatedAfterDemandSnapshot(
 		SessionNameMetadata: "worker-live",
 	}}
 	groupLive, revalidationComplete := continuationGroupHasLiveSession(
-		plans[0], continuationGroupTestConfig(), "", liveSession,
+		plans[0], store, continuationGroupTestConfig(), "", liveSession,
 	)
 	if !revalidationComplete || !groupLive {
 		t.Fatalf("live=%v complete=%v, want late owner detected by targeted live revalidation", groupLive, revalidationComplete)
@@ -180,6 +186,7 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_PreservesGroupWithL
 
 	reconciled := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
 		store,
+		beads.SessionStore{Store: store},
 		continuationGroupTestConfig(),
 		"",
 		[]session.Info{{ID: "session-live", Template: "worker", SessionNameMetadata: "worker-live"}},
@@ -191,6 +198,8 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_PreservesGroupWithL
 			OpenUnassignedRoutedWorkStores:    []beads.Store{store},
 			OpenUnassignedRoutedWorkStoreRefs: []string{"city:test"},
 		},
+		nil,
+		nil,
 		nil,
 	)
 	if len(reconciled) != 0 {
@@ -211,10 +220,13 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_PartialSnapshotPres
 
 	reconciled := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
 		store,
+		beads.SessionStore{Store: store},
 		continuationGroupTestConfig(),
 		"",
 		nil,
 		DesiredStateResult{StoreQueryPartial: true},
+		nil,
+		nil,
 		nil,
 	)
 	if len(reconciled) != 0 {
@@ -235,6 +247,7 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_MisalignedStoreSnap
 
 	reconciled := releaseOrphanedPoolAssignmentsWhenSnapshotsComplete(
 		store,
+		beads.SessionStore{Store: store},
 		continuationGroupTestConfig(),
 		"",
 		nil,
@@ -242,6 +255,8 @@ func TestReleaseOrphanedPoolAssignmentsWhenSnapshotsComplete_MisalignedStoreSnap
 			OpenUnassignedRoutedWorkBeads:     []beads.Bead{waiting},
 			OpenUnassignedRoutedWorkStoreRefs: []string{"city:test"},
 		},
+		nil,
+		nil,
 		nil,
 	)
 	if len(reconciled) != 0 {

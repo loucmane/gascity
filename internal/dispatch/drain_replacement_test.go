@@ -183,7 +183,7 @@ func mustFindDrainItemStepByRef(t *testing.T, store beads.Store, rootID, ref str
 
 func mustListDrainWorkflow(t *testing.T, store beads.Store, rootID string) []beads.Bead {
 	t.Helper()
-	items, err := listByWorkflowRoot(store, rootID)
+	items, err := beads.DirectMembers(store, rootID)
 	if err != nil {
 		t.Fatalf("list workflow %s: %v", rootID, err)
 	}

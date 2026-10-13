@@ -159,14 +159,12 @@ resolution and predicates: `bdReadyPoolDemandShell(limitFlag)` reads the
 canonical `gc.routed_to=<target>` route with `--include-ephemeral`, and
 the temporary migration predicate reads `gc.run_target=<target>` only on
 `gc.kind=workflow` roots that predate root `gc.routed_to` stamping. The
-work-query form reads the canonical probe oldest first with no bd row limit
-(`--sort oldest --limit 0`), drops graph.v2 workflow roots in `jq`, and
+work-query form reads the canonical probe in canonical priority order with no bd row limit
+(`--limit 0`), drops graph.v2 workflow roots in `jq`, and
 prints the first 20 remaining rows; it filters the migration probe the same
 way, and to roots with empty `gc.routed_to`, before printing the first
 match. That is an intentional routed-queue policy:
-unassigned routed pool work is FIFO before priority, so newer
-high-priority work does not jump ahead of older ready work already queued
-for the same target. The count form unions canonical and migration
+unassigned routed pool work is priority-first, FIFO within each priority. The count form unions canonical and migration
 probes, deduplicates by bead ID and drops graph.v2 workflow roots before
 printing the length.
 Targets resolve to `Agent.PoolName` when set and
@@ -280,7 +278,7 @@ regressions.
     worker and reconciler must also share the temporary migration predicate
     for `gc.run_target=<target>` on `gc.kind=workflow` roots with empty
     `gc.routed_to`, and the graph.v2 workflow-root exclusion; only the
-    worker's first-row form adds `bd ready --sort oldest` ordering and cuts
+    worker's first-row form adds canonical priority ordering and cuts
     its rows in `jq` after that exclusion.
     Any pool-demand predicate change to one (added filter, modified target
     resolution, new state) MUST be reflected in the other. Diverging the two
@@ -393,7 +391,7 @@ name = "coder"
 pool = { min = 1, max = 3, check = "echo 2" }
 # Default sling_query: bd update {} --set-metadata gc.routed_to=coder
 # Default work_query: bd ready --include-ephemeral --metadata-field gc.routed_to=coder
-#   --unassigned --exclude-type=epic --json --sort oldest --limit 0, minus
+#   --unassigned --exclude-type=epic --json --limit 0, minus
 #   graph.v2 workflow roots, first 20 rows; then a temporary gc.run_target
 #   workflow-root migration fallback
 ```

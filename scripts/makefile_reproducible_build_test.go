@@ -18,7 +18,7 @@ func TestMakeBuildUsesCommitDerivedReproducibleInputs(t *testing.T) {
 	for _, required := range []string{
 		`COMMIT     := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")`,
 		`BUILD_TIME := $(shell git show -s --format=%cI HEAD 2>/dev/null || echo "unknown")`,
-		`go build -trimpath -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/gc`,
+		`go build -trimpath -buildvcs=false -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/gc`,
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Errorf("Makefile is missing reproducible build contract %q", required)

@@ -327,8 +327,15 @@ func scopedNudgeFixture(t *testing.T) (string, nudgeTarget, nudgeQueueState, *be
 	}
 	store := beads.NewMemStore()
 	previous := openNudgeBeadStore
+	previousOwned := openOwnedNudgeBeadStore
 	openNudgeBeadStore = func(string) beads.NudgesStore { return beads.NudgesStore{Store: store} }
-	t.Cleanup(func() { openNudgeBeadStore = previous })
+	openOwnedNudgeBeadStore = func(string) (beads.NudgesStore, beads.Store) {
+		return beads.NudgesStore{Store: store}, nil // Borrow the test-owned store.
+	}
+	t.Cleanup(func() {
+		openNudgeBeadStore = previous
+		openOwnedNudgeBeadStore = previousOwned
+	})
 	front := nudgequeue.NewStore(beads.NudgesStore{Store: store})
 	var before []beads.Bead
 	for _, bucket := range [][]queuedNudge{foreign.Pending, foreign.InFlight, foreign.Dead} {

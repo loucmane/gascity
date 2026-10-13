@@ -14,7 +14,7 @@ import (
 )
 
 func attemptWorkStoreAccess(cityPath string, cfg *config.City) session.AttemptWorkStoreAccess {
-	return func(ref string, use func(beads.Store) error) error {
+	return func(ref, id string, use func(beads.Store) error) error {
 		if ref == "" || ref == "city" {
 			ref = "city:" + loadedCityName(cfg, cityPath)
 		}
@@ -33,11 +33,23 @@ func attemptWorkStoreAccess(cityPath string, cfg *config.City) session.AttemptWo
 				return fmt.Errorf("%w: unknown or noncanonical store identity %q", taskattempt.ErrRefused, ref)
 			}
 		}
+		// Pool provenance keeps a logical city/rig ref even when its driving
+		// graph step has moved into a class binding. Resolve that authoritative
+		// owner before consulting the work ledger or a retained same-ID copy.
+		if id != "" {
+			owner, bound, err := cliByIDBindingOwner(cityPath, id)
+			if err != nil {
+				return err
+			}
+			if bound {
+				return use(owner.Store) // Borrowed binding, owned by the residency resolver.
+			}
+		}
 		// Admission needs the authoritative work backend, not the deliberately
 		// CLI-only control-dispatch resolver. The ordinary factory retains its
 		// identity preflight and rollout policy, and normalizes registered rig
 		// paths against this city. An incapable fallback still refuses CAS.
-		result, err := openStoreResultAtForCityWithConfig(scopeRoot, cityPath, cfg, gate.ModeUnset, false, true)
+		result, err := openStoreResultAtForCityWithConfig(scopeRoot, cityPath, cfg, gate.ModeUnset, false, true, false)
 		if err != nil {
 			return err
 		}
@@ -60,7 +72,7 @@ func reservePoolTaskAttempt(bp *agentBuildParams, template string, metadata map[
 	}
 	ref := metadata[beadmeta.TriggerBeadStoreRefMetadataKey]
 	var token string
-	err := bp.attemptWorkStore(ref, func(s beads.Store) error {
+	err := bp.attemptWorkStore(ref, id, func(s beads.Store) error {
 		var err error
 		token, err = taskattempt.Reserve(s, id, ref, template)
 		return err

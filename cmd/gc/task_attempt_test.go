@@ -24,7 +24,7 @@ func TestTaskAttemptRejectsUnregisteredStoreRefs(t *testing.T) {
 	}}
 	for _, ref := range []string{"city:other", "city:", "city:fixture ", "rig:", "rig:missing", "rig:frontend ", "rig:../frontend", "rig:empty", "frontend"} {
 		t.Run(ref, func(t *testing.T) {
-			err := attemptWorkStoreAccess(cityPath, cfg)(ref, func(beads.Store) error {
+			err := attemptWorkStoreAccess(cityPath, cfg)(ref, "", func(beads.Store) error {
 				t.Fatal("invalid store reference reached callback")
 				return nil
 			})
@@ -33,7 +33,7 @@ func TestTaskAttemptRejectsUnregisteredStoreRefs(t *testing.T) {
 			}
 		})
 	}
-	if err := attemptWorkStoreAccess(cityPath, nil)("rig:frontend", func(beads.Store) error {
+	if err := attemptWorkStoreAccess(cityPath, nil)("rig:frontend", "", func(beads.Store) error {
 		t.Fatal("rig without configuration reached callback")
 		return nil
 	}); !errors.Is(err, taskattempt.ErrRefused) {
@@ -62,7 +62,7 @@ func TestTaskAttemptResolvesRegisteredRigPaths(t *testing.T) {
 			cfg := &config.City{Workspace: config.Workspace{Name: "fixture"}, Rigs: []config.Rig{
 				{Name: "frontend", Path: registeredPath},
 			}}
-			if err := attemptWorkStoreAccess(cityPath, cfg)("rig:frontend", func(s beads.Store) error {
+			if err := attemptWorkStoreAccess(cityPath, cfg)("rig:frontend", "", func(s beads.Store) error {
 				got, err := s.Get(b.ID)
 				if err == nil && got.Title != b.Title {
 					return errors.New("opened wrong work authority")
@@ -105,7 +105,7 @@ func TestPoolTaskAttemptReservationSurvivesNewBuild(t *testing.T) {
 	}
 	meta := map[string]string{beadmeta.TriggerBeadIDMetadataKey: b.ID, beadmeta.TriggerBeadStoreRefMetadataKey: "rig:fixture"}
 	makeBP := func() *agentBuildParams {
-		return &agentBuildParams{attemptWorkStore: func(ref string, use func(beads.Store) error) error {
+		return &agentBuildParams{attemptWorkStore: func(ref, id string, use func(beads.Store) error) error {
 			if ref != "rig:fixture" {
 				t.Fatalf("unexpected store %q", ref)
 			}
@@ -119,6 +119,52 @@ func TestPoolTaskAttemptReservationSurvivesNewBuild(t *testing.T) {
 		if _, err := reservePoolTaskAttempt(makeBP(), "fixture/worker", meta); !errors.Is(err, taskattempt.ErrRefused) {
 			t.Fatalf("new scheduler build: %v", err)
 		}
+	}
+}
+
+func TestPoolTaskAttemptUsesClassBindingBeforeRetainedWorkCopy(t *testing.T) {
+	cityPath := t.TempDir()
+	work, binding := beads.NewMemStore(), beads.NewMemStore()
+	work.HonorExplicitIDs, binding.HonorExplicitIDs = true, true
+	routes := splitRoutes(binding)
+	registerResidencyRoutes(cityPath, routes, func() beads.Store { return work })
+	t.Cleanup(func() { unregisterResidencyRoutes(cityPath, routes) })
+	const id = "gc-bounded-control"
+	const template = "core.control-dispatcher"
+	policy, err := taskattempt.Request("city:test", id, template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := binding.Create(beads.Bead{ID: id, Title: "bounded class task", Metadata: map[string]string{
+		beadmeta.NativeAttemptMetadataKey: policy,
+		beadmeta.KindMetadataKey:          beadmeta.KindWorkflowFinalize,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := work.Create(beads.Bead{ID: id, Title: "unbounded retained copy"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.City{Workspace: config.Workspace{Name: "test"}}
+	meta := map[string]string{beadmeta.TriggerBeadIDMetadataKey: id, beadmeta.TriggerBeadStoreRefMetadataKey: "city:test"}
+	bp := &agentBuildParams{attemptWorkStore: attemptWorkStoreAccess(cityPath, cfg)}
+	token, err := reservePoolTaskAttempt(bp, template, meta)
+	if err != nil || token == "" {
+		t.Fatalf("class reservation: %q %v", token, err)
+	}
+	bp = &agentBuildParams{attemptWorkStore: attemptWorkStoreAccess(cityPath, cfg)}
+	if _, err := reservePoolTaskAttempt(bp, template, meta); !errors.Is(err, taskattempt.ErrRefused) {
+		t.Fatalf("second build must retain the bounded reservation: %v", err)
+	}
+	start := func(s beads.Store) error { return taskattempt.Start(s, id, "city:test", template, token, "session-1") }
+	if err := bp.attemptWorkStore("city:test", id, start); err != nil {
+		t.Fatal(err)
+	}
+	if err := bp.attemptWorkStore("city:test", id, start); !errors.Is(err, taskattempt.ErrRefused) {
+		t.Fatalf("class attempt started twice: %v", err)
+	}
+	decoy, err := work.Get(id)
+	if err != nil || len(decoy.Metadata) != 0 {
+		t.Fatalf("retained work copy was changed: %+v %v", decoy, err)
 	}
 }
 
@@ -217,7 +263,7 @@ func TestPoolTaskAttemptConsumedBeforeCreateAndCopiedToSession(t *testing.T) {
 		Providers: map[string]config.ProviderSpec{"test": {Command: "true"}},
 	}
 	bp := newAgentBuildParams("test", t.TempDir(), cfg, runtime.NewFake(), time.Now().UTC(), s, io.Discard)
-	bp.attemptWorkStore = func(ref string, use func(beads.Store) error) error {
+	bp.attemptWorkStore = func(ref, id string, use func(beads.Store) error) error {
 		if ref != "city:test" {
 			t.Fatalf("unexpected store %q", ref)
 		}
@@ -272,7 +318,7 @@ func TestPoolTaskAttemptFailedCreateNeverRefunds(t *testing.T) {
 		Providers: map[string]config.ProviderSpec{"test": {Command: "true"}},
 	}
 	bp := newAgentBuildParams("test", t.TempDir(), cfg, runtime.NewFake(), time.Now().UTC(), sessions, io.Discard)
-	bp.attemptWorkStore = func(ref string, use func(beads.Store) error) error {
+	bp.attemptWorkStore = func(ref, id string, use func(beads.Store) error) error {
 		if ref != "city:test" {
 			t.Fatalf("unexpected store %q", ref)
 		}

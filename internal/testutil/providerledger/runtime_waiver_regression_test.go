@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gastownhall/gascity/internal/testpolicy/waiverclock"
 )
 
 // The retired constructor helper remains a negative policy fixture, not an
@@ -15,11 +17,11 @@ func TestRetiredRuntimeWaiverKeepsExactExpiryAndNoGrace(t *testing.T) {
 		t.Fatalf("retired waiver binding changed: %+v", claim.Waiver)
 	}
 	entry := validRuntimeEntry("runtime.retired-waiver", "exact:retired-waiver", claim)
-	if err := Validate([]Entry{entry}, deadline.Add(-time.Nanosecond)); err != nil {
+	if _, err := Validate([]Entry{entry}, deadline.Add(-time.Nanosecond), waiverclock.ModeStrict); err != nil {
 		t.Fatalf("just-before-expiry positive control: %v", err)
 	}
 	for _, now := range []time.Time{deadline, deadline.Add(time.Nanosecond), deadline.Add(7 * 24 * time.Hour)} {
-		if err := Validate([]Entry{entry}, now); err == nil || !strings.Contains(err.Error(), "waiver owned by ga-80po0c.3 expired") {
+		if _, err := Validate([]Entry{entry}, now, waiverclock.ModeStrict); err == nil || !strings.Contains(err.Error(), "waiver owned by ga-80po0c.3 expired") {
 			t.Fatalf("expired waiver at %s must refuse without grace: %v", now, err)
 		}
 	}

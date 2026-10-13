@@ -16,17 +16,24 @@ func TestWorkerFactoryAttemptUsesCityWorkAuthorityNotSessionDecoy(t *testing.T) 
 	for _, tc := range []struct {
 		name, configuredName string
 		withToken            bool
+		classBound           bool
 	}{
-		{"missing-token", "test-city", false},
-		{"one-native-start", "test-city", true},
-		{"resolved-name-missing-token", "", false},
-		{"resolved-name-one-native-start", "", true},
+		{"missing-token", "test-city", false, false},
+		{"one-native-start", "test-city", true, false},
+		{"resolved-name-missing-token", "", false, false},
+		{"resolved-name-one-native-start", "", true, false},
+		{"class-bound-missing-token", "test-city", false, true},
+		{"class-bound-one-native-start", "test-city", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			withToken := tc.withToken
 			fs := newSessionFakeState(t)
 			fs.cfg.Workspace.Name = tc.configuredName
 			tasks, sessions := fs.cityBeadStore, beads.NewMemStore()
+			if tc.classBound {
+				tasks = beads.NewMemStore()
+				fs.graphBeadStore = tasks
+			}
 			fs.sessionsBeadStore = sessions
 			task, err := tasks.Create(beads.Bead{Title: "bounded city work"})
 			if err != nil {
@@ -38,6 +45,9 @@ func TestWorkerFactoryAttemptUsesCityWorkAuthorityNotSessionDecoy(t *testing.T) 
 			}
 			if err := tasks.SetMetadata(task.ID, beadmeta.NativeAttemptMetadataKey, policy); err != nil {
 				t.Fatal(err)
+			}
+			if tc.classBound {
+				seedWithPinnedID(t, fs.cityBeadStore, task.ID, "unbounded retained work copy")
 			}
 			decoy, err := sessions.Create(beads.Bead{ID: task.ID, Title: "unbounded same-ID decoy"})
 			if err != nil || decoy.ID != task.ID {

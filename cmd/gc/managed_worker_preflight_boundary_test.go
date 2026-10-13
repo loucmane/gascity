@@ -42,7 +42,7 @@ func TestStartPreparedStartCandidateRefusesProviderStartWhenManagedPreflightFail
 		},
 	}
 
-	started, err := startPreparedStartCandidate(context.Background(), item, t.TempDir(), nil, sp, nil, nil, nil)
+	started, err := startPreparedStartCandidate(context.Background(), item, t.TempDir(), nil, sp, nil, nil, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "managed-worker preflight") || !strings.Contains(err.Error(), "rules sha256 mismatch") {
 		t.Fatalf("start error = %v", err)
 	}
@@ -143,6 +143,10 @@ func TestTaskCheckPathResolverFailsClosedOnConflictingRoutedWork(t *testing.T) {
 
 func TestCommitStartFailureEmitsManagedWorkerAttentionInSameCycle(t *testing.T) {
 	recorder := events.NewFake()
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{ID: "ci-managed", Type: "session", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
 	failure := &managedworker.Failure{Profile: "hpfetcher/gc.implementation-worker", Err: errors.New("rules sha256 mismatch")}
 	result := startResult{
 		prepared: preparedStart{candidate: startCandidate{
@@ -152,7 +156,7 @@ func TestCommitStartFailureEmitsManagedWorkerAttentionInSameCycle(t *testing.T) 
 		err:             failure,
 		rollbackPending: true,
 	}
-	commitStartFailure(result, nil, &clock.Fake{Time: time.Unix(1, 0)}, recorder, 1, &bytes.Buffer{}, nil)
+	commitStartFailure(result, sessionFrontDoor(store), &clock.Fake{Time: time.Unix(1, 0)}, recorder, 1, &bytes.Buffer{}, nil)
 	if len(recorder.Events) != 1 {
 		t.Fatalf("events = %#v, want one immediate attention event", recorder.Events)
 	}
