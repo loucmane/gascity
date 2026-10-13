@@ -133,7 +133,11 @@ func TestBuildPreparedStart_AntigravityDispatchEffortOptionPresent(t *testing.T)
 }
 
 func TestBuildPreparedStart_AntigravityPermissionModePlan(t *testing.T) {
-	candidate, cfg, store := newOptionSessionWithWork(t, antigravityEffortResolvedProvider(), "agy", map[string]string{"permission_mode": "plan"})
+	// Permission policy is config-owned (ga-6umo). Verify the upstream plan
+	// mode still renders, and worker metadata cannot replace it with yolo.
+	rp := antigravityEffortResolvedProvider()
+	rp.EffectiveDefaults["permission_mode"] = "plan"
+	candidate, cfg, store := newOptionSessionWithWork(t, rp, "agy --mode plan", map[string]string{"permission_mode": "yolo"})
 
 	prepared, _, err := buildPreparedStart(candidate, cfg, store)
 	if err != nil {

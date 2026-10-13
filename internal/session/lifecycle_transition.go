@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/gastownhall/gascity/internal/beadmeta"
 )
 
 // Priming markers record that a session's launch path attempted delivery of
@@ -223,18 +225,19 @@ func PreWakePatch(input PreWakePatchInput) MetadataPatch {
 		}
 	}
 	patch := MetadataPatch{
-		"instance_token":             input.InstanceToken,
-		"continuation_epoch":         fmt.Sprintf("%d", input.ContinuationEpoch),
-		"continuation_reset_pending": "",
-		"detached_at":                "",
-		"state":                      string(StateCreating),
-		"pending_create_started_at":  startedAt,
-		"last_woke_at":               input.Now.UTC().Format(time.RFC3339),
-		"sleep_reason":               input.SleepReason,
-		"sleep_intent":               "",
-		"generation":                 fmt.Sprintf("%d", input.Generation),
-		"wake_request":               "",
-		"wake_requested_at":          "",
+		"instance_token":                       input.InstanceToken,
+		beadmeta.CurrentClaimBeadIDMetadataKey: "",
+		"continuation_epoch":                   fmt.Sprintf("%d", input.ContinuationEpoch),
+		"continuation_reset_pending":           "",
+		"detached_at":                          "",
+		"state":                                string(StateCreating),
+		"pending_create_started_at":            startedAt,
+		"last_woke_at":                         input.Now.UTC().Format(time.RFC3339),
+		"sleep_reason":                         input.SleepReason,
+		"sleep_intent":                         "",
+		"generation":                           fmt.Sprintf("%d", input.Generation),
+		"wake_request":                         "",
+		"wake_requested_at":                    "",
 	}
 	if input.FreshWake {
 		patch["session_key"] = ""

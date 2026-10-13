@@ -621,7 +621,20 @@ func classRoutedHookClaimOps(ops hookClaimOps, route *hookClaimClassRoute) hookC
 	}
 
 	ops.AssignContinuation = func(ctx context.Context, dir string, env []string, beadID, assignee string) error {
-		write := func() error { return route.graph.Update(beadID, beads.UpdateOpts{Assignee: &assignee}) }
+		write := func() error {
+			current, err := route.class.Get(beadID)
+			if err != nil {
+				return err
+			}
+			if current.ID != beadID || current.Status != "open" || current.Assignee != "" {
+				return &beads.PreconditionFailedError{ID: beadID}
+			}
+			writer, ok := beads.RequiredConditionalWriterFor(route.class)
+			if !ok {
+				return beads.ErrConditionalWriteUnsupported
+			}
+			return writer.UpdateIfMatch(beadID, current.Revision, beads.UpdateOpts{Assignee: &assignee})
+		}
 		if route.knownResident(beadID) {
 			return write()
 		}

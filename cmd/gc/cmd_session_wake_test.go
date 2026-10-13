@@ -452,6 +452,7 @@ func TestDoSessionWake_StuckInFlightAgeGate(t *testing.T) {
 			withdrawCalled := false
 			deps := sessionWakeDeps{
 				store:        store,
+				resolveID:    resolveSessionID,
 				cityPath:     "/city",
 				cityResolved: true,
 				now:          time.Now,
@@ -549,7 +550,7 @@ func TestDoSessionWake_NoRunnableTemplateAgeGate(t *testing.T) {
 			if sessionWakeHasRunnableTemplateInfo(session.Info{Template: "worker"}, cfg) {
 				t.Fatal("test setup: template \"worker\" must not be runnable under this config")
 			}
-			deps := sessionWakeDeps{store: store, cfg: cfg, cityPath: "/city", now: time.Now}
+			deps := sessionWakeDeps{store: store, resolveID: resolveSessionID, cfg: cfg, cityPath: "/city", now: time.Now}
 
 			var stdout, stderr bytes.Buffer
 			if code := doSessionWake(b.ID, &stdout, &stderr, false, deps); code != 0 {
@@ -664,6 +665,7 @@ func TestDoSessionWake_SuspendedRigRejectsWake(t *testing.T) {
 			}
 			deps := sessionWakeDeps{
 				store:        store,
+				resolveID:    resolveSessionID,
 				cfg:          cfg,
 				cityPath:     cityPath,
 				cityResolved: true,

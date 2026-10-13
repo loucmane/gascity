@@ -1460,8 +1460,19 @@ func conformanceResidenceSweep(t *testing.T, e splitEnv) {
 // minting replacements. On a split city the routed work is class-resident, so a
 // warm path that reads the work store instead reads zero.
 func conformanceWarmTickDemand(t *testing.T, e splitEnv) {
-	e.mintWispWith(t, wispOpts{title: "routed treadmill wisp A", routedTo: e.qualified})
-	e.mintWispWith(t, wispOpts{title: "routed treadmill wisp B", routedTo: e.qualified})
+	first := e.mintWispWith(t, wispOpts{title: "routed treadmill wisp A", routedTo: e.qualified})
+	second := e.mintWispWith(t, wispOpts{title: "routed treadmill wisp B", routedTo: e.qualified})
+	if !e.split {
+		// Admission reopens the configured authority, independently of the
+		// session/census fixture. Publish both demand rows there as well.
+		authority := newConfiguredAttemptTestStore(t, e.cityPath, e.cityPath)
+		for _, work := range []beads.Bead{first, second} {
+			created, err := authority.Create(work)
+			if err != nil || created.ID != work.ID {
+				t.Fatalf("publish task authority %s: got %s, %v", work.ID, created.ID, err)
+			}
+		}
+	}
 
 	cold := buildDesiredStateWithSessionBeads(
 		"split-topology-city", e.cityPath, time.Now(), e.cfg, &localMockProvider{},

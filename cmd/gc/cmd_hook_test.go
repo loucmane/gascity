@@ -28,8 +28,9 @@ import (
 // runtime identity environment without the corresponding lifecycle projection.
 func startHookClaimFixtureSession(t *testing.T, cityDir, template, alias, sessionName, origin string) {
 	t.Helper()
+	store := beads.NewMemStore()
 	manager := session.NewManagerWithOptions(
-		beads.NewMemStore(),
+		store,
 		runtime.NewFake(),
 		session.WithCityPath(cityDir),
 	)
@@ -47,6 +48,7 @@ func startHookClaimFixtureSession(t *testing.T, cityDir, template, alias, sessio
 	if err != nil {
 		t.Fatalf("start hook-claim fixture session: %v", err)
 	}
+	installOwnSessionFrontDoor(t, cityDir, &ownSessionOnlyStore{mem: store, t: t, id: info.ID})
 	for key, value := range map[string]string{
 		"GC_SESSION_ID":     info.ID,
 		"GC_SESSION_NAME":   info.SessionName,
@@ -160,7 +162,7 @@ work_query = "printf '[]'"
 	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(cityToml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GC_SESSION_NAME", "worker-session")
+	startHookClaimFixtureSession(t, cityDir, "worker", "", "worker-session", "ephemeral")
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"--city", cityDir, "hook", "worker", "--claim", "--json"}, &stdout, &stderr)

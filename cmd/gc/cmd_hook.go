@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -304,13 +305,11 @@ func cmdHookWithOptions(args []string, opts hookCommandOptions, stdout, stderr i
 	// removed from config (resolveAgentIdentity fails), or whose agent was
 	// suspended, would otherwise hit one of those bare `return 1` paths, and its
 	// startup wrapper would keep retrying the plain failure instead of seeing
-	// the terminal drain result and exiting. The fence reads the runtime's own
-	// identity from the environment; it is a no-op for a genuinely non-session
-	// runtime (no GC_TEMPLATE and no GC_SESSION_ID) and fails open for an
-	// eligible session, a session id present with no instance token (the
-	// documented tokenless-runtime compatibility escape hatch), or a transient
-	// session-store fault, so a healthy worker still falls through to the
-	// suspension and config checks below.
+	// the terminal drain result and exiting. Managed callers must pass both
+	// the controller projection and an exact own-row incarnation check. The
+	// returned identity owns every later operation; missing identity and read
+	// failures refuse without invoking drain-ack.
+	var verified *VerifiedSession
 	if opts.Claim {
 		// F-A, at the earliest point that can answer it. tryHookClaim carries the
 		// same fence over the same predicate — it is the seam every ops-level
@@ -323,8 +322,18 @@ func cmdHookWithOptions(args []string, opts hookCommandOptions, stdout, stderr i
 		if marker := hookClaimNonTurnMarker(os.Environ()); marker != "" {
 			return writeHookClaimNonTurnDrain(marker, hookClaimOptions{JSON: opts.JSON}, stdout, stderr)
 		}
-		if code, handled := fenceHookClaimSession(cityPath, cfg, strings.TrimSpace(os.Getenv("GC_SESSION_ID")), opts, stdout, stderr); handled {
+		var code int
+		var handled bool
+		verified, code, handled = fenceHookClaimSession(cityPath, cfg, strings.TrimSpace(os.Getenv("GC_SESSION_ID")), opts, stdout, stderr)
+		if handled {
 			return code
+		}
+		if verified != nil {
+			if err := verified.checkEnvironment(os.Environ(), args); err != nil {
+				fmt.Fprintf(stderr, "gc hook --claim: %v\n", err) //nolint:errcheck
+				return writeHookClaimStaleSessionDrain(opts, stdout, stderr)
+			}
+			agentName, sessionTemplateContext = verified.Template, true
 		}
 	}
 
@@ -334,7 +343,11 @@ func cmdHookWithOptions(args []string, opts hookCommandOptions, stdout, stderr i
 		return 1
 	}
 
-	a, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+	rigContext := currentRigContext(cfg)
+	if verified != nil {
+		rigContext = ""
+	}
+	a, ok := resolveAgentIdentity(cfg, agentName, rigContext)
 	if !ok {
 		// Pool instances run with GC_AGENT/GC_ALIAS set to their per-instance name
 		// (e.g. "rig/polecat-adhoc-<hash>") which is not a config entry — only the
@@ -392,10 +405,14 @@ func cmdHookWithOptions(args []string, opts hookCommandOptions, stdout, stderr i
 	resolvedAgentName := a.QualifiedName()
 	agentForQuery := resolvedAgentName
 	sessionForQuery := ""
-	if sessionTemplateContext {
+	switch {
+	case verified != nil:
+		agentForQuery, sessionForQuery = verified.assignee(), verified.SessionName
+		verified.Rig = a.Dir
+	case sessionTemplateContext:
 		agentForQuery = hookSessionAgentForQuery()
 		sessionForQuery = os.Getenv("GC_SESSION_NAME")
-	} else {
+	default:
 		sessionForQuery = cliSessionName(cityPath, cityName, resolvedAgentName, cfg.Workspace.SessionTemplate)
 	}
 	overrides, err := hookQueryEnv(cityPath, cfg, &a)
@@ -416,10 +433,21 @@ func cmdHookWithOptions(args []string, opts hookCommandOptions, stdout, stderr i
 		overrides["GC_SESSION_ORIGIN"] = ""
 		overrides["GC_TEMPLATE"] = ""
 	}
+	if verified != nil {
+		overrides["GC_AGENT"], overrides["GC_SESSION_NAME"] = verified.assignee(), verified.SessionName
+		overrides["GC_ALIAS"], overrides["GC_SESSION_ID"] = verified.Alias, verified.ID
+		overrides["GC_TEMPLATE"], overrides["GC_SESSION_ORIGIN"] = verified.Template, verified.Origin
+		overrides["GC_TMUX_SESSION"], overrides["BEADS_ACTOR"] = verified.SessionName, verified.assignee()
+	}
 	queryEnv := mergeRuntimeEnv(os.Environ(), overrides)
 	failureTemplate, emitFailureEvent := hookWorkQueryFailureTemplate(len(args) > 0, sessionTemplateContext, a.QualifiedName())
 
 	stores := hookWorkQueryStores(cityPath, cfg, &a, agentForQuery, workDir, queryEnv, overrides)
+	if verified != nil {
+		// Derive scope from the verified configured agent, not the runtime ID.
+		stores = hookWorkQueryStores(cityPath, cfg, &a, a.QualifiedName(), workDir, queryEnv, overrides)
+		verified.AllowedWorkStores = slices.Clone(stores)
+	}
 	// On a split city the ready tiers of workQuery are already city-wide, so
 	// running the whole query once per store re-asks the same question R+1 times
 	// and re-opens every leg each time. Pin the city-wide read to the primary
@@ -451,6 +479,9 @@ func cmdHookWithOptions(args []string, opts hookCommandOptions, stdout, stderr i
 	sessionName := strings.TrimSpace(sessionForQuery)
 	alias := strings.TrimSpace(overrides["GC_ALIAS"])
 	assignee := hookClaimAssigneeIdentity(alias, sessionID, agentForQuery, resolvedAgentName, sessionName)
+	if verified != nil {
+		assignee = verified.assignee()
+	}
 	// IdentityCandidates governs ADOPTION of already-owned in_progress/open
 	// work (hookClaimExistingAssignment, claimFirstReadyHookAssignment, and
 	// the display path's hookCandidateVisible own-work check); it must be
@@ -470,9 +501,13 @@ func cmdHookWithOptions(args []string, opts hookCommandOptions, stdout, stderr i
 		alias,
 		agentForQuery,
 	)
+	if verified != nil {
+		identityCandidates = verified.identifiers()
+	}
 	routeTargets := hookClaimRouteTargets(hookClaimPrimaryRouteTarget(&a), resolvedAgentName, strings.TrimSpace(overrides["GC_TEMPLATE"]))
 	if opts.Claim {
 		claimOpts := hookClaimOptions{
+			Verified:           verified,
 			Assignee:           assignee,
 			SessionID:          sessionID,
 			IdentityCandidates: identityCandidates,
@@ -481,6 +516,9 @@ func cmdHookWithOptions(args []string, opts hookCommandOptions, stdout, stderr i
 			DrainAck:           opts.DrainAck,
 			JSON:               opts.JSON,
 			RuntimeActor:       strings.TrimSpace(os.Getenv("BEADS_ACTOR")),
+		}
+		if verified != nil {
+			claimOpts.RuntimeActor = verified.assignee()
 		}
 		return claimHookWork(cityPath, workQuery, workDir, queryEnv, stores, claimOpts, emitQueryFailure, stdout, stderr)
 	}
@@ -515,6 +553,7 @@ const (
 	// the runtime is stale. The caller retries it before returning an honest
 	// claims_errored result and never enters the work query.
 	hookClaimSessionStoreUnavailable
+	hookClaimSessionDraining
 )
 
 const (
@@ -523,31 +562,37 @@ const (
 )
 
 // fenceHookClaimSession applies the runtime-identity fence that gates
-// gc hook --claim before it runs the work query. It returns (code, handled):
+// gc hook --claim before it runs the work query. It returns (verified, code, handled):
 // handled is true for a definitively stale session, incomplete runtime
 // identity, and projection reads that remain unavailable after the bounded
-// retry budget. A context with no session ID or an eligible projection returns
-// handled=false so the normal claim path runs.
-func fenceHookClaimSession(cityPath string, _ *config.City, sessionID string, opts hookCommandOptions, stdout, stderr io.Writer) (int, bool) {
+// retry budget. A managed success returns its exact verified session row;
+// a genuinely unmanaged context returns nil with handled=false.
+func fenceHookClaimSession(cityPath string, cfg *config.City, sessionID string, opts hookCommandOptions, stdout, stderr io.Writer) (*VerifiedSession, int, bool) {
 	if sessionID == "" {
-		if template := strings.TrimSpace(os.Getenv("GC_TEMPLATE")); template != "" {
-			fmt.Fprintf(stderr, "gc hook --claim: refusing unregistered managed session for pool template %q: GC_TEMPLATE is set but GC_SESSION_ID is empty\n", template) //nolint:errcheck
-			return writeHookClaimMissingSessionRegistrationDrain(opts, stdout, stderr), true
+		for _, key := range []string{"GC_TEMPLATE", "GC_SESSION_NAME", "GC_TMUX_SESSION", "GC_INSTANCE_TOKEN", "GC_RUNTIME_EPOCH"} {
+			if strings.TrimSpace(os.Getenv(key)) != "" {
+				if key == "GC_TEMPLATE" {
+					fmt.Fprintf(stderr, "gc hook --claim: refusing unregistered managed session: GC_TEMPLATE=%q but GC_SESSION_ID is empty\n", os.Getenv(key)) //nolint:errcheck
+				} else {
+					fmt.Fprintf(stderr, "gc hook --claim: refusing unregistered managed session: %s is set but GC_SESSION_ID is empty\n", key) //nolint:errcheck
+				}
+				return nil, writeHookClaimMissingSessionRegistrationDrain(opts, stdout, stderr), true
+			}
 		}
-		return 0, false
+		return nil, 0, false
 	}
 	instanceToken := os.Getenv("GC_INSTANCE_TOKEN")
 	generation, generationErr := strconv.Atoi(strings.TrimSpace(os.Getenv("GC_RUNTIME_EPOCH")))
 	if strings.TrimSpace(instanceToken) == "" || generationErr != nil || generation <= 0 {
 		reason := "runtime identity environment is incomplete"
 		fmt.Fprintf(stderr, "gc hook --claim: session identity unavailable for %s: %s\n", sessionID, reason) //nolint:errcheck
-		return writeHookClaimDrain(hookClaimLabel, hookClaimReasonClaimsErrored, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr), true
+		return nil, writeHookClaimDrain(hookClaimLabel, hookClaimReasonClaimsErrored, opts.JSON, false, nil, stdout, stderr), true
 	}
 	for attempt := 1; attempt <= hookClaimSessionFenceAttempts; attempt++ {
 		switch verdict, reason := classifyHookClaimSessionProjection(cityPath, sessionID, instanceToken, generation); verdict {
 		case hookClaimSessionStale:
 			fmt.Fprintf(stderr, "gc hook --claim: refusing stale session %s: %s\n", sessionID, reason) //nolint:errcheck
-			return writeHookClaimStaleSessionDrain(opts, stdout, stderr), true
+			return nil, writeHookClaimStaleSessionDrain(opts, stdout, stderr), true
 		case hookClaimSessionStoreUnavailable:
 			if attempt < hookClaimSessionFenceAttempts {
 				timer := time.NewTimer(hookClaimSessionFenceDelay)
@@ -555,12 +600,20 @@ func fenceHookClaimSession(cityPath string, _ *config.City, sessionID string, op
 				continue
 			}
 			fmt.Fprintf(stderr, "gc hook --claim: session identity unavailable for %s after %d attempts: %s\n", sessionID, attempt, reason) //nolint:errcheck
-			return writeHookClaimDrain(hookClaimLabel, hookClaimReasonClaimsErrored, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr), true
+			return nil, writeHookClaimDrain(hookClaimLabel, hookClaimReasonClaimsErrored, opts.JSON, false, nil, stdout, stderr), true
 		default:
-			return 0, false
+			front, err := openHookSessionFrontDoor(cityPath, cfg)
+			if err != nil {
+				return nil, verifiedHookFailure(err, hookClaimOptions{JSON: opts.JSON}, stdout, stderr), true
+			}
+			identity, err := front.VerifySession(sessionID, instanceToken, generation)
+			if err != nil {
+				return nil, verifiedHookFailure(err, hookClaimOptions{JSON: opts.JSON}, stdout, stderr), true
+			}
+			return &VerifiedSession{VerifiedSession: identity, front: front, cityPath: cityPath, cfg: cfg, drainRequested: verdict == hookClaimSessionDraining}, 0, false
 		}
 	}
-	return writeHookClaimDrain(hookClaimLabel, hookClaimReasonClaimsErrored, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr), true
+	return nil, writeHookClaimDrain(hookClaimLabel, hookClaimReasonClaimsErrored, opts.JSON, false, nil, stdout, stderr), true
 }
 
 // classifyHookClaimSessionProjection validates the controller-owned projection
@@ -580,6 +633,9 @@ func classifyHookClaimSessionProjection(cityPath, sessionID, instanceToken strin
 	}
 	if !projection.MatchesInstanceToken(instanceToken) {
 		return hookClaimSessionStale, "runtime instance token does not match the controller projection"
+	}
+	if projection.State == string(session.StateDraining) {
+		return hookClaimSessionDraining, ""
 	}
 	if !projection.ClaimEligible() {
 		return hookClaimSessionStale, fmt.Sprintf("session state %q is not claim-eligible", projection.State)
@@ -609,6 +665,7 @@ func claimHookWork(cityPath, workQuery, workDir string, queryEnv []string, store
 		return 1
 	}
 	ops := classRoutedHookClaimOps(hookClaimOps{}, route)
+	bindVerifiedHookOps(&ops, claimOpts.Verified)
 	return claimHookWorkWithRunner(workQuery, workDir, queryEnv, stores, claimOpts, ops, shellWorkQueryWithEnv, emitFailure, stdout, stderr)
 }
 

@@ -70,8 +70,8 @@ func hookStampSessionCurrentClaim(sessionID, beadID string) error {
 // GetState reports as empty — is not this fence's business. A closed or
 // superseded incarnation is the runtime-identity fence's stale-session lane, and
 // answering false here leaves that lane's verdict intact rather than relabelling
-// it. Errors are returned rather than swallowed: the caller fails OPEN on them,
-// and it can only make that choice if it can see them.
+// it. This legacy seam is used by unmanaged callers. Managed claims instead
+// bind VerifiedSession.drainPending and fail closed on every read error.
 func hookSessionDrainPending(sessionID string) (bool, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {

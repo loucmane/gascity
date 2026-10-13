@@ -34,8 +34,8 @@ func TestDemandSpawnedSeatClaimsThroughItsOwnQuery(t *testing.T) {
 	if result.Action != "work" || result.BeadID != work.ID {
 		t.Fatalf("first hook result = %+v, want the routed row claimed", result)
 	}
-	if result.Assignee != h.sessionName {
-		t.Fatalf("assignee = %q, want the session-name form %q", result.Assignee, h.sessionName)
+	if result.Assignee != h.sessionBead.ID {
+		t.Fatalf("assignee = %q, want the session bead id %q", result.Assignee, h.sessionBead.ID)
 	}
 	if got := strings.Join(h.stepStarted, ","); got != work.ID {
 		t.Fatalf("execution.step_started = %q, want exactly one for %s", got, work.ID)
@@ -44,7 +44,7 @@ func TestDemandSpawnedSeatClaimsThroughItsOwnQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-reading claimed work: %v", err)
 	}
-	if !strings.EqualFold(strings.TrimSpace(claimed.Status), "in_progress") || strings.TrimSpace(claimed.Assignee) != h.sessionName {
+	if !strings.EqualFold(strings.TrimSpace(claimed.Status), "in_progress") || strings.TrimSpace(claimed.Assignee) != h.sessionBead.ID {
 		t.Fatalf("work bead = status %q assignee %q, want in_progress owned by the seat", claimed.Status, claimed.Assignee)
 	}
 
@@ -122,7 +122,8 @@ type handoffFixture struct {
 // env the hook runs with is the env the controller actually produces.
 func newHandoffFixture(t *testing.T) *handoffFixture {
 	t.Helper()
-	store := beads.NewMemStore()
+	cityPath := t.TempDir()
+	store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
 		Agents: []config.Agent{{
@@ -132,10 +133,10 @@ func newHandoffFixture(t *testing.T) *handoffFixture {
 			MaxActiveSessions: intPtr(2),
 		}},
 	}
-	h := &handoffFixture{store: store, cfg: cfg, dir: t.TempDir()}
+	h := &handoffFixture{store: store, cfg: cfg, dir: cityPath}
 
 	var stderr bytes.Buffer
-	bp := newAgentBuildParams("test-city", t.TempDir(), cfg, runtime.NewFake(), time.Now().UTC(), store, &stderr)
+	bp := newAgentBuildParams("test-city", cityPath, cfg, runtime.NewFake(), time.Now().UTC(), store, &stderr)
 	bp.sessionBeads = &sessionBeadSnapshot{}
 	desired := map[string]TemplateParams{}
 	seedID := h.mustSeed(t, "demand evidence").ID
@@ -211,7 +212,7 @@ func (h *handoffFixture) runHook(t *testing.T, run func() (string, error)) hookC
 	t.Helper()
 	env := h.env()
 	opts := hookClaimOptions{
-		Assignee:           h.sessionName,
+		Assignee:           hookClaimAssigneeIdentity("", h.sessionBead.ID, h.sessionName, "worker", h.sessionName),
 		IdentityCandidates: []string{h.sessionName, h.sessionBead.ID},
 		RouteTargets:       []string{"worker"},
 		Env:                env,

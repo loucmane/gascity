@@ -148,7 +148,9 @@ type hookClaimReleaseRecord struct {
 }
 
 type hookClaimOptions struct {
-	Assignee string
+	Verified       *VerifiedSession
+	publishedClaim string
+	Assignee       string
 	// SessionID is this session's durable bead ID. Assignee is deliberately the
 	// alias/agent form that read paths query through GC_AGENT, but a continuation
 	// pin means "run this on THIS session", which only a session identity can
@@ -413,21 +415,20 @@ func tryHookClaim(workQuery, dir string, opts *hookClaimOptions, ops *hookClaimO
 	// own in-progress bead re-parks the identical wedge. That work belongs to
 	// the dead-assignee and reopen lanes once the drain completes.
 	//
-	// The refusal rides the existing "drain" action — the agent protocol already
-	// treats it as "wind down" — and it CONSUMES --drain-ack. That is the entire
-	// point: it converts a wedge into a prompt self-drain. F-A's stale-session
-	// refusal honors --drain-ack too (writeHookClaimStaleSessionDrain), so that
-	// is not the delta. On this door the delta is the population covered — a seat
-	// carrying GC_SESSION_ID without GC_INSTANCE_TOKEN, where
-	// fenceHookClaimSession returns handled=false and never classifies the row —
-	// plus the distinct drain_pending reason reported for it. A seat carrying
-	// both already reports stale_session from F-A, which classifies `draining`
-	// through the default arm of hookClaimSessionEligibility; here F-D is
-	// redundant defense in depth.
-	if sessionID := hookClaimSessionID(opts.Env); sessionID != "" {
+	// A verified draining caller may acknowledge through its bounded ops.
+	// Stale callers never acknowledge. The legacy fail-open probe below is
+	// retained only for unmanaged internal callers; managed read failures stop.
+	sessionID := hookClaimSessionID(opts.Env)
+	if opts.Verified != nil {
+		sessionID = opts.Verified.ID
+	}
+	if sessionID != "" {
 		pending, err := ops.DrainPending(sessionID)
 		switch {
 		case err != nil:
+			if opts.Verified != nil {
+				return hookClaimResult{terminal: true, code: verifiedHookFailure(err, *opts, stdout, stderr)}
+			}
 			// Fail open. This probe is one store read on every agent turn in the
 			// city, so a store hiccup here must not idle every healthy seat; the
 			// drain lanes remain the backstop exactly as they are today. Name the
@@ -1206,16 +1207,44 @@ func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead
 	}
 	result.RootBeadID = strings.TrimSpace(bead.Metadata[beadmeta.RootBeadIDMetadataKey])
 	result.ContinuationGroup = strings.TrimSpace(bead.Metadata[beadmeta.ContinuationGroupMetadataKey])
+	if opts.Verified != nil {
+		v := opts.Verified
+		if err := v.front.CompareAndSetCurrentClaim(v.VerifiedSession, v.CurrentClaim, bead.ID); err != nil {
+			if minted {
+				unwindUndeliveredHookClaim("session_fence_refused", "session claim stamp refused", bead, opts, ops, dir, stderr)
+			}
+			return verifiedHookFailure(err, opts, stdout, stderr)
+		}
+		opts.publishedClaim = bead.ID
+	}
 	durable, stamped := stampHookClaimIdentity(bead, opts, ops, dir, stderr)
 	if stamped && hookClaimLifecycleCandidate(durable, opts) {
 		ops.EmitExecutionStepStarted(durable, dir, opts.Env, opts.Assignee)
 	}
-	stampHookSessionCurrentClaim(bead, opts, ops, stderr)
+	if opts.Verified == nil {
+		stampHookSessionCurrentClaim(bead, opts, ops, stderr)
+	}
 	publishHookClaimRunMap(bead, opts, ops, stderr)
 	assigned, err := preassignHookContinuationGroup(bead, opts, ops, dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc hook --claim: preassigning continuation group for %s: %v\n", bead.ID, err) //nolint:errcheck
+		if opts.Verified != nil {
+			clearHookSessionCurrentClaim(opts, ops, stderr)
+			if minted {
+				unwindUndeliveredHookClaim("continuation_refused", "continuation assignment refused", bead, opts, ops, dir, stderr)
+			}
+			return verifiedHookFailure(err, opts, stdout, stderr)
+		}
 		return 1
+	}
+	if opts.Verified != nil {
+		if err := opts.Verified.mayClaim(); err != nil {
+			clearHookSessionCurrentClaim(opts, ops, stderr)
+			if minted {
+				unwindUndeliveredHookClaim("session_fence_refused", "session changed before result delivery", bead, opts, ops, dir, stderr)
+			}
+			return verifiedHookFailure(err, opts, stdout, stderr)
+		}
 	}
 	result.ContinuationAssigned = assigned
 	if writeErr := writeHookClaimResultLine(result, opts.JSON, stdout); writeErr != nil {
@@ -1392,11 +1421,10 @@ func writeHookClaimDrainPending(label, sessionID string, opts hookClaimOptions, 
 // session (closed, superseded instance token, or a dormant/terminal state) that
 // must stop instead of claiming. It preserves the gc hook --claim result
 // contract: a --json caller gets a schema-backed drain record (action "drain",
-// reason "stale_session"), and --drain-ack is honored, so a startup wrapper
-// acknowledges drain and exits cleanly rather than seeing a bare exit 1 and
-// retrying the refusal forever.
+// reason "stale_session"). A refused identity has no release or acknowledgement
+// authority, even when --drain-ack was requested.
 func writeHookClaimStaleSessionDrain(opts hookCommandOptions, stdout, stderr io.Writer) int {
-	return writeHookClaimDrain(hookClaimLabel, hookClaimReasonStaleSession, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr)
+	return writeHookClaimDrain(hookClaimLabel, hookClaimReasonStaleSession, opts.JSON, false, nil, stdout, stderr)
 }
 
 // writeHookClaimMissingSessionRegistrationDrain emits the terminal result for a
@@ -1407,7 +1435,7 @@ func writeHookClaimStaleSessionDrain(opts hookCommandOptions, stdout, stderr io.
 // distinct reason so a wrapper or dashboard can tell "never registered" apart
 // from "registered, then went stale."
 func writeHookClaimMissingSessionRegistrationDrain(opts hookCommandOptions, stdout, stderr io.Writer) int {
-	return writeHookClaimDrain(hookClaimLabel, hookClaimReasonMissingSessionRegistration, opts.JSON, opts.DrainAck, hookRuntimeDrainAck, stdout, stderr)
+	return writeHookClaimDrain(hookClaimLabel, hookClaimReasonMissingSessionRegistration, opts.JSON, false, nil, stdout, stderr)
 }
 
 // writeHookClaimDrain writes the single structured drain result shared by every
@@ -1423,6 +1451,9 @@ func writeHookClaimMissingSessionRegistrationDrain(opts hookCommandOptions, stdo
 // through the DISCOVERY door too, and a hardcoded prefix would report the wrong
 // command to the operator reading the pane.
 func writeHookClaimDrain(label, reason string, jsonOut, drainAck bool, drainAckFn hookDrainAckFunc, stdout, stderr io.Writer) int {
+	if reason == hookClaimReasonStaleSession || reason == hookClaimReasonMissingSessionRegistration {
+		drainAck = false
+	}
 	result := hookClaimJSONResult{
 		SchemaVersion: "1",
 		OK:            true,
@@ -1466,6 +1497,11 @@ func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), hookClaimMutationTimeout)
 	defer cancel()
+	if opts.Verified != nil {
+		if err := opts.Verified.mayClaim(); err != nil {
+			return nil, err
+		}
+	}
 	siblings, err := ops.ListContinuation(ctx, dir, opts.Env, rootID, group)
 	if err != nil {
 		return nil, err
@@ -1480,7 +1516,15 @@ func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops 
 			!hookClaimMatchesRoute(sibling, opts.RouteTargets) {
 			continue
 		}
+		if opts.Verified != nil {
+			if err := opts.Verified.mayClaim(); err != nil {
+				return assigned, err
+			}
+		}
 		if err := ops.AssignContinuation(ctx, dir, opts.Env, sibling.ID, pinAssignee); err != nil {
+			if beads.IsPreconditionFailed(err) {
+				continue
+			}
 			return assigned, fmt.Errorf("assigning %s: %w", sibling.ID, err)
 		}
 		assigned = append(assigned, sibling.ID)
@@ -2244,6 +2288,15 @@ func stampHookSessionCurrentClaim(bead beads.Bead, opts hookClaimOptions, ops ho
 // another seat and still named by this session (the ordering session_beads.go's
 // cascade already relies on).
 func clearHookSessionCurrentClaim(opts hookClaimOptions, ops hookClaimOps, stderr io.Writer) {
+	if v := opts.Verified; v != nil {
+		if opts.publishedClaim == "" {
+			return
+		}
+		if err := v.front.CompareAndSetCurrentClaim(v.VerifiedSession, opts.publishedClaim, ""); err != nil {
+			fmt.Fprintf(stderr, "gc hook --claim: conditional current-claim clear refused: %v\n", err) //nolint:errcheck
+		}
+		return
+	}
 	sessionID := hookClaimSessionID(opts.Env)
 	if sessionID == "" {
 		return
@@ -2911,9 +2964,9 @@ func hookListContinuationWithBdStore(_ context.Context, dir string, env []string
 	})
 }
 
-func hookAssignContinuationWithBdStore(_ context.Context, dir string, env []string, beadID, assignee string) error {
-	store := hookClaimBdStore(dir, env, assignee)
-	return store.Update(beadID, beads.UpdateOpts{Assignee: &assignee})
+func hookAssignContinuationWithBdStore(ctx context.Context, dir string, env []string, beadID, assignee string) error {
+	store := hookClaimBdStoreContext(ctx, dir, env, assignee)
+	return store.AssignIfUnassigned(beadID, assignee)
 }
 
 func hookRuntimeDrainAck(stderr io.Writer) error {

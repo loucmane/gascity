@@ -1,9 +1,13 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -46,9 +50,59 @@ var claimCASAllowedFiles = map[string]bool{
 	"class_store_emit.go":  true,
 }
 
-// claimCASMarkers are the two shapes a claim compare-and-swap takes in this
-// package: the store contract's Claim, and the raw bd argv.
-var claimCASMarkers = []string{".Claim(", `"--claim"`}
+// claimCASUses recognizes store Claim calls and raw bd flag construction.
+// A literal used only in ==/!= is inspection, as in the ready --claim refusal;
+// it cannot originate a claim. Do not exempt the containing file: another argv
+// construction or Claim call in that file must still fail the guard.
+func claimCASUses(name string, raw []byte) ([]string, error) {
+	f, err := parser.ParseFile(token.NewFileSet(), name, raw, 0)
+	if err != nil {
+		return nil, err
+	}
+	comparisons := map[token.Pos]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		if b, ok := n.(*ast.BinaryExpr); ok && (b.Op == token.EQL || b.Op == token.NEQ) {
+			comparisons[b.X.Pos()], comparisons[b.Y.Pos()] = true, true
+		}
+		return true
+	})
+	var uses []string
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.CallExpr:
+			if sel, ok := n.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Claim" {
+				uses = append(uses, ".Claim(")
+			}
+		case *ast.BasicLit:
+			if n.Kind == token.STRING && !comparisons[n.Pos()] {
+				if s, err := strconv.Unquote(n.Value); err == nil && s == "--claim" {
+					uses = append(uses, s)
+				}
+			}
+		}
+		return true
+	})
+	return uses, nil
+}
+
+func TestClaimCASGuardDistinguishesInspectionFromMutation(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want int
+	}{
+		{`if arg == "--claim" { return }`, 0},
+		{`if "--claim" != arg { return }`, 0},
+		{`store.Claim(id)`, 1},
+		{`if opts.Claim { return }`, 0},
+		{`args := []string{"update", id, "--claim"}; run(args)`, 1},
+		{`if arg == "--claim" { return }; run("--claim")`, 1},
+	} {
+		uses, err := claimCASUses("fixture.go", []byte("package main\nfunc f() {"+tc.body+"}"))
+		if err != nil || len(uses) != tc.want {
+			t.Errorf("%s: uses=%v err=%v, want %d", tc.body, uses, err, tc.want)
+		}
+	}
+}
 
 // TestClaimCASStaysOnTheWorkerPullPath pins invariant 4: no non-test code path
 // outside the sanctioned worker-side pull files performs a claim CAS.
@@ -76,10 +130,12 @@ func TestClaimCASStaysOnTheWorkerPullPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reading %s: %v", name, err)
 		}
-		for _, marker := range claimCASMarkers {
-			if strings.Contains(string(raw), marker) {
-				violations = append(violations, name+" contains "+marker)
-			}
+		uses, err := claimCASUses(name, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, use := range uses {
+			violations = append(violations, name+" contains "+use)
 		}
 	}
 	if len(violations) > 0 {

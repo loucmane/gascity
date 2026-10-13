@@ -84,6 +84,8 @@ var canonicalProviderCalls = map[string]int{
 	"cmd_stop.go:cmdStopBodyWithoutSuccess:sessionProviderForStopCity:bind-error":                                                              1,
 	"cmd_supervisor.go:startOneCity:newSessionProviderFromContext:bind-error":                                                                  1,
 	"completion.go:loadSessionsForCompletion:newSessionProviderFromContext:bind-error":                                                         1,
+	"hook_verified_drain.go:<package>:newSessionProviderFromContext:forward-to-withSessionProviderConstructionContext":                         1,
+	"hook_verified_drain.go:<package>:withSessionProviderConstructionContext:forward-return":                                                   1,
 	"providers.go:newSessionProvider:newSessionProviderFromContext:forward-to-withSessionProviderConstructionContext":                          1,
 	"providers.go:newSessionProvider:withSessionProviderConstructionContext:forward-return":                                                    1,
 	"providers.go:newSessionProviderForCity:newSessionProviderFromContext:forward-to-withSessionProviderConstructionContext":                   1,
@@ -97,10 +99,17 @@ var canonicalProviderCalls = map[string]int{
 }
 
 // Multi-result forwarding is intentionally narrower than ordinary result
-// binding: only the canonical context wrapper and the one status constructor
-// delegation may relay a construction error without inspecting it locally.
+// binding: only the canonical context wrappers, the status constructor
+// delegation and the verified self-only hook wrapper may relay a construction
+// error without inspecting it locally.
 var reviewedCanonicalProviderForwards = map[string]bool{
-	"cmd_session.go:doSessionListFallback:newSessionProviderFromContext->withSessionProviderConstructionContext":                     true,
+	"cmd_session.go:doSessionListFallback:newSessionProviderFromContext->withSessionProviderConstructionContext": true,
+	// newVerifiedHookProvider forwards construction errors to drainAck, which
+	// checks them before acknowledgement. Its snapshot contains only the exact
+	// verified, token-redacted row; it never loads the all-sessions snapshot.
+	// TestVerifiedHookProviderConstructionReadsOnlyOwnRow pins that boundary.
+	"hook_verified_drain.go:<package>:newSessionProviderFromContext->withSessionProviderConstructionContext":                         true,
+	"hook_verified_drain.go:<package>:withSessionProviderConstructionContext->return":                                                true,
 	"providers.go:newSessionProvider:newSessionProviderFromContext->withSessionProviderConstructionContext":                          true,
 	"providers.go:newSessionProviderForCity:newSessionProviderFromContext->withSessionProviderConstructionContext":                   true,
 	"providers.go:newStatusSessionProviderForCityWithSnapshot:newSessionProviderFromContext->withSessionProviderConstructionContext": true,

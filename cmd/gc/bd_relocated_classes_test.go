@@ -397,6 +397,10 @@ func bdSQLRefusalCity(t *testing.T, storageTOML string) (capture string) {
 // bdSQLRefusalCityDir is bdSQLRefusalCity plus the city root, for the rows that
 // have to seed the relocated binding before they can address a bead it HOLDS.
 func bdSQLRefusalCityDir(t *testing.T, storageTOML string) (capture, cityDir string) {
+	return bdSQLRefusalCityFixture(t, storageTOML, true)
+}
+
+func bdSQLRefusalCityFixture(t *testing.T, storageTOML string, reachableDolt bool) (capture, cityDir string) {
 	t.Helper()
 
 	origCityFlag, origRigFlag, origProbe := cityFlag, rigFlag, bdBeadExists
@@ -407,7 +411,13 @@ func bdSQLRefusalCityDir(t *testing.T, storageTOML string) (capture, cityDir str
 	cityFlag, rigFlag = "", ""
 
 	cityDir = t.TempDir()
-	writeReachableManagedDoltState(t, cityDir)
+	if reachableDolt {
+		writeReachableManagedDoltState(t, cityDir)
+	} else {
+		// Ready conformance uses a fake bd and an explicit authoritative store;
+		// socket reachability is covered by the managed-Dolt tests.
+		disableManagedDoltRecoveryForTest(t)
+	}
 	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -904,6 +914,26 @@ func TestGcBdReadyRefusesAGraphClassProjectionOnASplitCity(t *testing.T) {
 // 0 — which is exactly why it was believed.
 const bdReadyLiveShortAnswer = `[{"id":"jc-026"},{"id":"jc-3nj"},{"id":"jc-aj3"},{"id":"jc-cpd"},{"id":"jc-wve"}]`
 
+func bdReadyOutcomeFixture(t *testing.T, storageTOML string) string {
+	t.Helper()
+	capture, cityDir := bdSQLRefusalCityFixture(t, storageTOML, false)
+	writeBuiltinImportsFixture(t, cityDir, "core", "bd")
+	var rows []beads.Bead
+	if err := json.Unmarshal([]byte(bdReadyLiveShortAnswer), &rows); err != nil {
+		t.Fatal(err)
+	}
+	store := beads.NewMemStoreFrom(1, rows, nil)
+	previous := openBdReadyStoreForTest
+	openBdReadyStoreForTest = func(scopeRoot, cityPath string, _ *config.City) (beads.Store, error) {
+		if scopeRoot != cityDir || cityPath != cityDir {
+			t.Fatalf("authoritative ready scope = %q/%q, want %q", scopeRoot, cityPath, cityDir)
+		}
+		return store, nil
+	}
+	t.Cleanup(func() { openBdReadyStoreForTest = previous })
+	return capture
+}
+
 // TestGcBdReadyRefusesTheWholeFrontierOnASplitCity is the ga-jbn6f measurement
 // as a test, and it is the one the selector guard could not have caught.
 //
@@ -977,13 +1007,10 @@ func TestGcBdReadyRefusesTheWholeFrontierOnASplitCity(t *testing.T) {
 // TestGcBdReadyIsByteIdenticalOnASingleStoreCity is the mutation proof for the
 // topology trigger, and it carries the claim the old
 // TestGcBdReadyKeepsAnsweringItsOrdinaryWorkQueries used to carry on the wrong
-// topology.
-//
-// That test asserted the pool-demand argv reached bd verbatim on a SPLIT city,
-// which was true and is no longer: a split city's frontier is short whatever
-// the selector says. The claim that survives — and the one the fix actually
-// owes — is that a city which relocates nothing sees no change at all. The same
-// argvs the split city now refuses are forwarded here byte for byte.
+// topology. List argv remains byte-identical. The fork's controller-outcome
+// filter deliberately expands ready to unlimited JSON before applying the
+// caller's presentation/limit; its selectors and complete eligible rows must
+// survive. A split city still refuses these same frontiers unless overridden.
 func TestGcBdReadyIsByteIdenticalOnASingleStoreCity(t *testing.T) {
 	for name, args := range map[string][]string{
 		"bare":                  {"ready"},
@@ -996,7 +1023,7 @@ func TestGcBdReadyIsByteIdenticalOnASingleStoreCity(t *testing.T) {
 		"list --reverse":        {"list", "-r", "--json"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			capture := bdSQLRefusalCity(t, "")
+			capture := bdReadyOutcomeFixture(t, "")
 			t.Setenv("BD_STUB_STDOUT", bdReadyLiveShortAnswer)
 
 			var stdout, stderr bytes.Buffer
@@ -1007,8 +1034,17 @@ func TestGcBdReadyIsByteIdenticalOnASingleStoreCity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("bd was not invoked for %v: %v", args, err)
 			}
-			if !strings.Contains(string(data), strings.Join(args, " ")) {
-				t.Fatalf("bd received %q, want %v forwarded verbatim", data, args)
+			wantArgs := strings.Join(args, " ")
+			if args[0] == "ready" {
+				wantArgs = strings.TrimSuffix(wantArgs, " --json") + " --json --limit 0"
+			}
+			if strings.TrimSpace(string(data)) != wantArgs {
+				t.Fatalf("bd received %q, want %q", data, wantArgs)
+			}
+			for _, id := range []string{"jc-026", "jc-3nj", "jc-aj3", "jc-cpd", "jc-wve"} {
+				if !strings.Contains(stdout.String(), id) {
+					t.Fatalf("single-store ready lost %s: %s", id, stdout.String())
+				}
 			}
 		})
 	}
@@ -1088,7 +1124,7 @@ func TestGcBdListReadyIsTheSameFrontierAndIsRefusedToo(t *testing.T) {
 // the read AND says what was overridden, so the short array they are about to
 // trust arrives with its own caveat.
 func TestGcBdReadyOverrideStillRunsTheFrontierLoudly(t *testing.T) {
-	capture := bdSQLRefusalCity(t, bdSQLRefusalSplitStorage)
+	capture := bdReadyOutcomeFixture(t, bdSQLRefusalSplitStorage)
 	t.Setenv("BD_STUB_STDOUT", bdReadyLiveShortAnswer)
 	t.Setenv(bdRelocatedClassOverrideEnvVar, "1")
 

@@ -1259,8 +1259,12 @@ func TestPrepareStartCandidate_NonexistentStampedWorkDirKeepsSessionWorkDir(t *t
 
 func TestPrepareStartCandidate_UsesTriggerBeadWorkDirBeforeClaim(t *testing.T) {
 	store := beads.NewMemStore()
-	sourceWorkDir := t.TempDir()
 	launcherWorkDir := t.TempDir()
+	// The trigger's checkout must be inside the configured launch root (ga-6umo).
+	sourceWorkDir := filepath.Join(launcherWorkDir, "source")
+	if err := os.MkdirAll(sourceWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	source, err := store.Create(beads.Bead{
 		Title: "implementation source anchor",
 		Type:  "task",

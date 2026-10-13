@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -61,7 +62,19 @@ func cmdHookCurrent(idOnly bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc hook current: %v\n", err) //nolint:errcheck
 		return 1
 	}
-	return doHookCurrent(sessFront, sessionID, idOnly, stdout, stderr)
+	generation, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("GC_RUNTIME_EPOCH")))
+	v, err := sessFront.VerifySession(sessionID, os.Getenv("GC_INSTANCE_TOKEN"), generation)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc hook current: %v\n", err) //nolint:errcheck
+		return 1
+	}
+	verified := &VerifiedSession{VerifiedSession: v, front: sessFront}
+	if err := verified.checkEnvironment(os.Environ(), nil); err != nil {
+		fmt.Fprintf(stderr, "gc hook current: %v\n", err) //nolint:errcheck
+		return 1
+	}
+	beadID, err := sessFront.CurrentClaimVerified(v)
+	return writeHookCurrent(sessionID, beadID, err, idOnly, stdout, stderr)
 }
 
 // doHookCurrent prints the bead id stamped on sessionID's bead by the claim
@@ -71,6 +84,10 @@ func cmdHookCurrent(idOnly bool, stdout, stderr io.Writer) int {
 // skip the close it owes.
 func doHookCurrent(sessFront *session.Store, sessionID string, idOnly bool, stdout, stderr io.Writer) int {
 	beadID, err := sessFront.CurrentClaimBeadID(sessionID)
+	return writeHookCurrent(sessionID, beadID, err, idOnly, stdout, stderr)
+}
+
+func writeHookCurrent(sessionID, beadID string, err error, idOnly bool, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "gc hook current: %v\n", err) //nolint:errcheck
 		return 1

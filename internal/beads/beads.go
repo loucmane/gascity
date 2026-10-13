@@ -401,6 +401,13 @@ func ConditionalWriterFor(store Store) (ConditionalWriter, bool) {
 	return nil, false
 }
 
+// RequiredConditionalWriterFor resolves wrappers for an operation whose
+// correctness requires CAS regardless of the optional rollout mode. Absence is
+// a refusal; callers must never fall back to an unconditional mutation.
+func RequiredConditionalWriterFor(store Store) (ConditionalWriter, bool) {
+	return ConditionalWriterFor(followConditionalWritesResolveTarget(store))
+}
+
 // PreconditionFailedError reports that a conditional write was rejected because
 // the bead's revision moved (bd exit 9 / the store's WHERE clause matched no
 // row). Expected/Current come from the backend's machine JSON when parseable and

@@ -55,6 +55,12 @@ unless the row names how they map to the canonical projection.
 
 ## Global Invariants
 
+- A managed `gc hook --claim [--drain-ack]` acts only as the one verified
+  session incarnation; it may read that session's own row, may write only
+  `current_claim_bead_id` on that row under atomic incarnation and prior-value
+  preconditions, may release only work that this incarnation itself holds, and
+  on any identity mismatch it changes nothing outside its own pending claim.
+
 - Session state is bead-backed and projected. Runtime facts are observations,
   not durable truth.
 - `ProjectLifecycle` is the canonical read model for lifecycle decisions and
@@ -152,6 +158,17 @@ unless the row names how they map to the canonical projection.
 | SESSION-WORK-003 | Orphan pool step beads | Open pool step beads assigned to dead session identities are collected and released after session drain without relying on stale snapshots. | commit `8068393d8`; `cmd/gc/pool_session_name_test.go` (`TestCollectAndReleaseOrphanPoolStepBead_Issue2793`) |
 | SESSION-WORK-004 | No-wake drains cancel on assigned work | Pending no-wake or orphan drains are canceled when assigned work reappears, and recovered drain-ack metadata is not allowed to suppress that wake demand. | commit `d565a34e2`; `cmd/gc/session_reconciler_test.go`; `cmd/gc/session_wake_test.go` |
 | SESSION-WORK-005 | Named mailbox survives session close | Mail and other messaging-class rows use `assignee` as a stable address, not a work claim. Closing or retiring a session must not clear, reopen, or reassign unread mail addressed to its configured named mailbox; ordinary assigned work is still released. | `cmd/gc/session_beads_test.go` (`TestUnclaimWorkAssignedToRetiredSessionPreservesUnreadMail`, `TestCloseBeadPreservesUnreadMailAssignedBySessionName`); `cmd/gc/work_assignment.go` |
+
+### Managed Claim Authority
+
+| ID | Scenario | Required behavior | Evidence |
+|---|---|---|---|
+| SESSION-CLAIM-001 | Verified worker identity | Verify exactly the worker's own open session row against token digest and generation; freeze names, template, rig and configured work-store scope. Refuse foreign environment names and positional targets before work queries. | `cmd/gc/hook_verified_session_test.go`; `cmd/gc/cmd_hook_claim_session_fence_test.go` |
+| SESSION-CLAIM-002 | Conditional stamp and clear | Only `current_claim_bead_id` may change. Check exact ID, session type, open status, incarnation, eligible state and expected prior on the revision being committed. Recheck every predicate on retry. Unsupported atomic backends refuse. Failed stamps unwind only the pending won claim. | `internal/session/verified_claim_test.go`; `cmd/gc/hook_verified_session_test.go` |
+| SESSION-CLAIM-003 | Probe and checkout | Managed drain-probe read errors fail closed. Checkout fallback uses one exact, incarnation-checked Get; pool/shared-slot and Git ownership exclusions remain. | `cmd/gc/hook_verified_session_test.go`; `cmd/gc/cmd_hook_claim_work_branch_test.go` |
+| SESSION-CLAIM-004 | Worker drain acknowledgement | Refused identities never release or acknowledge. Verified workers recheck before sweeping only configured work stores, and release only confirmed own assignee plus own `gc.session_id` under work revision CAS. Provider construction uses only the verified row, and acknowledgement targets its verified runtime name and token digest. | `cmd/gc/hook_verified_session_test.go`; `cmd/gc/hook_verified_drain.go` |
+| SESSION-CLAIM-005 | Claim consumers and new incarnation | Ownership veto requires matching work assignee and `gc.session_id`. `hook current` verifies the caller incarnation. The pre-wake transition and legacy token mint clear the prior claim so successors cannot inherit it. | `internal/session/verified_claim_test.go`; `cmd/gc/hook_verified_session_test.go`; `cmd/gc/session_ownership_test.go` |
+| SESSION-CLAIM-006 | Continuation competition | Pin only still-open, still-unassigned siblings conditionally. A competing assignment is omitted from the result; there is no unconditional fallback. | `internal/beads/bdstore_assign_unassigned_test.go`; `cmd/gc/cmd_hook_test.go`; `cmd/gc/claim_class_route.go` |
 
 ### Runtime, Submit, And Observation
 

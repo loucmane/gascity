@@ -54,6 +54,7 @@ func TestLifecycleTransitionPatchesSetCompleteMetadata(t *testing.T) {
 			}),
 			want: MetadataPatch{
 				"instance_token":             "token-3",
+				"current_claim_bead_id":      "",
 				"continuation_epoch":         "2",
 				"continuation_reset_pending": "",
 				"detached_at":                "",
@@ -78,6 +79,7 @@ func TestLifecycleTransitionPatchesSetCompleteMetadata(t *testing.T) {
 			}),
 			want: MetadataPatch{
 				"instance_token":             "token-4",
+				"current_claim_bead_id":      "",
 				"continuation_epoch":         "5",
 				"continuation_reset_pending": "",
 				"detached_at":                "",

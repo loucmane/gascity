@@ -61,6 +61,22 @@ func agreementRows() []agreementRow {
 	return []agreementRow{
 		{name: "canonical base route", bead: routed("a-1", agreementTemplate), wantServable: true},
 		{
+			name: "graph v2 root cannot use the legacy run_target tier",
+			bead: beads.Bead{ID: "a-graph-root", Status: "open", Type: "task", Metadata: map[string]string{
+				beadmeta.KindMetadataKey: "workflow", "gc.formula_contract": "graph.v2",
+				beadmeta.RunTargetMetadataKey: agreementTemplate,
+			}},
+			wantServable: false,
+		},
+		{
+			name: "graph v2 worker step remains servable",
+			bead: beads.Bead{ID: "a-graph-step", Status: "open", Type: "task", Metadata: map[string]string{
+				beadmeta.KindMetadataKey: "step", "gc.formula_contract": "graph.v2",
+				beadmeta.RoutedToMetadataKey: agreementTemplate,
+			}},
+			wantServable: true,
+		},
+		{
 			name: "slot-suffixed route, valid slot", bead: routed("a-2", agreementTemplate+"-2"),
 			wantServable: true, wantRewrittenTo: agreementTemplate,
 		},
@@ -431,6 +447,9 @@ func legacyWorkflowTierServes(bead beads.Bead, opts readyOpts, metaWant []metada
 	if strings.TrimSpace(bead.Metadata[beadmeta.WorkflowExpandedMetadataKey]) == "true" {
 		return false
 	}
+	if bead.Metadata["gc.kind"] == "workflow" && bead.Metadata["gc.formula_contract"] == "graph.v2" {
+		return false
+	}
 	return strings.TrimSpace(bead.Metadata[beadmeta.RoutedToMetadataKey]) == ""
 }
 
@@ -467,7 +486,7 @@ func assertLegacyTierFilterUnchanged(t *testing.T, query string) {
 	// poolDemandFirstRowFunctionScript, brackets and limit slice included. The
 	// query is compared with the sh -c single-quote escaping undone, so the pin
 	// holds the jq PROGRAM rather than the quoting of the shell wrapper around it.
-	const wantFilter = `jq '[.[] | select(((.metadata["gc.routed_to"] // "") == "") and ((.metadata["gc.workflow_expanded"] // "") != "true"))] | .[:1]'`
+	const wantFilter = `jq '[.[] | select(((.metadata["gc.routed_to"] // "") == "") and ((.metadata["gc.workflow_expanded"] // "") != "true") and (((.metadata["gc.kind"] // "") == "workflow" and (.metadata["gc.formula_contract"] // "") == "graph.v2") | not))] | .[:1]'`
 	if !strings.Contains(unescapeShellSingleQuotes(query), wantFilter) {
 		t.Fatalf("the legacy workflow tier's post-filter is no longer exactly\n  %s\nso the Go mirror in legacyWorkflowTierServes is unpinned. Re-derive the mirror against the new filter, then update this pin.\nGenerated query:\n%s", wantFilter, query)
 	}

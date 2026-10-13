@@ -76,7 +76,7 @@ func newOwnershipFixture(t *testing.T) *ownershipFixture {
 	env.store = backing
 	session := env.createSessionBead(ownershipWorkerName, ownershipPoolTemplate)
 	env.markSessionActive(&session)
-	env.setSessionMetadata(&session, map[string]string{poolManagedMetadataKey: "true"})
+	env.setSessionMetadata(&session, map[string]string{poolManagedMetadataKey: "true", "alias": "legacy-claim-owner"})
 	if err := env.sp.Start(context.Background(), ownershipWorkerName, runtime.Config{Command: "test-cmd"}); err != nil {
 		t.Fatalf("Start(%s): %v", ownershipWorkerName, err)
 	}
@@ -97,13 +97,14 @@ func newOwnershipFixture(t *testing.T) *ownershipFixture {
 }
 
 // claimOutOfProcess is the worker's `gc hook --claim`: the step moves to
-// in_progress under the pool route name (an assignee spelling no session
-// identity guard matches) and the session bead records current_claim_bead_id.
+// in_progress under a persisted legacy alias and the session bead records
+// current_claim_bead_id. This exercises the live-claim veto independently of
+// the other awake-set gates, which recognize bead IDs and runtime names.
 // Neither write goes through the controller's cache.
 func (f *ownershipFixture) claimOutOfProcess(t *testing.T) {
 	t.Helper()
 	inProgress := "in_progress"
-	assignee := ownershipPoolTemplate
+	assignee := "legacy-claim-owner"
 	if err := f.backing.Update(f.work.ID, beads.UpdateOpts{Status: &inProgress, Assignee: &assignee}); err != nil {
 		t.Fatalf("claim work: %v", err)
 	}
@@ -516,7 +517,7 @@ func TestSessionOwnsLiveClaim_StopsAtFoundBead(t *testing.T) {
 		{name: "held", wantHeld: true, mutate: func(*testing.T, beads.Bead) {}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			inProgress, assignee := "in_progress", ownershipPoolTemplate
+			inProgress, assignee := "in_progress", session.ID
 			work, err := city.Create(beads.Bead{Title: "do-work", Type: "task"})
 			if err != nil {
 				t.Fatal(err)

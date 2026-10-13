@@ -318,8 +318,18 @@ esac
 	if mode == "present" {
 		writeClaimIdentityRaceProjection(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken, 1, session.StateActive)
 	}
+	installOwnSessionFrontDoor(t, cityDir, claimIdentityOwnSessionStore(t, claimIdentityRaceToken, "1"))
 
 	return cityDir, claimLock, projectionReady, workerProvider
+}
+
+func claimIdentityOwnSessionStore(t *testing.T, token, generation string) *ownSessionOnlyStore {
+	t.Helper()
+	mem := beads.NewMemStoreFrom(1, []beads.Bead{{
+		ID: claimIdentityRaceSessionID, Status: "open", Type: "session", Revision: 1,
+		Metadata: map[string]string{"session_name": "worker-1", "template": claimIdentityRaceRoute, "state": "active", "instance_token": token, "generation": generation},
+	}}, nil)
+	return &ownSessionOnlyStore{mem: mem, t: t, id: claimIdentityRaceSessionID}
 }
 
 func decodeClaimIdentityRaceResult(t *testing.T, stdout *bytes.Buffer) hookClaimJSONResult {
@@ -854,8 +864,15 @@ func TestHookCommandClaimIdentityFailureIsNeverNoWork(t *testing.T) {
 	}
 }
 
-func TestHookCommandClaimUsesCityIdentityStoreAndRigWorkStore(t *testing.T) {
+// A managed gc hook --claim [--drain-ack] acts only as the one verified session
+// incarnation; it may read that session's own row, may write only
+// current_claim_bead_id under atomic incarnation and prior-value preconditions,
+// may release only work that this incarnation itself holds, and on any identity
+// mismatch it changes nothing outside its own pending claim.
+func TestManagedHookClaimActsOnlyAsVerifiedSessionIncarnationWithOwnRowReadsConditionalClaimStampAndOwnWorkRelease(t *testing.T) {
 	cityDir, claimLock, _, workerProvider := newClaimIdentityRaceFixture(t, "present")
+	owned := claimIdentityOwnSessionStore(t, claimIdentityRaceToken, "1")
+	installOwnSessionFrontDoor(t, cityDir, owned)
 	// Reproduce the launched worker's ambient provider/store selection: its
 	// default handle is rig-scoped, while GC_CITY remains the explicit path to
 	// the separate city store that owns session identity beads.
@@ -884,17 +901,29 @@ func TestHookCommandClaimUsesCityIdentityStoreAndRigWorkStore(t *testing.T) {
 	if strings.Contains(stderr.String(), "session identity unavailable") {
 		t.Fatalf("city session identity read drained under rig worker environment: %s", stderr.String())
 	}
-	if attempts, err := os.ReadFile(os.Getenv("CLAIM_SOCKET_ATTEMPT_LOG")); err == nil && len(bytes.TrimSpace(attempts)) > 0 {
-		t.Fatalf("claim fence attempted city-store/socket access: %q", attempts)
+	if owned.reads == 0 || owned.writes != 1 {
+		t.Fatalf("own session accesses = %d reads, %d conditional writes", owned.reads, owned.writes)
+	}
+	stored, _ := owned.mem.Get(claimIdentityRaceSessionID)
+	if stored.Metadata["current_claim_bead_id"] != claimIdentityRaceWorkID {
+		t.Fatal("own session stamp missing")
 	}
 	claimCalls, err := os.ReadFile(os.Getenv("CLAIM_CALL_LOG"))
 	if err != nil {
 		t.Fatalf("read claim call log: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(claimCalls)), "\n")
-	if len(lines) != 1 || !strings.Contains(lines[0], "scope=rig ") ||
-		!strings.Contains(lines[0], "beads_dir="+os.Getenv("CLAIM_RIG_BEADS_DIR")+" ") {
-		t.Fatalf("claim mutations = %q, want exactly one against the rig store", claimCalls)
+	claimCount := 0
+	for _, line := range lines {
+		if !strings.Contains(line, "scope=rig ") || !strings.Contains(line, "beads_dir="+os.Getenv("CLAIM_RIG_BEADS_DIR")+" ") || !strings.Contains(line, claimIdentityRaceWorkID) {
+			t.Fatalf("foreign work mutation: %q", line)
+		}
+		if strings.Contains(line, " --claim ") {
+			claimCount++
+		}
+	}
+	if claimCount != 1 {
+		t.Fatalf("claim mutations = %d, want one", claimCount)
 	}
 }
 
@@ -922,6 +951,7 @@ func TestHookCommandClaimRejectsReplacedTokenAndAdmitsOnlyReplacement(t *testing
 
 	t.Setenv("GC_INSTANCE_TOKEN", replacementToken)
 	t.Setenv("GC_RUNTIME_EPOCH", "2")
+	installOwnSessionFrontDoor(t, cityDir, claimIdentityOwnSessionStore(t, replacementToken, "2"))
 	var freshStdout, freshStderr bytes.Buffer
 	freshCode := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &freshStdout, &freshStderr)
 	freshResult := decodeClaimIdentityRaceResult(t, &freshStdout)
@@ -934,7 +964,7 @@ func TestHookCommandClaimRejectsReplacedTokenAndAdmitsOnlyReplacement(t *testing
 }
 
 func TestHookCommandClaimRejectsIneligibleProjectedStates(t *testing.T) {
-	for _, state := range []session.State{session.StateClosed, session.StateSuspended, session.StateDraining, session.StateDrained} {
+	for _, state := range []session.State{session.StateClosed, session.StateSuspended, session.StateDrained} {
 		t.Run(string(state), func(t *testing.T) {
 			cityDir, claimLock, _, _ := newClaimIdentityRaceFixture(t, "never")
 			writeClaimIdentityRaceProjection(t, cityDir, claimIdentityRaceSessionID, claimIdentityRaceToken, 1, state)
@@ -1184,10 +1214,9 @@ func TestHookCommandClaimAbsentSessionBeadReportsClaimsErrored(t *testing.T) {
 	}
 }
 
-// TestHookCommandClaimProjectionDoesNotOpenCityStore proves the readable
-// controller projection is the entire worker-side identity authority: even a
-// corrupt/unopenable city store cannot make the hook dial or query it.
-func TestHookCommandClaimProjectionDoesNotOpenCityStore(t *testing.T) {
+// A valid projection cannot authorize a claim when its own session row is
+// unreadable. The new contract permits this exact read and fails closed.
+func TestHookCommandClaimProjectionCannotBypassUnreadableOwnSessionRow(t *testing.T) {
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS", "file")
@@ -1202,11 +1231,8 @@ func TestHookCommandClaimProjectionDoesNotOpenCityStore(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
 
-	if _, err := os.Stat(queryMarker); err != nil {
-		t.Fatalf("work query did not run with a valid projection: %v", err)
-	}
-	if strings.Contains(stderr.String(), "session identity unavailable") {
-		t.Fatalf("projection reader attempted city store: %s", stderr.String())
+	if _, err := os.Stat(queryMarker); !os.IsNotExist(err) {
+		t.Fatalf("work query ran without readable identity: %v", err)
 	}
 	if code != 1 {
 		t.Fatalf("code = %d, want 1 (JSON claims-errored drain without --drain-ack)", code)
@@ -1215,14 +1241,13 @@ func TestHookCommandClaimProjectionDoesNotOpenCityStore(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
 		t.Fatalf("stdout is not a JSON result: %v\n%s", err, stdout.String())
 	}
-	if result.Action != "drain" || result.Reason != hookClaimReasonNoWork {
-		t.Fatalf("result = %+v, want action=drain reason=no_work", result)
+	if result.Action != "drain" || result.Reason != hookClaimReasonClaimsErrored {
+		t.Fatalf("result = %+v, want action=drain reason=claims_errored", result)
 	}
 }
 
 // TestWriteHookClaimDrainStaleSessionWithDrainAck proves the stale-session drain
-// honors --drain-ack: it runs the drain-ack, marks the record acknowledged, and
-// exits 0 so a startup wrapper treats the refusal as a completed drain.
+// refuses acknowledgement: an unauthenticated caller has no release/ack authority.
 func TestWriteHookClaimDrainStaleSessionWithDrainAck(t *testing.T) {
 	acked := false
 	fakeAck := func(io.Writer) error { acked = true; return nil }
@@ -1230,18 +1255,18 @@ func TestWriteHookClaimDrainStaleSessionWithDrainAck(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := writeHookClaimDrain(hookClaimLabel, hookClaimReasonStaleSession, true, true, fakeAck, &stdout, &stderr)
 
-	if code != 0 {
-		t.Fatalf("code = %d, want 0 for an acknowledged drain; stderr=%s", code, stderr.String())
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 for an unacknowledged refusal; stderr=%s", code, stderr.String())
 	}
-	if !acked {
-		t.Fatalf("drain-ack function was not called")
+	if acked {
+		t.Fatalf("stale caller invoked drain-ack")
 	}
 	var result hookClaimJSONResult
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
 		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
 	}
-	if result.Action != "drain" || result.Reason != hookClaimReasonStaleSession || !result.DrainAcknowledged {
-		t.Fatalf("result = %+v, want drain/stale_session/acknowledged", result)
+	if result.Action != "drain" || result.Reason != hookClaimReasonStaleSession || result.DrainAcknowledged {
+		t.Fatalf("result = %+v, want drain/stale_session without acknowledgement", result)
 	}
 }
 

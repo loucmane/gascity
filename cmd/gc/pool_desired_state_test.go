@@ -2275,9 +2275,17 @@ func TestBuildDesiredState_BlockedFreshSessionMaterializesRunnableReplacement(t 
 			blocked.Metadata["pool_slot"] = "1"
 			blocked.Metadata["held_until"] = decisionTime.Add(time.Minute).Format(time.RFC3339)
 			blocked.Labels = append(blocked.Labels, "agent:claude-1")
-			snapshot := newSessionBeadSnapshot([]beads.Bead{blocked})
-			store := beads.NewMemStoreFrom(1, []beads.Bead{tt.work, blocked}, nil)
 			cityPath := t.TempDir()
+			store := newConfiguredAttemptTestStore(t, cityPath, cityPath)
+			if _, err := store.Create(tt.work); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			blocked, err = store.Create(blocked)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := newSessionBeadSnapshot([]beads.Bead{blocked})
 
 			result := buildDesiredStateWithSessionBeadsAt(
 				"test-city",

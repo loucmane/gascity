@@ -141,6 +141,26 @@ printf '[]'
 	return logPath
 }
 
+// publishOccupantClaimFence supplies the controller projection that accompanies
+// the runtime identity in a launched worker. The actor assertions below still
+// exercise the real claim and legacy-restamp paths.
+func publishOccupantClaimFence(t *testing.T, sessionID string) {
+	t.Helper()
+	const token = "occupant-claim-fixture"
+	b := beads.Bead{ID: sessionID, Type: sessionBeadType, Status: "open", Revision: 1, Metadata: map[string]string{
+		"state": "active", "instance_token": token, "generation": "1",
+		"session_name": os.Getenv("GC_SESSION_NAME"), "template": os.Getenv("GC_TEMPLATE"),
+		"alias": os.Getenv("GC_ALIAS"), "agent_name": os.Getenv("GC_AGENT"),
+	}}
+	info := sessiontest.SeedBead(t, b)
+	installOwnSessionFrontDoor(t, os.Getenv("GC_CITY"), &ownSessionOnlyStore{mem: beads.NewMemStoreFrom(1, []beads.Bead{b}, nil), t: t, id: sessionID})
+	if err := sessionpkg.PublishLiveSessionFenceProjection(os.Getenv("GC_CITY"), info); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_INSTANCE_TOKEN", token)
+	t.Setenv("GC_RUNTIME_EPOCH", "1")
+}
+
 // The production shape. An unaliased pool worker must claim under its session
 // bead id, and the slot label must not appear as an actor on any bd subprocess.
 func TestCmdHookClaimUnaliasedPoolWorkerClaimsUnderItsSessionBeadID(t *testing.T) {
@@ -160,6 +180,7 @@ func TestCmdHookClaimUnaliasedPoolWorkerClaimsUnderItsSessionBeadID(t *testing.T
 	t.Setenv("GC_AGENT", slotLabel)
 	t.Setenv("GC_SESSION_NAME", slotLabel)
 	t.Setenv("GC_SESSION_ID", sessionID)
+	publishOccupantClaimFence(t, sessionID)
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -210,6 +231,7 @@ func TestCmdHookClaimAliasedSessionStillClaimsUnderItsAlias(t *testing.T) {
 	t.Setenv("GC_AGENT", alias)
 	t.Setenv("GC_SESSION_NAME", "test-city--builder-3")
 	t.Setenv("GC_SESSION_ID", sessionID)
+	publishOccupantClaimFence(t, sessionID)
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)

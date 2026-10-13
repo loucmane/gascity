@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
@@ -107,7 +108,7 @@ func sessionOwnsLiveClaim(
 			}
 			return false, err
 		}
-		held = claimedWorkStillHeldBy(work, info.ID)
+		held = claimedWorkStillHeldBy(work, info)
 		return true, nil
 	})
 	if err != nil {
@@ -117,14 +118,15 @@ func sessionOwnsLiveClaim(
 }
 
 // claimedWorkStillHeldBy is the per-bead half of sessionOwnsLiveClaim.
-func claimedWorkStillHeldBy(work beads.Bead, sessionID string) bool {
+func claimedWorkStillHeldBy(work beads.Bead, info sessionpkg.Info) bool {
 	if work.Status == "closed" {
 		return false
 	}
-	if work.Status == "open" && strings.TrimSpace(work.Assignee) == "" {
+	identifiers := hookClaimIdentityCandidates(append(sessionAssignmentIdentifiersInfo(info), info.Alias, info.AgentName)...)
+	if !slices.Contains(identifiers, strings.TrimSpace(work.Assignee)) {
 		return false
 	}
-	if owner := strings.TrimSpace(work.Metadata[beadmeta.SessionIDMetadataKey]); owner != "" && owner != sessionID {
+	if owner := strings.TrimSpace(work.Metadata[beadmeta.SessionIDMetadataKey]); owner == "" || owner != info.ID {
 		return false
 	}
 	return true

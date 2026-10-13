@@ -153,6 +153,7 @@ func TestCmdHookClaimRestampsLegacySpellingOnAdoption(t *testing.T) {
 	t.Setenv("BEADS_ACTOR", sessionID)
 	t.Setenv("GC_SESSION_NAME", legacy)
 	t.Setenv("GC_SESSION_ID", sessionID)
+	publishOccupantClaimFence(t, sessionID)
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -201,6 +202,7 @@ func TestCmdHookClaimRefusesAdoptionWhenWorkStoreRestampFails(t *testing.T) {
 	t.Setenv("BEADS_ACTOR", sessionID)
 	t.Setenv("GC_SESSION_NAME", legacy)
 	t.Setenv("GC_SESSION_ID", sessionID)
+	publishOccupantClaimFence(t, sessionID)
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -249,6 +251,7 @@ func TestCmdHookClaimRestampsLegacySpellingOnReadyAssignment(t *testing.T) {
 	t.Setenv("BEADS_ACTOR", sessionID)
 	t.Setenv("GC_SESSION_NAME", legacy)
 	t.Setenv("GC_SESSION_ID", sessionID)
+	publishOccupantClaimFence(t, sessionID)
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)
@@ -293,6 +296,7 @@ func TestCmdHookClaimReadyAssignmentFailedRestampWarns(t *testing.T) {
 	t.Setenv("BEADS_ACTOR", sessionID)
 	t.Setenv("GC_SESSION_NAME", legacy)
 	t.Setenv("GC_SESSION_ID", sessionID)
+	publishOccupantClaimFence(t, sessionID)
 
 	var stdout, stderr bytes.Buffer
 	code := cmdHookWithOptions(nil, hookCommandOptions{Claim: true, JSON: true}, &stdout, &stderr)

@@ -9765,11 +9765,9 @@ func TestWorkflowDeleteSourceLocksTheCityScopeForABindingTarget(t *testing.T) {
 }
 
 func TestCmdWorkflowReopenSourceClearsRoutedToForResling(t *testing.T) {
-	// Backward-compat: when gc.run_target is not set on the source bead
-	// (legacy beads stamped before the field existed), reopen-source clears
-	// gc.routed_to so the caller's explicit re-sling can write the correct
-	// route.  A blank gc.routed_to is not ideal (route-reclaim skips it) but
-	// is no worse than the pre-FR-C0.1 behavior for this legacy class.
+	// ga-20zd deliberately supersedes the legacy blank-route expectation:
+	// clearing workflow/affinity must preserve the route until re-sling replaces
+	// it, so a failed re-sling cannot silently orphan this legacy source.
 	cityDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte("[workspace]\nname = \"test-city\"\n"), 0o644); err != nil {
 		t.Fatalf("write city.toml: %v", err)
@@ -9823,8 +9821,8 @@ func TestCmdWorkflowReopenSourceClearsRoutedToForResling(t *testing.T) {
 	if got := strings.TrimSpace(updated.Metadata["workflow_id"]); got != "" {
 		t.Fatalf("workflow_id = %q, want cleared", got)
 	}
-	if got := strings.TrimSpace(updated.Metadata["gc.routed_to"]); got != "" {
-		t.Fatalf("gc.routed_to = %q, want cleared (no gc.run_target → legacy blank)", got)
+	if got := strings.TrimSpace(updated.Metadata["gc.routed_to"]); got != "mayor" {
+		t.Fatalf("gc.routed_to = %q, want preserved until re-sling (ga-20zd)", got)
 	}
 	if got := strings.TrimSpace(updated.Metadata["gc.session_affinity"]); got != "" {
 		t.Fatalf("gc.session_affinity = %q, want cleared with unassigned reopen", got)

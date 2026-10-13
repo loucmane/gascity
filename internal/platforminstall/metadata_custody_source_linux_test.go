@@ -9,11 +9,11 @@ import (
 
 func TestMetadataCustodyOwningSourceProfile(t *testing.T) {
 	project := map[string]string{
-		"cmd/gc/main.go":                           "47b67dd6d7ba1d01426edcc7bc50b6798ec1bb6c2618bdb0e91071df05256ae9",
-		"cmd/gc/cmd_supervisor.go":                 "67726fee27d167e5f1720c604bb9b73ec0dc848b6ee0abf6f0691b419bdec19c",
-		"cmd/gc/dolt_start_managed.go":             "1050a984f884d09ce548dfce6341699d81e98a224f16b556b585a91020a1c1d2",
+		"cmd/gc/main.go":                           "f07b6c13a7c7af838ae6b0914fa65a11b4afdb2ea6a1faa25c9b2340c3848a85",
+		"cmd/gc/cmd_supervisor.go":                 "79f355551389d100edcbd07587981e90c8e0d9519c952c1dd8b0cb1c7f33dcaf",
+		"cmd/gc/dolt_start_managed.go":             "277cb276f1798559a5ea02a3a2f1549472338f4f3c90d8a5d39282bb8f8760e5",
 		"internal/api/supervisor.go":               "f513589dfa77d547a51280da68e13db5a46d5d660b0384b9149e4797e752141e",
-		"internal/api/huma_handlers_supervisor.go": "01bec09f1006f0b1ef78cf65a9f405c7179c2d5a5a112a05eb13db088821f386",
+		"internal/api/huma_handlers_supervisor.go": "b71ac882c17fdc48e2d315249aa5056c8a668b06846944225363d05551c6c064",
 		"internal/api/metadata_lease.go":           "22405e3c423172cfba4c5e9e025a852b44277554883733a65b73f3291aab9fa6",
 		"internal/api/middleware.go":               "4668db0734a4ba08160409c47d2caa75f845e1cc32f41ce81207f10a3bcee104",
 		"internal/api/writeauth.go":                "10fd588b3c171c4204ffaef4594a72f63e565db32371d3847acd2cf8a29894d8",

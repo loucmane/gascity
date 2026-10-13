@@ -29,6 +29,7 @@ type phase2ProviderCase struct {
 	wantEmitsPermission   bool
 	wantAcceptDialogs     *bool
 	overrideOption        string
+	optionDefaults        map[string]string
 	overrideValue         string
 	wantOverrideArgs      []string
 }
@@ -208,6 +209,7 @@ func resolvePhase2Template(t *testing.T, tc phase2ProviderCase) TemplateParams {
 
 	agentCfg := &config.Agent{
 		Name:               "worker",
+		OptionDefaults:     tc.optionDefaults,
 		Provider:           tc.family,
 		WorkDir:            filepath.Join(".gc", "agents", "phase2", tc.family),
 		Nudge:              "nudge-" + tc.family,

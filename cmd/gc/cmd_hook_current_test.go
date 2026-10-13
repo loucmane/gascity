@@ -21,7 +21,7 @@ const hookCurrentSessionID = "mc-sess1"
 func hookCurrentFrontDoor(t *testing.T, claim string) *session.Store {
 	t.Helper()
 	sessionID := hookCurrentSessionID
-	meta := map[string]string{"state": string(session.StateActive)}
+	meta := map[string]string{"state": string(session.StateActive), "instance_token": "current-fixture", "generation": "1"}
 	if claim != "" {
 		meta[beadmeta.CurrentClaimBeadIDMetadataKey] = claim
 	}
@@ -128,6 +128,9 @@ func TestCmdHookCurrentRequiresASessionIdentity(t *testing.T) {
 // CALLING session from GC_SESSION_ID — the same variable the claim path stamped
 // under — rather than any other identity variable.
 func TestCmdHookCurrentReadsTheCallingSessionFromEnv(t *testing.T) {
+	clearGCEnv(t)
+	t.Setenv("GC_INSTANCE_TOKEN", "current-fixture")
+	t.Setenv("GC_RUNTIME_EPOCH", "1")
 	t.Setenv("GC_SESSION_ID", "mc-sess1")
 	restore := hookCurrentSessionFrontDoor
 	t.Cleanup(func() { hookCurrentSessionFrontDoor = restore })

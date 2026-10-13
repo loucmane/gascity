@@ -50,6 +50,16 @@ func TestPhase2InitialInputDelivery(t *testing.T) {
 					"initial_message":        "Ship it.",
 					phase2OverrideOption(tc): tc.overrideValue,
 				})
+				if tc.overrideOption == "mcp_approval" {
+					// MCP approval is permission policy, not worker metadata.
+					// Keep the schema conformance assertion on the config-owned
+					// option and prove the untrusted override was refused first.
+					if containsOrderedArgs(prepared.cfg.Command, tc.wantOverrideArgs) {
+						t.Fatal("metadata enabled MCP approval (ga-6umo)")
+					}
+					tc.optionDefaults = map[string]string{tc.overrideOption: tc.overrideValue}
+					prepared = preparePhase2Start(t, tc, "", map[string]string{"initial_message": "Ship it."})
+				}
 
 				reporter.Require(t, inputOverrideDefaultsResult(tc, prepared))
 			})

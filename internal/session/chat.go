@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/git"
 	"github.com/gastownhall/gascity/internal/pathutil"
@@ -609,7 +610,7 @@ func (m *Manager) ensureRunning(ctx context.Context, id string, b beads.Bead, se
 			return fmt.Errorf("tombstoning claim-fence projection before token replacement: %w", err)
 		}
 		instanceToken = NewInstanceToken()
-		if err := m.store.SetMetadata(id, "instance_token", instanceToken); err != nil {
+		if err := m.store.Update(id, beads.UpdateOpts{Metadata: map[string]string{"instance_token": instanceToken, beadmeta.CurrentClaimBeadIDMetadataKey: ""}}); err != nil {
 			return fmt.Errorf("storing instance token: %w", err)
 		}
 		if b.Metadata == nil {
@@ -755,7 +756,7 @@ func (m *Manager) ensureRunningRuntimeOnly(ctx context.Context, id string, b bea
 			return fmt.Errorf("tombstoning claim-fence projection before token replacement: %w", err)
 		}
 		instanceToken = NewInstanceToken()
-		if err := m.store.SetMetadata(id, "instance_token", instanceToken); err != nil {
+		if err := m.store.Update(id, beads.UpdateOpts{Metadata: map[string]string{"instance_token": instanceToken, beadmeta.CurrentClaimBeadIDMetadataKey: ""}}); err != nil {
 			return fmt.Errorf("storing instance token: %w", err)
 		}
 		if b.Metadata == nil {

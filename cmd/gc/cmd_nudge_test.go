@@ -580,6 +580,7 @@ func TestDeliverSessionNudgeWithWorkerAcksDeliveredUnobservedInsteadOfFailing(t 
 
 	target := nudgeTarget{
 		cityPath:    dir,
+		cfg:         resumableNudgeTestConfig("claude"),
 		sessionID:   info.ID,
 		sessionName: info.SessionName,
 	}
