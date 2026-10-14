@@ -196,6 +196,9 @@ func preserveTestControlEnv(key string) bool {
 		key == managedDoltTestModeEnv ||
 		key == managedDoltTestParentPIDEnv ||
 		key == "GC_DOLT_REAL_BINARY" ||
+		// The real-bd pin for opt-in proxied CAS host tests (ga-vfug); scrubbing it
+		// left TestProxiedNativeClaimCAS unable to see the binary it must use.
+		key == "GC_ACCEPTANCE_BD_BIN" ||
 		// The live herdr tier's opt-in. Without it here the scrub below would
 		// strip the variable before any cmd/gc live journey could read it, so
 		// `make test-herdr-live` could never reach the journeys in this package.
