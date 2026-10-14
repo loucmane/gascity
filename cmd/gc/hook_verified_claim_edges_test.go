@@ -48,23 +48,28 @@ func TestVerifiedHookBrokenOutputConditionallyClearsPublishedClaimAndUnwinds(t *
 	released := 0
 	ops := hookClaimOps{
 		PublishRunMap: noopPublishRunMap,
-		Release: func(_ context.Context, _ string, _ []string, id, assignee string) (bool, error) {
-			if id != "work-own" || assignee != v.ID {
+		EmitClaimReleased: func(record hookClaimReleaseRecord) {
+			if record.BeadID != "work-own" || record.Assignee != v.ID {
 				t.Fatal("wrong pending release")
 			}
 			released++
-			return true, nil
 		},
 	}
 	ops.applyDefaults()
 	// This fixture needs no work identity patch; the test owns the session-side
 	// stamp/clear and output rollback, independently of Git probes.
 	bead := beads.Bead{ID: "work-own", Type: "task", Status: "in_progress", Assignee: v.ID, Metadata: map[string]string{beadmeta.ClaimedAtMetadataKey: "2026-10-13T00:00:00Z"}}
+	mem := beads.NewMemStoreFrom(1, []beads.Bead{bead}, nil)
+	installVerifiedWorkStore(t, v, mem)
 	opts := hookClaimOptions{Verified: v, Assignee: v.ID, JSON: true}
 	code := writeHookClaimWorkResultForBead(hookClaimJSONResult{Action: "work", BeadID: bead.ID}, bead, opts, ops, "", true, verifiedBrokenOutput{}, io.Discard)
 	row, _ := own.mem.Get(v.ID)
 	if code != 1 || released != 1 || own.writes != 2 || row.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey] != "" {
 		t.Fatalf("code=%d releases=%d writes=%d", code, released, own.writes)
+	}
+	live, _ := mem.Get(bead.ID)
+	if live.Status != "open" || live.Assignee != "" {
+		t.Fatal("broken output did not unwind fenced work")
 	}
 }
 
@@ -84,7 +89,7 @@ func (s *releaseWorkCASRace) UpdateIfMatch(id string, rev int64, opts beads.Upda
 
 func TestVerifiedHookReleaseCannotOverwriteConcurrentWorkOwnership(t *testing.T) {
 	v, _ := newVerifiedHookFixture(t)
-	mem := beads.NewMemStoreFrom(1, []beads.Bead{{ID: "work", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID}}}, nil)
+	mem := beads.NewMemStoreFrom(1, []beads.Bead{{ID: "work", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID, verifiedHookIncarnationKey: v.workIncarnation(), verifiedHookAttemptKey: "fixture-attempt"}}}, nil)
 	store := &releaseWorkCASRace{MemStore: mem, beforeWrite: func() {
 		if err := mem.SetMetadata("work", beadmeta.SessionIDMetadataKey, "s-other"); err != nil {
 			t.Fatal(err)
@@ -103,7 +108,7 @@ type releaseNoCASStore struct{ beads.Store }
 
 func TestVerifiedHookReleaseWithoutAtomicBackendRefuses(t *testing.T) {
 	v, _ := newVerifiedHookFixture(t)
-	mem := beads.NewMemStoreFrom(1, []beads.Bead{{ID: "work", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID}}}, nil)
+	mem := beads.NewMemStoreFrom(1, []beads.Bead{{ID: "work", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID, verifiedHookIncarnationKey: v.workIncarnation(), verifiedHookAttemptKey: "fixture-attempt"}}}, nil)
 	if err := releaseVerifiedHookClaims(v, releaseNoCASStore{mem}); !errors.Is(err, beads.ErrConditionalWriteUnsupported) {
 		t.Fatalf("unfenced release: %v", err)
 	}
@@ -166,7 +171,7 @@ func TestVerifiedHookDrainAckReleasesOnlyConfiguredStoresAndClearsOwnStamp(t *te
 			t.Fatal(err)
 		}
 		stores[i] = store
-		work[i], err = store.Create(beads.Bead{Title: "owned work", Type: "task", Status: "in_progress", Assignee: v.ID, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID}})
+		work[i], err = store.Create(beads.Bead{Title: "owned work", Type: "task", Status: "in_progress", Assignee: v.ID, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID, verifiedHookIncarnationKey: v.workIncarnation(), verifiedHookAttemptKey: "fixture-attempt"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -186,6 +191,7 @@ func TestVerifiedHookDrainAckReleasesOnlyConfiguredStoresAndClearsOwnStamp(t *te
 	if err := sp.Start(context.Background(), v.SessionName, runtime.Config{}); err != nil {
 		t.Fatal(err)
 	}
+	mustSetMeta(t, sp, v.SessionName, "GC_RUNTIME_EPOCH", "1")
 	if err := sp.SetMeta(v.SessionName, "GC_INSTANCE_TOKEN", "own-fixture"); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +222,7 @@ func TestVerifiedHookDrainAckReleasesOnlyConfiguredStoresAndClearsOwnStamp(t *te
 	if err != nil || row.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey] != "" || own.writes != 2 {
 		t.Fatalf("own stamp clear: writes=%d err=%v", own.writes, err)
 	}
-	if ack, _ := sp.GetMeta(v.SessionName, "GC_DRAIN_ACK"); ack != "1" {
+	if ack, _ := sp.GetMeta(v.SessionName, "GC_DRAIN_ACK"); ack != verifiedDrainAckValue(v) {
 		t.Fatal("verified provider acknowledgement missing")
 	}
 }
@@ -274,15 +280,16 @@ func TestVerifiedHookLateFailureUnwindsPendingClaimWithoutClearingSuccessor(t *t
 				ListContinuation: func(context.Context, string, []string, string, string) ([]beads.Bead, error) {
 					return nil, errors.New("fixture continuation read unavailable")
 				},
-				Release: func(_ context.Context, _ string, _ []string, id, assignee string) (bool, error) {
-					if id != bead.ID || assignee != v.ID {
+				EmitClaimReleased: func(record hookClaimReleaseRecord) {
+					if record.BeadID != bead.ID || record.Assignee != v.ID {
 						t.Fatal("foreign pending release")
 					}
 					released++
-					return true, nil
 				},
 			}
 			ops.applyDefaults()
+			mem := beads.NewMemStoreFrom(1, []beads.Bead{bead}, nil)
+			installVerifiedWorkStore(t, v, mem)
 			var out bytes.Buffer
 			opts := hookClaimOptions{Verified: v, Assignee: v.ID, Env: []string{"GC_SESSION_ID=" + v.ID}, JSON: true}
 			code := writeHookClaimWorkResultForBead(hookClaimJSONResult{Action: "work", BeadID: bead.ID}, bead, opts, ops, "", true, &out, io.Discard)
@@ -294,6 +301,10 @@ func TestVerifiedHookLateFailureUnwindsPendingClaimWithoutClearingSuccessor(t *t
 			}
 			if code != 1 || result.Reason != wantReason || released != 1 || own.writes != wantWrites || row.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey] != wantClaim {
 				t.Fatalf("late failure: code=%d result=%+v released=%d writes=%d row=%+v", code, result, released, own.writes, row)
+			}
+			live, _ := mem.Get(bead.ID)
+			if live.Status != "open" || live.Assignee != "" {
+				t.Fatal("late failure did not unwind fenced work")
 			}
 		})
 	}

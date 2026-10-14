@@ -179,7 +179,7 @@ func (o *providerDrainOps) isDrainAcked(sessionName string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("reading GC_DRAIN_ACK: %w", err)
 	}
-	return val == "1", nil
+	return providerDrainAckValueMatches(o.sp, sessionName, val)
 }
 
 func (o *providerDrainOps) setRestartRequested(sessionName string) error {

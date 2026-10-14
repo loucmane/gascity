@@ -146,6 +146,7 @@ printf '[]'
 // exercise the real claim and legacy-restamp paths.
 func publishOccupantClaimFence(t *testing.T, sessionID string) {
 	t.Helper()
+	installCommandVerifiedWorkStore(t)
 	const token = "occupant-claim-fixture"
 	b := beads.Bead{ID: sessionID, Type: sessionBeadType, Status: "open", Revision: 1, Metadata: map[string]string{
 		"state": "active", "instance_token": token, "generation": "1",

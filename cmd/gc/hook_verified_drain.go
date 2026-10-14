@@ -3,9 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
-	"slices"
 
-	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
@@ -61,7 +59,7 @@ func (v *VerifiedSession) drainAck(route *hookClaimClassRoute, stderr io.Writer)
 // releaseVerifiedHookClaims is deliberately separate from the controller's
 // administrative release sweep: workers have neither name-resolution authority
 // nor its unconditional fallback. Each release guards the whole observed row,
-// including status, assignee and gc.session_id, in one revision CAS.
+// including status, assignee and the work-side incarnation, in one revision CAS.
 func releaseVerifiedHookClaims(v *VerifiedSession, store beads.Store) error {
 	if _, err := v.front.ReadVerified(v.VerifiedSession); err != nil {
 		return err
@@ -73,7 +71,7 @@ func releaseVerifiedHookClaims(v *VerifiedSession, store beads.Store) error {
 			return err
 		}
 		for _, item := range items {
-			if item.Metadata[beadmeta.SessionIDMetadataKey] != v.ID || !slices.Contains(v.identifiers(), item.Assignee) {
+			if !verifiedHookOwnsWork(v, item) {
 				continue
 			}
 			if _, err := v.front.ReadVerified(v.VerifiedSession); err != nil {
@@ -83,23 +81,19 @@ func releaseVerifiedHookClaims(v *VerifiedSession, store beads.Store) error {
 			if err != nil {
 				return err
 			}
-			if live.ID != item.ID || live.Status != "in_progress" || live.Metadata[beadmeta.SessionIDMetadataKey] != v.ID || !slices.Contains(v.identifiers(), live.Assignee) {
+			if live.ID != item.ID || !verifiedHookOwnsWork(v, live) {
 				continue
 			}
 			writer, ok := beads.RequiredConditionalWriterFor(store)
 			if !ok {
 				return beads.ErrConditionalWriteUnsupported
 			}
-			// This is the last read before the work CAS; a stale incarnation
-			// cannot use the controller's wider release authority.
+			// A successor adopting after this read changes the work marker and
+			// revision, so this CAS cannot release the successor's assignment.
 			if _, err := v.front.ReadVerified(v.VerifiedSession); err != nil {
 				return err
 			}
-			status, empty := "open", ""
-			err = writer.UpdateIfMatch(live.ID, live.Revision, beads.UpdateOpts{
-				Status: &status, Assignee: &empty,
-				Metadata: map[string]string{beadmeta.SessionAffinityMetadataKey: "", beadmeta.ContinuationGroupMetadataKey: ""},
-			})
+			err = writer.UpdateIfMatch(live.ID, live.Revision, verifiedHookReleasePatch())
 			if beads.IsPreconditionFailed(err) {
 				continue
 			}
@@ -130,7 +124,7 @@ func acknowledgeVerifiedHookProvider(v *VerifiedSession, sp runtime.Provider) er
 		{reconcilerDrainAckGenerationKey, "", true},
 		{drainAckRequesterInstanceTokenKey, v.InstanceTokenSHA256, false},
 		{reconcilerDrainAckSourceKey, drainAckSourceAgentValue, false},
-		{"GC_DRAIN_ACK", "1", false},
+		{"GC_DRAIN_ACK", verifiedDrainAckValue(v), false},
 	} {
 		if _, err := v.front.ReadVerified(v.VerifiedSession); err != nil {
 			return err
@@ -150,6 +144,18 @@ func acknowledgeVerifiedHookProvider(v *VerifiedSession, sp runtime.Provider) er
 		if err != nil {
 			return err
 		}
+	}
+	// A runtime replacement during the last write leaves an inert addressed
+	// value, and must not be reported as a successful acknowledgement here.
+	if _, err := v.front.ReadVerified(v.VerifiedSession); err != nil {
+		return err
+	}
+	matched, err := providerDrainAckValueMatches(sp, v.SessionName, verifiedDrainAckValue(v))
+	if err != nil {
+		return err
+	}
+	if !matched {
+		return session.ErrStaleSession
 	}
 	return nil
 }

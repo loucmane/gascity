@@ -2286,7 +2286,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 				continue
 			default:
 				if dops != nil {
-					if acked, _ := dops.isDrainAcked(name); acked {
+					if acked, _ := dops.isDrainAcked(name); acked && controllerDrainAckMatches(infoByID[id], sp, name) {
 						// gc-hz0nu: every drain-acked decision below depends on the
 						// store-derived desired-state / assigned-work view. During a
 						// partial store query (transient Dolt failure) that view is
@@ -2795,7 +2795,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 		// the session falls through to orphan handling and can block the next
 		// worker wave until the stale awake bead ages out.
 		if dops != nil {
-			if acked, _ := dops.isDrainAcked(name); acked {
+			if acked, _ := dops.isDrainAcked(name); acked && controllerDrainAckMatches(infoByID[id], sp, name) {
 				if !alive && staleOrLegacyDrainAckBeforeStartInfo(infoByID[id], sp, name) {
 					_ = clearReconcilerDrainAckMetadata(sp, name)
 				} else {

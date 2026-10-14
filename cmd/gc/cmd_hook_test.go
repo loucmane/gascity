@@ -28,6 +28,7 @@ import (
 // runtime identity environment without the corresponding lifecycle projection.
 func startHookClaimFixtureSession(t *testing.T, cityDir, template, alias, sessionName, origin string) {
 	t.Helper()
+	installCommandVerifiedWorkStore(t)
 	store := beads.NewMemStore()
 	manager := session.NewManagerWithOptions(
 		store,
@@ -2533,7 +2534,7 @@ mode = "on_demand"
 	}
 
 	fakeBin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fakeBin, "bd"), []byte("#!/bin/sh\nprintf '[]'\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(fakeBin, "bd"), []byte("#!/bin/sh\nprintf '[{\"id\":\"ga-frpt4k\",\"status\":\"in_progress\",\"assignee\":\"builder\",\"metadata\":{\"gc.routed_to\":\"builder\"}}]'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1196,6 +1196,16 @@ func hookClaimCandidateIsMessage(candidate beads.Bead) bool {
 // turn legitimately made. A held claim that goes undelivered is re-served to the
 // next turn by the existing-assignment tier instead.
 func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, minted bool, stdout, stderr io.Writer) int {
+	if opts.Verified != nil {
+		fenced, err := fenceVerifiedHookWork(bead, opts, ops, dir)
+		if err != nil {
+			// A claim whose work fence never landed is not ours to release.
+			// Leave it to controller recovery instead of an assignee-only unwind.
+			return verifiedHookFailure(err, opts, stdout, stderr)
+		}
+		bead = fenced
+		result.Assignee = bead.Assignee
+	}
 	// F-B straddle. The CAS was STARTED inside the window and LANDED outside it:
 	// the claim-write child carries its own ceiling, so a claim can commit after
 	// the invoking turn is already gone. That is the same parked claim by another
@@ -1217,7 +1227,10 @@ func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead
 		}
 		opts.publishedClaim = bead.ID
 	}
-	durable, stamped := stampHookClaimIdentity(bead, opts, ops, dir, stderr)
+	durable, stamped := bead, opts.Verified != nil
+	if opts.Verified == nil {
+		durable, stamped = stampHookClaimIdentity(bead, opts, ops, dir, stderr)
+	}
 	if stamped && hookClaimLifecycleCandidate(durable, opts) {
 		ops.EmitExecutionStepStarted(durable, dir, opts.Env, opts.Assignee)
 	}
@@ -1324,7 +1337,13 @@ func unwindUndeliveredHookClaim(reason, cause string, bead beads.Bead, opts hook
 	// window is already spent, and the unwind must still be allowed to run.
 	ctx, cancel := context.WithTimeout(context.Background(), hookClaimMutationTimeout)
 	defer cancel()
-	released, err := ops.Release(ctx, dir, opts.Env, bead.ID, assignee)
+	var released bool
+	var err error
+	if opts.Verified != nil {
+		released, err = releaseVerifiedHookPending(bead, opts, ops, dir)
+	} else {
+		released, err = ops.Release(ctx, dir, opts.Env, bead.ID, assignee)
+	}
 	if released && err == nil {
 		ops.EmitClaimReleased(hookClaimReleaseRecord{BeadID: bead.ID, Assignee: assignee, Reason: reason})
 	}

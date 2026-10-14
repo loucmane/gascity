@@ -117,28 +117,36 @@ func TestVerifiedHookEnvironmentRefusesForeignNamesAndTrailingAgent(t *testing.T
 
 func TestVerifiedHookStampRaceUnwindsOnlyPendingClaim(t *testing.T) {
 	v, store := newVerifiedHookFixture(t)
-	if err := store.mem.SetMetadata(v.ID, "instance_token", "successor"); err != nil {
-		t.Fatal(err)
-	}
+	bead := beads.Bead{ID: "work-own", Assignee: v.ID, Status: "in_progress", Revision: 1}
+	mem := beads.NewMemStoreFrom(1, []beads.Bead{bead}, nil)
+	work := &releaseWorkCASRace{MemStore: mem, beforeWrite: func() {
+		if err := store.mem.SetMetadata(v.ID, "instance_token", "successor"); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	installVerifiedWorkStore(t, v, work)
 	releases, acknowledgements := 0, 0
 	ops := hookClaimOps{
-		Release: func(_ context.Context, _ string, _ []string, id, assignee string) (bool, error) {
-			if id != "work-own" || assignee != v.ID {
+		EmitClaimReleased: func(record hookClaimReleaseRecord) {
+			if record.BeadID != "work-own" || record.Assignee != v.ID {
 				t.Fatal("foreign release")
 			}
 			releases++
-			return true, nil
 		},
 		DrainAck: func(io.Writer) error { acknowledgements++; return nil },
 	}
 	ops.applyDefaults()
 	var out, diagnostic bytes.Buffer
 	code := writeHookClaimWorkResultForBead(hookClaimJSONResult{Action: "work", BeadID: "work-own"},
-		beads.Bead{ID: "work-own", Assignee: v.ID, Status: "in_progress"},
+		bead,
 		hookClaimOptions{Verified: v, Assignee: v.ID, JSON: true, DrainAck: true}, ops, "", true, &out, &diagnostic)
 	result := decodeClaimIdentityRaceResult(t, &out)
 	if code != 1 || result.Reason != hookClaimReasonStaleSession || releases != 1 || acknowledgements != 0 || store.writes != 0 {
 		t.Fatalf("code=%d result=%+v release=%d ack=%d writes=%d", code, result, releases, acknowledgements, store.writes)
+	}
+	live, _ := mem.Get(bead.ID)
+	if live.Status != "open" || live.Assignee != "" {
+		t.Fatal("pending work was not released")
 	}
 }
 
@@ -179,9 +187,9 @@ func TestVerifiedHookReleaseRequiresBothOwnershipFieldsAndCurrentIncarnation(t *
 		t.Run(map[bool]string{false: "current", true: "successor"}[stale], func(t *testing.T) {
 			v, store := newVerifiedHookFixture(t)
 			work := beads.NewMemStoreFrom(1, []beads.Bead{
-				{ID: "work-own", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID}},
+				{ID: "work-own", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID, verifiedHookIncarnationKey: v.workIncarnation(), verifiedHookAttemptKey: "fixture-attempt"}},
 				{ID: "other-id", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: "s-other"}},
-				{ID: "other-assignee", Type: "task", Status: "in_progress", Assignee: "s-other", Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID}},
+				{ID: "other-assignee", Type: "task", Status: "in_progress", Assignee: "s-other", Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID, verifiedHookIncarnationKey: v.workIncarnation(), verifiedHookAttemptKey: "fixture-attempt"}},
 				{ID: "unstamped", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1},
 			}, nil)
 			if stale {
@@ -227,13 +235,14 @@ func TestVerifiedHookProviderAckRefusesReusedName(t *testing.T) {
 	if ack, _ := sp.GetMeta(v.SessionName, "GC_DRAIN_ACK"); ack != "" {
 		t.Fatal("foreign acknowledgement")
 	}
+	mustSetMeta(t, sp, v.SessionName, "GC_RUNTIME_EPOCH", "1")
 	if err := sp.SetMeta(v.SessionName, "GC_INSTANCE_TOKEN", "own-fixture"); err != nil {
 		t.Fatal(err)
 	}
 	if err := acknowledgeVerifiedHookProvider(v, sp); err != nil {
 		t.Fatal(err)
 	}
-	if ack, _ := sp.GetMeta(v.SessionName, "GC_DRAIN_ACK"); ack != "1" {
+	if ack, _ := sp.GetMeta(v.SessionName, "GC_DRAIN_ACK"); ack != verifiedDrainAckValue(v) {
 		t.Fatal("own acknowledgement missing")
 	}
 }
@@ -375,7 +384,7 @@ func (s *verifiedReleaseRaceStore) Get(id string) (beads.Bead, error) {
 
 func TestVerifiedHookReleaseRechecksIncarnationImmediatelyBeforeCAS(t *testing.T) {
 	v, own := newVerifiedHookFixture(t)
-	work := &verifiedReleaseRaceStore{MemStore: beads.NewMemStoreFrom(1, []beads.Bead{{ID: "work", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID}}}, nil)}
+	work := &verifiedReleaseRaceStore{MemStore: beads.NewMemStoreFrom(1, []beads.Bead{{ID: "work", Type: "task", Status: "in_progress", Assignee: v.ID, Revision: 1, Metadata: map[string]string{beadmeta.SessionIDMetadataKey: v.ID, verifiedHookIncarnationKey: v.workIncarnation(), verifiedHookAttemptKey: "fixture-attempt"}}}, nil)}
 	work.onGet = func() {
 		if err := own.mem.SetMetadata(v.ID, "generation", "2"); err != nil {
 			t.Fatal(err)

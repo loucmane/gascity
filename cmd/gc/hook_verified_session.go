@@ -97,18 +97,15 @@ func bindVerifiedHookOps(ops *hookClaimOps, v *VerifiedSession) {
 		return
 	}
 	ops.applyDefaults()
-	claim, restamp, stamp := ops.Claim, ops.RestampAdopted, ops.StampWorkMeta
+	claim, stamp := ops.Claim, ops.StampWorkMeta
 	ops.Claim = func(ctx context.Context, dir string, env []string, id, assignee string) (beads.Bead, bool, error) {
 		if err := v.mayClaim(); err != nil {
 			return beads.Bead{}, false, err
 		}
 		return claim(ctx, dir, env, id, assignee)
 	}
-	ops.RestampAdopted = func(ctx context.Context, dir string, env []string, id, from, to string) (bool, error) {
-		if err := v.mayClaim(); err != nil {
-			return false, err
-		}
-		return restamp(ctx, dir, env, id, from, to)
+	ops.RestampAdopted = func(_ context.Context, dir string, _ []string, id, from, to string) (bool, error) {
+		return restampVerifiedHookWork(v, ops.ClassRoute, dir, id, from, to)
 	}
 	ops.StampWorkMeta = func(ctx context.Context, dir string, env []string, id, assignee string, patch map[string]string) error {
 		if err := v.mayClaim(); err != nil {

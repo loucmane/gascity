@@ -159,6 +159,7 @@ func writeClaimIdentityRaceProjection(t *testing.T, cityDir, sessionID, token st
 // store return empty, pinning both halves of the production topology.
 func newClaimIdentityRaceFixture(t *testing.T, mode string) (string, string, string, string) {
 	t.Helper()
+	installCommandVerifiedWorkStore(t)
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS_FORCE_FALLBACK", "1")
