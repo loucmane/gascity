@@ -6,6 +6,7 @@ go_library(
         "beacon.go",
         "carrier.go",
         "dialog.go",
+        "drain_ack.go",
         "envsecret.go",
         "fake.go",
         "fingerprint.go",

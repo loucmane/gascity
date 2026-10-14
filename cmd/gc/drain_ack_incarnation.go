@@ -2,15 +2,13 @@
 package main
 
 import (
-	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
 )
 
-const drainAckIncarnationPrefix = "incarnation:"
+const drainAckIncarnationPrefix = runtime.DrainAckIncarnationPrefix
 
 // The acknowledgement itself carries its author. Separate source/requester
 // keys are useful diagnostics but cannot authenticate a write across name
@@ -20,24 +18,11 @@ func verifiedDrainAckValue(v *VerifiedSession) string {
 }
 
 func drainAckIncarnationMatches(value, generation, token string) bool {
-	n, err := strconv.Atoi(generation)
-	return err == nil && n > 0 && token != "" &&
-		value == fmt.Sprintf("%s%d:%s", drainAckIncarnationPrefix, n, drainAckInstanceTokenDigest(token))
+	return runtime.DrainAckMatchesIncarnation(value, generation, token)
 }
 
 func providerDrainAckValueMatches(sp runtime.Provider, name, value string) (bool, error) {
-	if !strings.HasPrefix(value, drainAckIncarnationPrefix) {
-		return value == "1", nil
-	}
-	token, err := sp.GetMeta(name, "GC_INSTANCE_TOKEN")
-	if err != nil {
-		return false, err
-	}
-	generation, err := sp.GetMeta(name, "GC_RUNTIME_EPOCH")
-	if err != nil {
-		return false, err
-	}
-	return drainAckIncarnationMatches(value, generation, token), nil
+	return runtime.DrainAckMatchesRuntime(sp, name, value)
 }
 
 // Both controller stop paths require the acknowledgement to name the row AND

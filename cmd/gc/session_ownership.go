@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
@@ -128,6 +129,13 @@ func claimedWorkStillHeldBy(work beads.Bead, info sessionpkg.Info) bool {
 	}
 	if owner := strings.TrimSpace(work.Metadata[beadmeta.SessionIDMetadataKey]); owner == "" || owner != info.ID {
 		return false
+	}
+	// New incarnations must still clear current_claim_bead_id: legacy work
+	// has no marker, and the pointer must never be inherited by a successor.
+	if marker := work.Metadata[verifiedHookIncarnationKey]; marker != "" {
+		generation, err := strconv.Atoi(info.Generation)
+		return err == nil && generation > 0 && info.InstanceToken != "" &&
+			marker == fmt.Sprintf("%d:%s", generation, drainAckInstanceTokenDigest(info.InstanceToken))
 	}
 	return true
 }

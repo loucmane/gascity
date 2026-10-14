@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
@@ -59,8 +60,12 @@ func fenceVerifiedHookWork(bead beads.Bead, opts hookClaimOptions, ops hookClaim
 		return beads.Bead{}, beads.ErrConditionalWriteUnsupported
 	}
 	patch := hookClaimIdentityPatch(live, opts, ops, dir)
-	patch[beadmeta.SessionIDMetadataKey] = v.ID
-	patch[beadmeta.SessionNameMetadataKey] = v.SessionName
+	// Control kinds intentionally carry no execution-session back-references.
+	// Their claim authority is the assignee plus the incarnation/attempt CAS.
+	if !beadmeta.IsControlKind(strings.TrimSpace(live.Metadata[beadmeta.KindMetadataKey])) {
+		patch[beadmeta.SessionIDMetadataKey] = v.ID
+		patch[beadmeta.SessionNameMetadataKey] = v.SessionName
+	}
 	patch[verifiedHookIncarnationKey] = v.workIncarnation()
 	patch[verifiedHookAttemptKey] = uuid.NewString()
 	update := beads.UpdateOpts{Metadata: patch}
@@ -113,8 +118,10 @@ func restampVerifiedHookWork(v *VerifiedSession, route *hookClaimClassRoute, dir
 }
 
 func verifiedHookOwnsWork(v *VerifiedSession, b beads.Bead) bool {
+	ownerMatches := b.Metadata[beadmeta.SessionIDMetadataKey] == v.ID ||
+		beadmeta.IsControlKind(strings.TrimSpace(b.Metadata[beadmeta.KindMetadataKey]))
 	return b.Status == "in_progress" && slices.Contains(v.identifiers(), b.Assignee) &&
-		b.Metadata[beadmeta.SessionIDMetadataKey] == v.ID &&
+		ownerMatches &&
 		b.Metadata[verifiedHookIncarnationKey] == v.workIncarnation() &&
 		b.Metadata[verifiedHookAttemptKey] != ""
 }

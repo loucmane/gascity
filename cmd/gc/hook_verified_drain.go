@@ -11,6 +11,8 @@ import (
 
 // Provider construction receives only the authenticated row, with its raw token
 // removed by ReadVerified. It never loads the all-session provider snapshot.
+// GC_SESSION is intentionally ignored: provider selection comes from the city
+// configuration and verified row, never an ambient provider override.
 var newVerifiedHookProvider = func(v *VerifiedSession, info session.Info) (runtime.Provider, error) {
 	ctx := sessionProviderContextForCity(v.cfg, v.cityPath, "")
 	return withSessionProviderConstructionContext(newSessionProviderFromContext(ctx,

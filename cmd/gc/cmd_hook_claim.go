@@ -1225,7 +1225,12 @@ func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead
 			}
 			return verifiedHookFailure(err, opts, stdout, stderr)
 		}
-		opts.publishedClaim = bead.ID
+		// CompareAndSetCurrentClaim validates but does not write when the
+		// prior stamp already names this bead. A later delivery failure must
+		// not clear a stamp published by an earlier invocation.
+		if v.CurrentClaim != bead.ID {
+			opts.publishedClaim = bead.ID
+		}
 	}
 	durable, stamped := bead, opts.Verified != nil
 	if opts.Verified == nil {

@@ -549,7 +549,11 @@ func staleOrLegacyDrainAckBeforeStart(session beads.Bead, sp runtime.Provider, n
 		return staleReconcilerDrainAck(session, sp, name)
 	}
 	acked, err := sp.GetMeta(name, "GC_DRAIN_ACK")
-	return err == nil && acked == "1"
+	if err != nil {
+		return false
+	}
+	matched, err := providerDrainAckValueMatches(sp, name, acked)
+	return err == nil && matched
 }
 
 // staleOrLegacyDrainAckBeforeStartInfo is the session.Info sibling of
@@ -568,7 +572,11 @@ func staleOrLegacyDrainAckBeforeStartInfo(info sessions.Info, sp runtime.Provide
 		return staleReconcilerDrainAckInfo(info, sp, name)
 	}
 	acked, err := sp.GetMeta(name, "GC_DRAIN_ACK")
-	return err == nil && acked == "1"
+	if err != nil {
+		return false
+	}
+	matched, err := providerDrainAckValueMatches(sp, name, acked)
+	return err == nil && matched
 }
 
 // cancelRecoveredReconcilerAckedDrainInfo clears a reconciler-owned drain ack

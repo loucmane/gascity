@@ -36,9 +36,11 @@ the bead it is running reads the stamp back here:
 
     BEAD_ID="${GC_BEAD_ID:-$(gc hook current --id-only)}"
 
-The calling session is taken from $GC_SESSION_ID. Exits 1 when there is no
-session identity and when the session has claimed nothing, so a caller that
-cannot name its bead fails loudly instead of skipping its own work.`,
+The calling session is taken from $GC_SESSION_ID and verified against
+$GC_INSTANCE_TOKEN and the positive integer $GC_RUNTIME_EPOCH. All three must
+identify the current incarnation. Exits 1 when the identity is missing, invalid
+or stale, and when the session has claimed nothing, so a caller that cannot
+name its bead fails loudly instead of skipping its own work.`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return exitForCode(cmdHookCurrent(idOnly, stdout, stderr))
@@ -57,12 +59,16 @@ func cmdHookCurrent(idOnly bool, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gc hook current: no session identity (set $GC_SESSION_ID); only a session that claimed work has a current bead") //nolint:errcheck
 		return 1
 	}
+	generation, err := strconv.Atoi(strings.TrimSpace(os.Getenv("GC_RUNTIME_EPOCH")))
+	if err != nil || generation <= 0 {
+		fmt.Fprintln(stderr, "gc hook current: invalid $GC_RUNTIME_EPOCH (must be a positive integer)") //nolint:errcheck
+		return 1
+	}
 	sessFront, err := hookCurrentSessionFrontDoor()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc hook current: %v\n", err) //nolint:errcheck
 		return 1
 	}
-	generation, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("GC_RUNTIME_EPOCH")))
 	v, err := sessFront.VerifySession(sessionID, os.Getenv("GC_INSTANCE_TOKEN"), generation)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc hook current: %v\n", err) //nolint:errcheck

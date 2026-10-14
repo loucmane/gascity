@@ -1,46 +1,52 @@
-# harp-asg1 — ypav-a5c source handoff
+# harp-asg1 — ypav-a5d source handoff
 
-Classification: internal operational evidence. 2026-10-13.
+Classification: internal operational evidence. 2026-10-14.
 
-Authority: /tmp/ga-ypav-round4c-brief.md, fixing independent REVIEW-B's P1/P2.
-The coordinator committed rounds 4/4b at 21c0144df44a8e402cba3ed8c713ac7a7bc1e91e.
-This round started clean there; edits remain unstaged on ga-ypav-port2.
-No live city operations, credentials, signing or deployment.
+Authority: updated /tmp/ga-ypav-round4d-brief.md, REVIEW-B2.md and REVIEW-A.md.
+Started clean at 306c11a23a43bc3e96fd8cd161a48b45fa32ae25 on ga-ypav-port2.
+Edits remain unstaged. No live city, credentials, signing, staging or commit.
 
-Managed claim/adoption now must revision-CAS a work-side incarnation marker
-and new claim-attempt ID before publishing the session claim or delivering work.
-Even unchanged metadata on successor adoption advances the work revision.
-Drain requires that incarnation; pending rollback also requires its exact attempt.
-Legacy unmarked rows stay for controller recovery. Work identity metadata and
-legacy assignee repair use revision CAS. Unsupported backends fail closed.
+Fixed the control-kind metadata regression without removing work CAS: all
+managed acquisitions/adoptions still stamp incarnation and unique attempt,
+but control kinds omit session ID/name back-references. Control drain/unwind
+ownership uses assignee and markers; exact-attempt and revision checks remain.
 
-The verified hook writes an acknowledgement containing generation and token
-digest in the acknowledgement value itself. Both controller stop paths check
-it against the session row and runtime token/epoch. A write onto a recycled
-name is inert. Legacy agent acks with mismatched requester digests are rejected.
-Provider writes themselves remain non-atomic.
+Review A fixes: marked-work ownership veto checks the current incarnation;
+T3 and wake readers accept only runtime-matching addressed acknowledgements;
+no-op claim publication cannot clear an earlier adoption stamp on failure;
+controller tests now fail when the controller guards are removed. Hook-current
+help names token/epoch requirements and epoch parse errors fail before store
+access. Verified provider selection intentionally ignores GC_SESSION.
 
-Both reviewer proofs failed before the fix and pass afterwards. The combined
-run passes 2,359 records: 821 cmd/gc, 1,246 session and 292 beads, retaining every
-previously passing round-4 record. Changed production coverage: 178/208 (85.58%).
-Vet passes; final lint and delivery evidence are in ROUND4.md. Two CGO-disabled
-builds match dbd6b5cc3744645937268d1a25003b1e628edb041e23cdf78351fb9d5d3728cf.
+Final combined run: 2,415 passing records, zero failures/skips (869 cmd/gc,
+1,246 session, 292 beads, 8 T3). Every round-4/4c passing record is retained.
+B2's reviewer proof failed before the fix and now passes; both adapted review-B
+proofs remain green. The eight strengthened controller cases fail with the
+guards removed, then pass restored. Historical compile-only red evidence is
+explicitly distinguished in ROUND4.md from behavioral red proofs.
 
-Full evidence: /tmp/ga-ypav-window/ROUND4.md, Round 4c. Remaining limits:
-- Acquisition, fencing, session publication and delivery are separate operations;
-  crashes or failed fences can leave pending work for controller recovery.
-- The session current-claim pointer has no attempt ID: concurrent invocations
-  of the same incarnation can clear that pointer without releasing newer work.
-- Continuation siblings are individually assigned, not a group transaction.
-- Provider metadata can receive stale auxiliary writes; the addressed ack
-  cannot authorize successor stop. This is not an atomic provider-write claim.
+Changed executable production line coverage: 60/67 (89.55%). Two offline,
+CGO-disabled builds from this source tree match SHA-256
+17df59b373f7e59f0f556f179d6da5655449f65cd18921aabd74d8e168db1a5d.
+Final lint reports zero issues; vet passes. Source/digest checks are retained
+in round4-logs.
 
-Ready for independent re-review, not live-upgrade approval. No new full host
-cmd/gc pass is claimed. The tracked-source resource census passes but must be
-rerun after staging new files. The standards wrapper still lacks this tree's
-file-size baseline. Human review remains required for lifecycle/execution
-and prior configuration/custody changes.
+Deployment gates and residuals are in internal/session/REQUIREMENTS.md:
+- Every session, work and relocated class leg must support real revision CAS;
+  the pinned subprocess BdStore does not. Failed fences can park assignments.
+- The live provider must expose its current runtime epoch and instance token.
+- Stripped managed env can enter legacy claim behavior; preserve managed env.
+- New incarnations must still clear current_claim_bead_id. Same-incarnation
+  concurrent actual publications still lack an attempt on that session pointer.
+- Acquisition/fence/publication/output and continuation siblings are separate
+  operations. Provider metadata is not transactional.
 
-ROUND4-SOURCE.diff is cumulative from c64fd0574; ROUND4C-SOURCE.diff contains
-only this round from 21c0144. Source/artifact manifests are refreshed.
-The coordinator owns staging, commits, host checks and release actions.
+Human review is required for lifecycle/execution. No live-upgrade approval or
+new full host cmd/gc/networked T3 pass is claimed. The standards wrapper still
+lacks the source tree's file-size baseline. The resource census passes its
+tracked-file view; rerun after staging new files. Bazel was not run.
+
+Full report: /tmp/ga-ypav-window/ROUND4.md, Round 4d.
+ROUND4-SOURCE.diff is cumulative from c64fd0574; ROUND4D-SOURCE.diff is this
+round's exact delta from 306c11a. The coordinator owns staging, commits,
+host checks and release actions. A reusable playbook gotcha was queued.

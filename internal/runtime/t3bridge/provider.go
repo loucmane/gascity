@@ -2823,10 +2823,17 @@ func (p *Provider) SetMeta(name, key, value string) error {
 	if binding == nil {
 		return nil
 	}
-	switch {
-	case key == "GC_DRAIN":
+	switch key {
+	case "GC_DRAIN":
 		p.recordStateChange(binding.ThreadID, "draining", "GC session draining", nil)
-	case key == "GC_DRAIN_ACK" && value == "1":
+	case "GC_DRAIN_ACK":
+		matched, err := runtime.DrainAckMatchesRuntime(p, name, value)
+		if err != nil {
+			return err
+		}
+		if !matched {
+			return nil
+		}
 		_ = writeMetaValue(name, "drained", "1")
 		p.recordStateChange(binding.ThreadID, "drained", "GC session drained", nil)
 	}

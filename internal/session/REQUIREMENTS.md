@@ -166,11 +166,36 @@ unless the row names how they map to the canonical projection.
 | SESSION-CLAIM-001 | Verified worker identity | Verify exactly the worker's own open session row against token digest and generation; freeze names, template, rig and configured work-store scope. Refuse foreign environment names and positional targets before work queries. | `cmd/gc/hook_verified_session_test.go`; `cmd/gc/cmd_hook_claim_session_fence_test.go` |
 | SESSION-CLAIM-002 | Conditional stamp and clear | Only `current_claim_bead_id` may change. Check exact ID, session type, open status, incarnation, eligible state and expected prior on the revision being committed. Recheck every predicate on retry. Unsupported atomic backends refuse. Failed stamps unwind only the pending won claim. | `internal/session/verified_claim_test.go`; `cmd/gc/hook_verified_session_test.go` |
 | SESSION-CLAIM-003 | Probe and checkout | Managed drain-probe read errors fail closed. Checkout fallback uses one exact, incarnation-checked Get; pool/shared-slot and Git ownership exclusions remain. | `cmd/gc/hook_verified_session_test.go`; `cmd/gc/cmd_hook_claim_work_branch_test.go` |
-| SESSION-CLAIM-004 | Worker drain acknowledgement | Refused identities never release or acknowledge. Verified workers recheck before sweeping only configured work stores, and release only confirmed own assignee, `gc.session_id` and claim incarnation under work revision CAS. Legacy unmarked work stays for controller recovery. Provider construction uses only the verified row. | `cmd/gc/hook_verified_session_test.go`; `cmd/gc/hook_verified_drain.go`; `cmd/gc/hook_verified_review_b_test.go` |
-| SESSION-CLAIM-005 | Claim consumers and new incarnation | Ownership veto requires matching work assignee and `gc.session_id`. `hook current` verifies the caller incarnation. The pre-wake transition and legacy token mint clear the prior claim so successors cannot inherit it. | `internal/session/verified_claim_test.go`; `cmd/gc/hook_verified_session_test.go`; `cmd/gc/session_ownership_test.go` |
+| SESSION-CLAIM-004 | Worker drain acknowledgement | Refused identities never release or acknowledge. Verified workers recheck before sweeping only configured work stores, and release only confirmed own assignee and claim incarnation/attempt under work revision CAS. Execution work additionally requires `gc.session_id`; control kinds omit session back-references. Legacy unmarked work stays for controller recovery. Provider construction uses only the verified row and city configuration, intentionally ignoring the ambient `GC_SESSION` provider override. | `cmd/gc/hook_verified_session_test.go`; `cmd/gc/hook_verified_drain.go`; `cmd/gc/hook_verified_review_b_test.go`; `cmd/gc/hook_verified_round4d_test.go` |
+| SESSION-CLAIM-005 | Claim consumers and new incarnation | Ownership veto requires matching work assignee and `gc.session_id`, and when present, a claim incarnation matching the current session generation/token. Legacy unmarked work retains the prior rule. The pre-wake transition and legacy token mint MUST still clear the prior claim: marker checking does not eliminate that dependency for legacy work or stale pointers. `hook current` requires `GC_SESSION_ID`, `GC_INSTANCE_TOKEN` and positive integer `GC_RUNTIME_EPOCH`; invalid epochs fail before opening a store. | `internal/session/verified_claim_test.go`; `cmd/gc/hook_verified_session_test.go`; `cmd/gc/session_ownership_test.go`; `cmd/gc/hook_verified_round4d_test.go` |
 | SESSION-CLAIM-006 | Continuation competition | Pin only still-open, still-unassigned siblings conditionally. A competing assignment is omitted from the result; there is no unconditional fallback. | `internal/beads/bdstore_assign_unassigned_test.go`; `cmd/gc/cmd_hook_test.go`; `cmd/gc/claim_class_route.go` |
 | SESSION-CLAIM-007 | Work-side incarnation fence | Every managed claim/adoption must CAS `gc.claim_incarnation` (generation plus token digest) and a fresh `gc.claim_attempt` before session stamp or delivery, even when identity metadata already matches. Metadata stamping and legacy assignee repair use work revision CAS after a fresh own-session check. Pending rollback requires both markers to match; successor adoption and same-incarnation ABA cannot be released by an old invocation. Unsupported CAS refuses. | `cmd/gc/hook_verified_work_test.go`; `cmd/gc/hook_verified_review_b_test.go` |
 | SESSION-CLAIM-008 | Recycled runtime acknowledgement | The verified hook writes `GC_DRAIN_ACK=incarnation:<generation>:<digest>`. Both controller stop paths require that value to match the session row and runtime token/epoch. A stray old write is inert; legacy agent acknowledgements with mismatched requester digests are also rejected. | `cmd/gc/drain_ack_incarnation_test.go`; `cmd/gc/hook_verified_review_b_test.go` |
+| SESSION-CLAIM-009 | Control-kind metadata contract | Mandatory work incarnation/attempt CAS applies to control work on both acquisition and adoption, but must not add `gc.session_id` or `gc.session_name`. Worker drain uses assignee plus both markers; pending unwind additionally requires the exact attempt from that invocation. | `cmd/gc/hook_verified_review_b2_test.go`; `cmd/gc/hook_verified_round4d_test.go` |
+| SESSION-CLAIM-010 | No-op session publication | A successful compare-and-set with identical expected/next claim IDs validates without writing. Adoption delivery failure may clear only a claim actually published by this invocation, not an earlier stamp preserved by a no-op. Actual writes still use conditional compensation. | `cmd/gc/hook_verified_round4d_test.go` (`TestRound4DAdoptionNoopStampSurvivesLaterFailure`) |
+| SESSION-CLAIM-011 | Addressed acknowledgement readers | Runtime ack readers, wake legacy-ack detection and T3 bridge drain-state reflection accept addressed values only when generation and token digest match that runtime's current metadata. Missing, malformed, mismatched or unreadable identity does not acknowledge. Legacy bare acknowledgements retain their existing semantics. | `internal/runtime/drain_ack.go`; `cmd/gc/hook_verified_round4d_test.go`; `internal/runtime/t3bridge/drain_ack_test.go` |
+
+#### Managed-claim residuals and deployment gates
+
+- A stripped managed environment can still enter the legacy unmanaged claim
+  path (`cmd/gc/cmd_hook.go`). That path cannot authenticate a managed session
+  write or another session's drain acknowledgement. Deployments must preserve
+  the managed identity environment; this is a recorded residual, not a claim
+  that every legacy invocation has managed incarnation fencing.
+- Every configured session, work and relocated class-store leg must resolve to
+  a genuinely CAS-capable backend. The pinned subprocess `BdStore` cannot
+  satisfy mandatory revision CAS. A work-fence failure refuses delivery and
+  can leave assigned work for controller recovery; backend capability must be
+  verified on every leg before deployment, not inferred from one session store.
+- The live provider must expose its current `GC_RUNTIME_EPOCH` and
+  `GC_INSTANCE_TOKEN` metadata. Addressed acknowledgements without either are
+  rejected. Provider metadata reads/writes remain separate operations; this is
+  not a provider-wide transaction or a redesign of runtime stop authority.
+- Clearing `current_claim_bead_id` at each new incarnation remains required.
+  No-op adoption compensation is excluded, but concurrent actual publications
+  of the same claim within one incarnation still lack an attempt ID on the
+  session pointer. Work-side attempts prevent stale work release; full pointer
+  isolation would require an attempt-aware session stamp or serialized turns.
 
 ### Runtime, Submit, And Observation
 

@@ -39,7 +39,13 @@ func TestControllerDrainAckCannotStopSuccessor(t *testing.T) {
 					mustSetMeta(t, e.sp, "worker", drainAckRequesterInstanceTokenKey, drainAckInstanceTokenDigest("old"))
 				}
 				mustSetMeta(t, e.sp, "worker", "GC_DRAIN_ACK", ack)
-				dops := &providerDrainOps{sp: e.sp}
+				// Exercise the controller fence independently of the provider's
+				// first check: a provider may observe an ack before runtime reuse.
+				// The pre-fence controller accepted this positive observation.
+				dops := newFakeDrainOps()
+				if err := dops.setDrainAck("worker"); err != nil {
+					t.Fatal(err)
+				}
 				e.reconcileWithPoolDesiredAndDrainOps([]beads.Bead{row}, nil, dops)
 				got, _ := e.store.Get(row.ID)
 				if got.Status == "closed" || isDrainAckStopPendingInfo(e.sessionInfo(row.ID)) || !e.sp.IsRunning("worker") {
