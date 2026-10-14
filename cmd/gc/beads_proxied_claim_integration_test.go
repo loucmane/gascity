@@ -57,13 +57,17 @@ func TestProxiedNativeClaimCAS(t *testing.T) {
 	t.Setenv("BEADS_DOLT_SERVER_PORT", "")
 	t.Setenv("BEADS_DOLT_PORT", "")
 	runPackReleaseGit(t, scope, "init", "-q")
-	if err := os.WriteFile(filepath.Join(scope, "city.toml"), []byte("[workspace]\nname = \"vfug\"\n[beads]\nprovider = \"bd\"\nconditional_writes = \"require\"\n"), 0o600); err != nil {
+	// Raw bd init stores its prefix in SQL, not config.yaml. Declare the same
+	// namespace for gc's CLI leaf so the native prefix fence sees agreement.
+	if err := os.WriteFile(filepath.Join(scope, "city.toml"), []byte("[workspace]\nname = \"vfug\"\nprefix = \"vfug\"\n[beads]\nprovider = \"bd\"\nconditional_writes = \"require\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		runRawBDFromDir(t, bd, scope, "dolt", "stop")
 	})
-	runRawBDFromDir(t, bd, scope, "init", "--proxied-server", "--prefix", "vfug", "--quiet")
+	// Match gc init/migrate-proxied's idle-never policy. Finite-idle fallback
+	// is owned by TestProxiedOpenFiniteIdleLongLivedFallsToBdStore in beads.
+	runRawBDFromDir(t, bd, scope, "init", "--proxied-server", "--proxied-server-idle-timeout", "0", "--prefix", "vfug", "--quiet")
 	runRawBDFromDir(t, bd, scope, "config", "set", "types.custom", "session")
 	result, err := openStoreResultAtForCity(scope, scope)
 	if err != nil {
@@ -76,8 +80,12 @@ func TestProxiedNativeClaimCAS(t *testing.T) {
 		}
 	})
 	view, ok := beads.ProxiedStoreFrom(store)
+	t.Logf("factory diagnostic: %+v; proxied verdict: %+v", result.Diagnostic, result.Diagnostic.Proxied)
 	if !ok || view.Report().Demoted || result.Diagnostic.Proxied == nil {
-		t.Fatalf("factory did not select native proxied reads: %+v", result.Diagnostic)
+		t.Fatalf("factory did not select native proxied reads: %+v; proxied verdict: %+v", result.Diagnostic, result.Diagnostic.Proxied)
+	}
+	if policy := view.Report().IdlePolicy; !strings.HasPrefix(policy, "never(") {
+		t.Fatalf("CAS fixture idle policy = %q, want production idle-never policy", policy)
 	}
 	work, err := store.Create(beads.Bead{Title: "work fence", Type: "task"})
 	if err != nil {

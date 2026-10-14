@@ -102,6 +102,9 @@ func TestMigrateProxiedDryRunWritesNothing(t *testing.T) {
 func TestMigrateProxiedMigratesCityAndSharedRootRig(t *testing.T) {
 	city, rigs := newLegacyManagedCityFixture(t, "spike")
 	rig := rigs["spike"]
+	// Persisted namespaces can differ from city.toml's configured or derived
+	// prefixes. Changing transport must not change either scope's namespace.
+	writeLegacyManagedScope(t, rig, "legacysp", "sp", contract.EndpointOriginInheritedCity)
 	seedCityDatabaseDir(t, city, "sp")
 	initDoltRootMarker(t, filepath.Join(city, ".beads", "dolt"))
 	calls := stubMigrateProxiedBdFlippingMetadata(t)
@@ -125,6 +128,20 @@ func TestMigrateProxiedMigratesCityAndSharedRootRig(t *testing.T) {
 	if len(*calls) == 0 || (*calls)[0].scope != normalizePathForCompare(city) {
 		t.Fatalf("first bd call = %+v, want the city", *calls)
 	}
+	for _, scope := range []string{city, rig} {
+		found := false
+		for _, call := range *calls {
+			if call.scope == scope && len(call.args) >= 2 && call.args[0] == "migrate" && call.args[1] == "from-server-to-proxied-server" {
+				found = true
+				if !strings.Contains(" "+strings.Join(call.args, " ")+" ", " --idle-timeout 0 ") {
+					t.Errorf("%s migration omitted idle-never: %v", scope, call.args)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s was not passed to bd migrate", scope)
+		}
+	}
 
 	for _, scope := range []string{city, rig} {
 		mode, ok, err := contract.ReadDoltMode(fsys.OSFS{}, filepath.Join(scope, ".beads", "metadata.json"))
@@ -137,6 +154,19 @@ func TestMigrateProxiedMigratesCityAndSharedRootRig(t *testing.T) {
 		}
 		if strings.Contains(cfg, "dolt.host") || strings.Contains(cfg, "dolt.port") {
 			t.Errorf("%s config.yaml still carries a managed endpoint:\n%s", scope, cfg)
+		}
+	}
+	// Native reads resolve the database from metadata and fence it against
+	// the CLI leaf's prefix. Migration must preserve both for every scope.
+	for _, want := range []struct{ scope, database, prefix string }{
+		{city, "hq", "ci"},
+		{rig, "sp", "legacysp"},
+	} {
+		if got := proxiedScopeDatabase(city, want.scope); got != want.database {
+			t.Errorf("%s native database = %q, want %q", want.scope, got, want.database)
+		}
+		if got := readScopeIssuePrefix(want.scope); got != want.prefix {
+			t.Errorf("%s scope prefix = %q, want %q", want.scope, got, want.prefix)
 		}
 	}
 

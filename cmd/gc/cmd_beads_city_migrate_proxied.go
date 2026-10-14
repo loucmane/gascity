@@ -15,7 +15,6 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/beads/contract"
-	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/spf13/cobra"
 )
@@ -793,11 +792,13 @@ func planMigrateProxiedScopes(cityPath string, selected []string) ([]migrateProx
 		}
 	}
 
+	// Preserve each persisted namespace, using city.toml only when the scope
+	// has no prefix. Migration changes transport, not the database's IDs.
 	scopes := []migrateProxiedScope{{
 		Label:  "city",
 		Name:   "city",
 		Path:   normalizePathForCompare(cityPath),
-		Prefix: config.EffectiveHQPrefix(cfg),
+		Prefix: issuePrefixForScope(cityPath, cityPath, cfg),
 		IsCity: true,
 	}}
 	matched := map[string]bool{}
@@ -814,7 +815,7 @@ func planMigrateProxiedScopes(cityPath string, selected []string) ([]migrateProx
 			Label:  "rig:" + rig.Name,
 			Name:   rig.Name,
 			Path:   normalizePathForCompare(rig.Path),
-			Prefix: rig.EffectivePrefix(),
+			Prefix: issuePrefixForScope(rig.Path, cityPath, cfg),
 		}
 		rel, err := sharedCityRootForRig(cityPath, scope.Path)
 		if err != nil {
