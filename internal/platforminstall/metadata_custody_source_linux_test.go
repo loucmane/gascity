@@ -9,7 +9,7 @@ import (
 
 func TestMetadataCustodyOwningSourceProfile(t *testing.T) {
 	project := map[string]string{
-		"cmd/gc/main.go":                           "f07b6c13a7c7af838ae6b0914fa65a11b4afdb2ea6a1faa25c9b2340c3848a85",
+		"cmd/gc/main.go":                           "9a1fcff8984b821a650ec17a4f460f7f5dc421b100260c484f19a8bd48edaaaf",
 		"cmd/gc/cmd_supervisor.go":                 "79f355551389d100edcbd07587981e90c8e0d9519c952c1dd8b0cb1c7f33dcaf",
 		"cmd/gc/dolt_start_managed.go":             "277cb276f1798559a5ea02a3a2f1549472338f4f3c90d8a5d39282bb8f8760e5",
 		"internal/api/supervisor.go":               "f513589dfa77d547a51280da68e13db5a46d5d660b0384b9149e4797e752141e",

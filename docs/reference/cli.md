@@ -2072,9 +2072,11 @@ the bead it is running reads the stamp back here:
 
     BEAD_ID="$&#123;GC_BEAD_ID:-$(gc hook current --id-only)&#125;"
 
-The calling session is taken from $GC_SESSION_ID. Exits 1 when there is no
-session identity and when the session has claimed nothing, so a caller that
-cannot name its bead fails loudly instead of skipping its own work.
+The calling session is taken from $GC_SESSION_ID and verified against
+$GC_INSTANCE_TOKEN and the positive integer $GC_RUNTIME_EPOCH. All three must
+identify the current incarnation. Exits 1 when the identity is missing, invalid
+or stale, and when the session has claimed nothing, so a caller that cannot
+name its bead fails loudly instead of skipping its own work.
 
 ```
 gc hook current [flags]

@@ -248,11 +248,16 @@ func RunGC(env *Env, dir string, args ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.Command(gcPath, args...)
+	return RunBinary(env.List(), gcPath, dir, args...)
+}
+
+// RunBinary runs a fixture executable with an explicit environment and directory.
+func RunBinary(env []string, bin, dir string, args ...string) (string, error) {
+	cmd := exec.Command(bin, args...) //nolint:gosec // caller-resolved fixture executable
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Env = env.List()
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

@@ -349,7 +349,9 @@ func conformanceRowBackedMutationFlavors(t *testing.T, name string, open func(t 
 		s := open(t)
 		w := conformanceWriterFor(t, s)
 		strPtr := func(s string) *string { return &s }
-		row, err := s.Create(beads.Bead{Title: "row-backed-mutations"})
+		// Each flavor must change content, including stores defaulting to task/2.
+		initialPriority := 1
+		row, err := s.Create(beads.Bead{Title: "row-backed-mutations", Type: "bug", Priority: &initialPriority})
 		if err != nil {
 			t.Fatal(err)
 		}

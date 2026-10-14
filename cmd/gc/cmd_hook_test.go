@@ -2046,6 +2046,12 @@ name = "worker"
 	script := fmt.Sprintf(`#!/bin/sh
 printf 'actor=%%s args=%%s\n' "${BEADS_ACTOR:-}" "$*" >> %q
 case "$*" in
+  *"--help"*)
+    printf "supports --if-revision\n"
+    ;;
+  *"show --json hw-next"*)
+    printf '[{"id":"hw-next","status":"open","revision":1,"metadata":{"gc.routed_to":"worker","gc.root_bead_id":"root-1","gc.continuation_group":"body"}}]'
+    ;;
   *"update hw-claim --claim --json"*)
     printf '[{"id":"hw-claim","status":"in_progress","assignee":"%%s","metadata":{"gc.routed_to":"worker","gc.root_bead_id":"root-1","gc.continuation_group":"body"}}]' "${BEADS_ACTOR:-}"
     ;;
@@ -2117,10 +2123,10 @@ esac
 	// query through GC_AGENT), but the continuation pin is a session binding: the
 	// sibling must name GC_SESSION_ID so wake demand and the continuation
 	// backstop can both resolve it back to this session.
-	if !strings.Contains(logText, "args=update --json hw-next --assignee "+sessionID) {
+	if !strings.Contains(logText, "args=update --json hw-next --assignee "+sessionID+" --if-revision 1") {
 		t.Fatalf("continuation sibling was not preassigned to the session id; log:\n%s", logText)
 	}
-	if strings.Contains(logText, "args=update hw-other --assignee") {
+	if strings.Contains(logText, "args=update hw-other --assignee") || strings.Contains(logText, "args=update --json hw-other --assignee") {
 		t.Fatalf("continuation preassignment crossed route target; log:\n%s", logText)
 	}
 }

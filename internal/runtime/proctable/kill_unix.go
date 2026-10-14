@@ -48,8 +48,8 @@ func KillByPID(pid int) error {
 // checks passes every process-level test and still ships the bug.
 func killLivenessFuncsForPID(pid int) (termLive, runLive func(int) bool) {
 	startTime, _ := pidutil.StartTime(pid)
-	return func(p int) bool { return pidAliveWithIdentity(p, startTime) },
-		func(p int) bool { return pidutil.AliveWithStartTime(p, startTime) }
+	return func(p int) bool { return p == pid && pidAliveWithIdentity(p, startTime) },
+		func(p int) bool { return p == pid && pidutil.AliveWithStartTime(p, startTime) }
 }
 
 // pidAliveWithIdentity is the cheap kill(0) liveness used across the SIGTERM

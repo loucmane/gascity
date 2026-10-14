@@ -305,6 +305,11 @@ type E2EAgent struct {
 
 // WaitForCondition polls fn until it returns true or timeout expires.
 func (c *City) WaitForCondition(fn func() bool, timeout time.Duration) bool {
+	return WaitForCondition(fn, timeout)
+}
+
+// WaitForCondition polls a fixture observation until it succeeds or times out.
+func WaitForCondition(fn func() bool, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if fn() {

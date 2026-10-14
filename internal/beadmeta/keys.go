@@ -77,7 +77,13 @@ const (
 	// (*beads.PreconditionFailedError) with no fallback and no partial
 	// effect ever lands. See molecule.ClaimExact's doc for the exact
 	// guarantee this does and does not provide.
-	ClaimGenerationMetadataKey           = "gc.claim_generation"
+	ClaimGenerationMetadataKey = "gc.claim_generation"
+	// ClaimIncarnationMetadataKey identifies the verified session incarnation
+	// that fenced a work claim, including both generation and token hash.
+	ClaimIncarnationMetadataKey = "gc.claim_incarnation"
+	// ClaimAttemptMetadataKey distinguishes repeated claims within one session
+	// incarnation so a delayed unwind cannot release a later adoption.
+	ClaimAttemptMetadataKey              = "gc.claim_attempt"
 	ClosedByAttemptMetadataKey           = "gc.closed_by_attempt"
 	ContinuationGroupMetadataKey         = "gc.continuation_group"
 	ControlDispatcherFallbackMetadataKey = "gc.control_dispatcher_fallback"
@@ -459,6 +465,8 @@ var KnownMetadataKeys = []string{
 	CityPathMetadataKey,
 	ClaimedAtMetadataKey,
 	ClaimGenerationMetadataKey,
+	ClaimIncarnationMetadataKey,
+	ClaimAttemptMetadataKey,
 	ClosedByAttemptMetadataKey,
 	ContinuationGroupMetadataKey,
 	ControlEpochMetadataKey,

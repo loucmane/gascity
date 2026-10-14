@@ -89,12 +89,19 @@ func (s *commandWorkCASFixture) UpdateIfMatch(id string, revision int64, patch b
 		return &beads.PreconditionFailedError{ID: id}
 	}
 	if patch.Assignee != nil {
-		moved, err := s.backing.TransferIfCurrent(id, current.Assignee, *patch.Assignee)
-		if err != nil {
-			return err
-		}
-		if !moved {
-			return &beads.PreconditionFailedError{ID: id}
+		if current.Assignee == "" {
+			// Continuation pins exercise the actual BdStore revision flag.
+			if err := s.backing.UpdateIfMatch(id, revision, beads.UpdateOpts{Assignee: patch.Assignee}); err != nil {
+				return err
+			}
+		} else {
+			moved, err := s.backing.TransferIfCurrent(id, current.Assignee, *patch.Assignee)
+			if err != nil {
+				return err
+			}
+			if !moved {
+				return &beads.PreconditionFailedError{ID: id}
+			}
 		}
 	}
 	if len(patch.Metadata) > 0 {

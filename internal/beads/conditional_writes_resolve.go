@@ -333,6 +333,8 @@ func refuseOrDegrade(store Store, mode gate.Mode, reason string) (ConditionalWri
 // the %T spelling, which is descriptive enough for a diagnostic surface.
 func conditionalStoreKind(store Store) string {
 	switch store.(type) {
+	case *ProxiedStore:
+		return "ProxiedStore"
 	case *BdStore:
 		return storeNameBdStore
 	case *FileStore:

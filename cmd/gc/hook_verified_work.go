@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	verifiedHookIncarnationKey = "gc.claim_incarnation"
-	verifiedHookAttemptKey     = "gc.claim_attempt"
+	verifiedHookIncarnationKey = beadmeta.ClaimIncarnationMetadataKey
+	verifiedHookAttemptKey     = beadmeta.ClaimAttemptMetadataKey
 )
 
 func (v *VerifiedSession) workIncarnation() string {
@@ -164,4 +164,32 @@ func verifiedHookReleasePatch() beads.UpdateOpts {
 		beadmeta.SessionAffinityMetadataKey: "", beadmeta.ContinuationGroupMetadataKey: "",
 		verifiedHookIncarnationKey: "", verifiedHookAttemptKey: "",
 	}}
+}
+
+// pinVerifiedHookContinuation uses the same revision-fenced write boundary as
+// managed claims, so proxy generation changes cannot bypass read-after-write checks.
+func pinVerifiedHookContinuation(sibling beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir, assignee string) error {
+	v := opts.Verified
+	store, err := openVerifiedHookWorkStore(v, ops.ClassRoute, dir, sibling.ID)
+	if err != nil {
+		return err
+	}
+	live, err := store.Get(sibling.ID)
+	if err != nil {
+		return err
+	}
+	if live.ID != sibling.ID || live.Status != "open" || live.Assignee != "" ||
+		live.Metadata[beadmeta.RootBeadIDMetadataKey] != sibling.Metadata[beadmeta.RootBeadIDMetadataKey] ||
+		live.Metadata[beadmeta.ContinuationGroupMetadataKey] != sibling.Metadata[beadmeta.ContinuationGroupMetadataKey] ||
+		!hookClaimMatchesRoute(live, opts.RouteTargets) {
+		return &beads.PreconditionFailedError{ID: sibling.ID}
+	}
+	writer, ok := beads.RequiredConditionalWriterFor(store)
+	if !ok {
+		return beads.ErrConditionalWriteUnsupported
+	}
+	if err := v.mayClaim(); err != nil {
+		return err
+	}
+	return writer.UpdateIfMatch(live.ID, live.Revision, beads.UpdateOpts{Assignee: &assignee})
 }

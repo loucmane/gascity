@@ -1545,7 +1545,13 @@ func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops 
 				return assigned, err
 			}
 		}
-		if err := ops.AssignContinuation(ctx, dir, opts.Env, sibling.ID, pinAssignee); err != nil {
+		var err error
+		if opts.Verified != nil {
+			err = pinVerifiedHookContinuation(sibling, opts, ops, dir, pinAssignee)
+		} else {
+			err = ops.AssignContinuation(ctx, dir, opts.Env, sibling.ID, pinAssignee)
+		}
+		if err != nil {
 			if beads.IsPreconditionFailed(err) {
 				continue
 			}
