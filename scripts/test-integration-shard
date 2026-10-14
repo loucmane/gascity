@@ -130,6 +130,7 @@ cmd_gc_integration_tests=(
   TestManagedBeadsNativeCLICompatibility
   TestPhase2WorkerCoreRealTransportProof
   TestPlatformCanaryRunnerRoundTripsSelectedProfile
+  TestProxiedNativeClaimCAS
   TestRigAddIncludeResolvesScopedRegistryPackName
   TestStorageGateServesACityFromItsBeadsWorkspace
 )
