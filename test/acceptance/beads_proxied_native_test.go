@@ -10,7 +10,9 @@
 // Every row drives a REAL bd proxy and a REAL dolt child, disturbs it the way an
 // operator or a crash does — `bd dolt stop`, SIGKILL and SIGTERM on the Dolt
 // child, SIGKILL on the proxy itself, a foreign ownership record, a moved proxy
-// root — and reads gc's answer back through two independent instruments:
+// root — then drives recovery through `gc status --json`. Doctor observes the
+// recovered store; its stopped-store guard intentionally never restarts one.
+// Two independent instruments record the result:
 //
 //   - the recording BD_BIN shim, which counts EVERY bd fork whatever spawned it,
 //     so "at most one ping and one recover per generation" is a measurement
@@ -170,6 +172,22 @@ func proxiedScopeProxyRoot(t *testing.T, scopeRoot string) string {
 func (c *proxiedNativeCity) account(t *testing.T, label string) (beadsStorePayloadDoc, doctorCheckResult) {
 	t.Helper()
 	return readBeadsStorePayload(t, c.lane, c.root, label)
+}
+
+// admit measures the ordinary read path's recovery before doctor
+// observes it. Doctor must not contribute another recovery attempt.
+func (c *proxiedNativeCity) admit(t *testing.T, label string) (beadsStorePayloadDoc, doctorCheckResult, proxiedForkCensus) {
+	t.Helper()
+	c.reset(t)
+	if out, err := helpers.RunGC(c.lane, c.root, "status", "--json"); err != nil {
+		t.Fatalf("%s: gc status --json: %v\n%s", label, err, out)
+	}
+	census := c.census(t)
+	payload, result := c.account(t, label)
+	if after := c.census(t); after.Pings != census.Pings || after.DoltStops != census.DoltStops {
+		t.Errorf("%s: doctor attempted recovery after status: before=%s after=%s\n%s", label, census, after, c.calls.Describe())
+	}
+	return payload, result, census
 }
 
 // tryAccount is account for the rows that deliberately break the scope.
@@ -361,7 +379,6 @@ func TestProxiedNativeLifecycle(t *testing.T) {
 
 	before := scopeFileSnapshot(t, c.root, c.proxyDir)
 
-	var baseGeneration string
 	t.Run("healthy-baseline", func(t *testing.T) {
 		// The control every other row is read against: on an undisturbed city
 		// the lane serves natively and spends no bd verb to decide it.
@@ -376,13 +393,14 @@ func TestProxiedNativeLifecycle(t *testing.T) {
 		if census.Pings != 0 {
 			t.Errorf("admission spent %d ping(s) on a healthy proxy, want 0:\n%s", census.Pings, c.calls.Describe())
 		}
-		baseGeneration = payload.Proxied.Endpoint.Generation
+		baseGeneration := payload.Proxied.Endpoint.Generation
 		if baseGeneration == "" {
 			t.Fatalf("a served open pinned no generation: %s", describeProxiedAccount(payload))
 		}
 	})
 
 	t.Run("stop-ping-repin", func(t *testing.T) {
+		baseGeneration := c.heal(t, "before the stop row")
 		// The operator move. `bd dolt stop` retires the proxy AND its Dolt child
 		// and removes the record, which is the "absent record" arm: one ping, and
 		// the lane re-pins to whatever bd produced rather than demoting.
@@ -393,9 +411,7 @@ func TestProxiedNativeLifecycle(t *testing.T) {
 			t.Fatalf("bd dolt stop left processes behind:\n%s", strings.Join(leaked, "\n"))
 		}
 
-		c.reset(t)
-		payload, result := c.account(t, "a city whose proxy was stopped")
-		census := c.census(t)
+		payload, result, census := c.admit(t, "a city whose proxy was stopped")
 		t.Logf("stop-ping-repin: %s; store=%q %s", census, payload.Store, describeProxiedAccount(payload))
 
 		if payload.Store != "NativeDoltStore" {
@@ -413,10 +429,10 @@ func TestProxiedNativeLifecycle(t *testing.T) {
 		if got := payload.Proxied.Endpoint.Generation; got == baseGeneration {
 			t.Errorf("the lane re-pinned to the same generation %q across a full stop/start; the generation is {pid,birth} and cannot survive one", got)
 		}
-		baseGeneration = payload.Proxied.Endpoint.Generation
 	})
 
 	t.Run("dead-record-one-ping", func(t *testing.T) {
+		baseGeneration := c.heal(t, "before the dead-record row")
 		// SIGKILL the proxy itself. Nothing cleans up, so the record survives and
 		// names a pid that is gone: the "dead record" arm, decided from the
 		// process table with no dial at all, and worth exactly one ping.
@@ -437,9 +453,7 @@ func TestProxiedNativeLifecycle(t *testing.T) {
 			helpers.MissingPrecondition(t, "bd removed its record on SIGKILL (%v), so this host cannot produce the dead-record arm", err)
 		}
 
-		c.reset(t)
-		payload, result := c.account(t, "a city whose proxy was killed")
-		census := c.census(t)
+		payload, result, census := c.admit(t, "a city whose proxy was killed")
 		t.Logf("dead-record-one-ping: %s; store=%q %s", census, payload.Store, describeProxiedAccount(payload))
 
 		if payload.Store != "NativeDoltStore" {
@@ -455,7 +469,6 @@ func TestProxiedNativeLifecycle(t *testing.T) {
 		if got := payload.Proxied.Endpoint.Generation; got == baseGeneration {
 			t.Errorf("the lane re-pinned to the killed generation %q", got)
 		}
-		baseGeneration = c.heal(t, "after the dead-record row")
 	})
 
 	// Both child-crash exits. On the pinned bd both retire the proxy with its
@@ -470,26 +483,27 @@ func TestProxiedNativeLifecycle(t *testing.T) {
 	//              when its Dolt backend exits cleanly (gastownhall/beads#6937),
 	//              so this row now takes the dead-record arm too.
 	t.Run("child-kill9", func(t *testing.T) {
-		baseGeneration = c.childCrashRow(t, childCrashExpectation{
+		c.childCrashRow(t, childCrashExpectation{
 			signal:    syscall.SIGKILL,
 			label:     "kill -9",
 			pings:     1,
 			doltStops: 0,
 			mechanism: "the proxy goes down with its child, so its record names a dead pid and one ping is the whole escalation a dead record is worth",
-		}, baseGeneration)
+		})
 	})
 
 	t.Run("child-term", func(t *testing.T) {
-		baseGeneration = c.childCrashRow(t, childCrashExpectation{
+		c.childCrashRow(t, childCrashExpectation{
 			signal:    syscall.SIGTERM,
 			label:     "kill -TERM",
 			pings:     1,
 			doltStops: 0,
 			mechanism: "bd retires the proxy when its Dolt child exits cleanly (beads#6937), so its record names a dead pid and one ping is the whole escalation a dead record is worth",
-		}, baseGeneration)
+		})
 	})
 
 	t.Run("foreign-root", func(t *testing.T) {
+		c.heal(t, "before the foreign-root row")
 		// A proxy.pid whose root_id belongs to somebody else's workspace: the
 		// copied-record shape. It must be decided from the record alone — no
 		// dial, no bd verb — because dialing a port named by a record that does
@@ -558,6 +572,7 @@ func TestProxiedNativeLifecycle(t *testing.T) {
 	})
 
 	t.Run("root-move", func(t *testing.T) {
+		c.heal(t, "before the root-move row")
 		// U22's shape, as far as a city scope can express it: the proxy root is
 		// moved out from under a live proxy. The pinned endpoint keeps listening
 		// and keeps serving the moved database, so the only thing standing
@@ -597,7 +612,7 @@ func TestProxiedNativeLifecycle(t *testing.T) {
 			t.Fatalf("restore the proxy root: %v", err)
 		}
 		restored = true
-		baseGeneration = c.heal(t, "after the root came back")
+		baseGeneration := c.heal(t, "after the root came back")
 		t.Logf("root-move: re-pinned to %s after the root was restored", baseGeneration)
 	})
 
@@ -652,8 +667,9 @@ type childCrashExpectation struct {
 // generation sets exist to prevent. Under budget means the escalation this host
 // actually produces has changed shape, which is the fact this row exists to
 // record and not something to wave through.
-func (c *proxiedNativeCity) childCrashRow(t *testing.T, want childCrashExpectation, baseGeneration string) string {
+func (c *proxiedNativeCity) childCrashRow(t *testing.T, want childCrashExpectation) {
 	t.Helper()
+	baseGeneration := c.heal(t, "before "+want.label)
 	proxies, servers := doltFamilyPIDs(t, c.proxyDir)
 	if len(servers) == 0 {
 		t.Fatalf("no dolt sql-server under %s to kill", c.proxyDir)
@@ -670,9 +686,7 @@ func (c *proxiedNativeCity) childCrashRow(t *testing.T, want childCrashExpectati
 		t.Fatalf("%s: the proxy %v outlived its dolt child by 30s; the pinned bd retires it (beads#6937)", want.label, alive)
 	}
 
-	c.reset(t)
-	payload, result := c.account(t, "a city whose dolt child took "+want.label)
-	census := c.census(t)
+	payload, result, census := c.admit(t, "a city whose dolt child took "+want.label)
 	t.Logf("%s: %s; store=%q %s", want.label, census, payload.Store, describeProxiedAccount(payload))
 
 	if census.Pings != want.pings || census.DoltStops != want.doltStops {
@@ -686,7 +700,6 @@ func (c *proxiedNativeCity) childCrashRow(t *testing.T, want childCrashExpectati
 	if got := payload.Proxied.Endpoint.Generation; got == baseGeneration {
 		t.Errorf("%s: the lane is still pinned to generation %q, which no longer has a Dolt child behind it", want.label, got)
 	}
-	return payload.Proxied.Endpoint.Generation
 }
 
 // namesNotIn returns the members of a that b does not contain.

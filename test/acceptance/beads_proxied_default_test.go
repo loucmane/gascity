@@ -28,8 +28,6 @@ import (
 	helpers "github.com/gastownhall/gascity/test/acceptance/helpers"
 )
 
-const proxiedTimingReportPath = "/data/tmp/gc-dolt-takeover/10-timing.md"
-
 // proxiedBeadsMetadata is the subset of bd's .beads/metadata.json this test
 // reads. bd writes the topology only here; config.yaml has no mode.
 type proxiedBeadsMetadata struct {
@@ -707,9 +705,11 @@ func TestBeadsProxiedDefault(t *testing.T) {
 		}
 	})
 
-	t.Run("init-default", func(t *testing.T) {
-		city.Init("claude")
+	// City owns the parent test's cleanup and fatal reporting. Initialize in
+	// that test so a setup failure cannot call FailNow on a subtest's parent.
+	city.Init("claude")
 
+	t.Run("init-default", func(t *testing.T) {
 		assertProxiedScope(t, cityRoot, "city")
 
 		var journal scopeOwnershipDoc
@@ -1189,15 +1189,6 @@ func TestBeadsProxiedDefault(t *testing.T) {
 		}
 		for _, s := range samples {
 			t.Log(s)
-		}
-		report := "# Slice 1 timing (R6, informational)\n\n" +
-			"Measured on the Tier A acceptance harness against a bd v1.3.0\n" +
-			"proxied-local city. Every command goes through the bd CLI front door\n" +
-			"(decision D2): there is no library open for a proxied workspace in v1.3.0.\n\n" +
-			"| command | topology | wall clock |\n|---|---|---|\n" +
-			strings.Join(samples, "\n") + "\n"
-		if err := os.WriteFile(proxiedTimingReportPath, []byte(report), 0o644); err != nil {
-			t.Logf("timing report not written to %s: %v", proxiedTimingReportPath, err)
 		}
 	})
 }

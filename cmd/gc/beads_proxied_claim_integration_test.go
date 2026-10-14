@@ -19,12 +19,20 @@ import (
 // with a disposable bd-owned proxy. Run on the host with the CAS backport bd.
 func TestProxiedNativeClaimCAS(t *testing.T) {
 	if os.Getenv("GC_TEST_PROXIED_CAS") != "1" {
-		t.Skip("set GC_TEST_PROXIED_CAS=1 with real bd and dolt on PATH")
+		t.Skip("set GC_TEST_PROXIED_CAS=1 and GC_ACCEPTANCE_BD_BIN with real dolt on PATH")
 	}
-	bd, err := exec.LookPath("bd")
+	// testscript.Main prepends its fake bd to PATH before m.Run. An explicit
+	// binary is required so this opt-in test cannot pass against that double
+	// or silently choose a host bd without the revision-CAS backport.
+	bd := strings.TrimSpace(os.Getenv("GC_ACCEPTANCE_BD_BIN"))
+	if !filepath.IsAbs(bd) || isTestscriptShim(bd) {
+		t.Fatal("set GC_ACCEPTANCE_BD_BIN to the absolute path of the real bd with --if-revision support; PATH contains the testscript bd shim")
+	}
+	bd, err := exec.LookPath(bd)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("GC_ACCEPTANCE_BD_BIN: %v", err)
 	}
+	t.Logf("CAS bd binary: %s", bd)
 	if _, err := exec.LookPath("dolt"); err != nil {
 		t.Fatal(err)
 	}
