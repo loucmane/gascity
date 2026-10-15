@@ -52,6 +52,10 @@ PY
 printf 'Fixture namespace: %s\n' "$vfug_fixture"
 # Explicit environment: no inherited endpoint, agent session, credentials,
 # service-manager or bd workspace configuration enters the command.
+# --keep-caps: with --map-current-user the shell is uid 1000 inside the namespace and
+# would drop the namespace capabilities on exec, so `mount --make-rprivate /` failed
+# ("mount failed: Unknown error 5005", 2026-10-15). Caps stay namespace-scoped.
+# Keep comments out of the continued command below: a `#` there ends it.
 exec /usr/bin/env -i \
   HOME="$vfug_fixture/h" USERPROFILE="$vfug_fixture/h" \
   GC_HOME="$vfug_fixture/g" DOLT_ROOT_PATH="$vfug_fixture/d" \
@@ -66,8 +70,5 @@ exec /usr/bin/env -i \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
   GC_DISABLE_USAGE_METRICS=1 BD_DISABLE_METRICS=1 DO_NOT_TRACK=1 \
   PATH="${VFUG_PAIR_BIN:-$vfug_root/r9/tools}:$vfug_root/r9/tools:$vfug_root/local-r5/bin:/home/loucmane/.local/share/go/1.26.7/bin:/usr/local/bin:/usr/bin:/bin" \
-  # --keep-caps: with --map-current-user the shell is uid 1000 inside the namespace and
-  # would drop the namespace capabilities on exec, so `mount --make-rprivate /` failed
-  # ("mount failed: Unknown error 5005", 2026-10-15). Caps stay namespace-scoped.
   unshare --user --map-current-user --keep-caps --mount --pid --fork --mount-proc \
   bash "$0" --inside "$vfug_fixture" "$@"
