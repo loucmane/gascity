@@ -143,12 +143,16 @@ func newBeadsStorePayload(scopeRoot string, target contract.DoltConnectionTarget
 // It also says where writes go, unprompted. "native" on a line about a bead
 // store reads as "gc talks to Dolt", and the whole safety argument of this lane
 // is that it does not — every mutation is still bd's.
-func proxiedNativeStoreMessage(proxied *beads.ProxiedDiagnostic) string {
+func proxiedNativeStoreMessage(proxied *beads.ProxiedDiagnostic, store beads.Store) string {
 	generation := "unknown"
 	if proxied != nil && proxied.Endpoint.Generation != "" {
 		generation = proxied.Endpoint.Generation
 	}
-	return fmt.Sprintf("native reads over bd proxy (gen %s, writes via bd CLI; claims use --if-revision CAS)", generation)
+	claims := "claims refused: bd revision CAS unavailable"
+	if status := beads.InspectConditionalWrites(store); status.Capable {
+		claims = "claims use --if-revision CAS"
+	}
+	return fmt.Sprintf("native reads over bd proxy (gen %s, writes via bd CLI; %s)", generation, claims)
 }
 
 // rigProxiedStoreMessage is the rig lane's line for a bd-owned proxied scope.
@@ -166,7 +170,7 @@ func rigProxiedStoreMessage(store beads.Store) string {
 			return proxiedNativeStoreMessage(&beads.ProxiedDiagnostic{
 				Endpoint: report.Endpoint,
 				Evidence: report.Evidence,
-			})
+			}, store)
 		}
 		if verdict := proxied.Verdict(); verdict != nil {
 			return proxiedFallbackStoreMessage(&beads.ProxiedDiagnostic{Verdict: verdict.Verdict})

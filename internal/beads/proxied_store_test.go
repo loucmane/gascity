@@ -1203,3 +1203,25 @@ func TestStandDownKeepsTheTerminalReason(t *testing.T) {
 		t.Error("the store promoted itself")
 	}
 }
+
+func TestProxiedGenerationConcurrentRepin(_ *testing.T) {
+	// repin updates these scope fields under mu. Exercise the observer and the
+	// mutation's memo eviction against that same writer synchronization.
+	store := &ProxiedStore{bd: NewMemStore()}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			store.mu.Lock()
+			store.root = ""
+			store.database = "test"
+			store.mu.Unlock()
+		}
+	}()
+	for i := 0; i < 1000; i++ {
+		store.currentGeneration()
+		_ = store.withMutation("test", func(Store) error { return nil })
+	}
+	wg.Wait()
+}

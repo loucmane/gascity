@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/rollout/gate"
 	"github.com/google/uuid"
 )
 
@@ -23,13 +25,18 @@ func (v *VerifiedSession) workIncarnation() string {
 
 // Use the configured work leg, or the class residence already proved by the
 // claim route. Never rediscover a different ledger when compensating a claim.
-var openVerifiedHookWorkStore = func(v *VerifiedSession, route *hookClaimClassRoute, dir, id string) (beads.Store, error) {
+var openVerifiedHookWorkStore = func(ctx context.Context, env []string, v *VerifiedSession, route *hookClaimClassRoute, dir, id string) (beads.Store, error) {
 	if route != nil && route.knownResident(id) {
 		return route.class, nil
 	}
 	for _, leg := range v.AllowedWorkStores {
 		if leg.dir == dir {
-			return openStoreAtForCity(dir, v.cityPath)
+			var commandEnv map[string]string
+			if env != nil {
+				commandEnv = hookClaimEnvMap(env, dir, v.assignee())
+			}
+			result, err := openStoreResultAtForCityContext(ctx, dir, v.cityPath, nil, gate.ModeUnset, false, false, false, commandEnv)
+			return result.Store, err
 		}
 	}
 	return nil, fmt.Errorf("work store is outside verified scope")
@@ -44,7 +51,7 @@ func fenceVerifiedHookWork(bead beads.Bead, opts hookClaimOptions, ops hookClaim
 	if err := v.mayClaim(); err != nil {
 		return beads.Bead{}, err
 	}
-	store, err := openVerifiedHookWorkStore(v, ops.ClassRoute, dir, bead.ID)
+	store, err := openVerifiedHookWorkStore(context.Background(), opts.Env, v, ops.ClassRoute, dir, bead.ID)
 	if err != nil {
 		return beads.Bead{}, err
 	}
@@ -91,7 +98,7 @@ func restampVerifiedHookWork(v *VerifiedSession, route *hookClaimClassRoute, dir
 	if route != nil && route.knownResident(id) {
 		return false, errRestampGraphResident
 	}
-	store, err := openVerifiedHookWorkStore(v, route, dir, id)
+	store, err := openVerifiedHookWorkStore(context.Background(), nil, v, route, dir, id)
 	if err != nil {
 		return false, err
 	}
@@ -135,7 +142,7 @@ func releaseVerifiedHookPending(bead beads.Bead, opts hookClaimOptions, ops hook
 	if !verifiedHookOwnsWork(v, bead) {
 		return false, nil
 	}
-	store, err := openVerifiedHookWorkStore(v, ops.ClassRoute, dir, bead.ID)
+	store, err := openVerifiedHookWorkStore(context.Background(), opts.Env, v, ops.ClassRoute, dir, bead.ID)
 	if err != nil {
 		return false, err
 	}
@@ -168,10 +175,9 @@ func verifiedHookReleasePatch() beads.UpdateOpts {
 
 // pinVerifiedHookContinuation uses the same revision-fenced write boundary as
 // managed claims, so proxy generation changes cannot bypass read-after-write checks.
-func pinVerifiedHookContinuation(sibling beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir, assignee string) error {
+func pinVerifiedHookContinuation(ctx context.Context, store beads.Store, sibling beads.Bead, opts hookClaimOptions, assignee string) error {
 	v := opts.Verified
-	store, err := openVerifiedHookWorkStore(v, ops.ClassRoute, dir, sibling.ID)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	live, err := store.Get(sibling.ID)

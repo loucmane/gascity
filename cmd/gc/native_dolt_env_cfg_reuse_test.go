@@ -17,9 +17,9 @@ import (
 // after the open, on a reconnect where re-reading current config is the point.
 func TestOpenNativeStoreReusesTheLoadedCityConfig(t *testing.T) {
 	const (
-		enclosing = "openStoreResultAtForCityWithConfig"
+		enclosing = "openStoreResultAtForCityContext"
 		field     = "OpenNativeStore"
-		callee    = "nativeDoltOpenEnvForScope"
+		callee    = "nativeDoltOpenEnvForScopeContext"
 		wantArg   = "cfg"
 	)
 
@@ -40,6 +40,9 @@ func TestOpenNativeStoreReusesTheLoadedCityConfig(t *testing.T) {
 
 	var checked int
 	ast.Inspect(value, func(n ast.Node) bool {
+		if _, nested := n.(*ast.FuncLit); nested && n != value {
+			return false // Reconnect deliberately reloads current configuration.
+		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -49,13 +52,13 @@ func TestOpenNativeStoreReusesTheLoadedCityConfig(t *testing.T) {
 			return true
 		}
 		checked++
-		if len(call.Args) != 3 {
-			t.Fatalf("%s: got %d args, want 3", callee, len(call.Args))
+		if len(call.Args) != 4 {
+			t.Fatalf("%s: got %d args, want 4", callee, len(call.Args))
 		}
-		arg, ok := call.Args[1].(*ast.Ident)
+		arg, ok := call.Args[2].(*ast.Ident)
 		if !ok || arg.Name != wantArg {
 			t.Fatalf("%s in %s.%s passes %s as its config; want the already-loaded %q",
-				callee, enclosing, field, exprText(call.Args[1]), wantArg)
+				callee, enclosing, field, exprText(call.Args[2]), wantArg)
 		}
 		return true
 	})

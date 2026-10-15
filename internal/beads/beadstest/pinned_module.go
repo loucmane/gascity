@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/mod/modfile"
 )
 
 // PinnedBeadsModulePath is the module gc links its native store against.
@@ -43,6 +45,29 @@ func PinnedBeadsModuleDir(t *testing.T) string {
 	// a pure-Bazel machine has no go module cache at all.
 	if dir := bazelRunfilesBeadsModule(); dir != "" {
 		return dir
+	}
+	// A local fork replacement is the actual linked source, not the cache's
+	// upstream version with the same require line.
+	root := RepositoryRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, replacement := range mod.Replace {
+		if replacement.Old.Path == PinnedBeadsModulePath && replacement.New.Version == "" {
+			dir := replacement.New.Path
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(root, dir)
+			}
+			if info, err := os.Stat(filepath.Join(dir, "go.mod")); err != nil || info.IsDir() {
+				t.Fatalf("unavailable pinned beads replacement %s: %v", dir, err)
+			}
+			return dir
+		}
 	}
 	return pinnedBeadsModuleDirOrFatal(t, goModuleCache(t), PinnedBeadsVersion(t))
 }

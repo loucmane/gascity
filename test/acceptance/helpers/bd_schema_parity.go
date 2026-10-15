@@ -13,9 +13,8 @@ import (
 	"github.com/steveyegge/beads/schema"
 )
 
-// bdSchemaProbeTimeout bounds the probe. It opens a throwaway SQLite database
-// and applies migrations to it, which is a sub-second operation; the timeout is
-// here so a wedged bd cannot hang every acceptance run at startup.
+// bdSchemaProbeTimeout bounds migration of a disposable embedded Dolt database
+// so a wedged bd cannot hang every acceptance run at startup.
 const bdSchemaProbeTimeout = 60 * time.Second
 
 // bdSchemaVersionPattern matches the version bd reports from `migrate schema`
@@ -78,9 +77,9 @@ func abs(n int) int {
 }
 
 // bdLatestSchemaVersion asks the binary what schema version it migrates to, by
-// migrating a throwaway SQLite database. `bd migrate schema` needs no `bd init`
-// and no server when handed an explicit --db, so this costs one sub-second
-// process and touches nothing the suite cares about.
+// migrating a disposable embedded Dolt database. The child gets an isolated
+// home and explicit embedded mode so host configuration cannot route this
+// migration to a shared server.
 func bdLatestSchemaVersion(bdPath string) (int, error) {
 	dir, err := os.MkdirTemp("", "gc-bd-schema-probe-*")
 	if err != nil {
@@ -93,6 +92,22 @@ func bdLatestSchemaVersion(bdPath string) (int, error) {
 
 	cmd := exec.CommandContext(ctx, bdPath, "migrate", "schema", "--db", filepath.Join(dir, "probe.db")) //nolint:gosec // caller-supplied test binary
 	cmd.Dir = dir
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + dir,
+		"XDG_CONFIG_HOME=" + filepath.Join(dir, "config"),
+		"DOLT_ROOT_PATH=" + dir,
+		"TMPDIR=" + dir,
+		"GOTMPDIR=" + dir,
+		"BEADS_CENTRAL_CONFIG=" + filepath.Join(dir, "absent-central.json"),
+		"BEADS_DOLT_SERVER_MODE=0",
+		"BEADS_DOLT_SHARED_SERVER=0",
+		"BEADS_DOLT_AUTO_START=0",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"BD_DISABLE_METRICS=1",
+		"DO_NOT_TRACK=1",
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("bd schema probe: %s migrate schema: %w\n%s", bdPath, err, out)

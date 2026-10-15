@@ -995,3 +995,17 @@ func TestRigProxiedStoreMessageSeesThroughWrappers(t *testing.T) {
 		t.Fatalf("rigProxiedStoreMessage(MemStore) = %q, want the unchanged base message", got)
 	}
 }
+
+func TestRigProxiedDoctorReportsCASCapability(t *testing.T) {
+	for _, incapable := range []bool{false, true} {
+		held := &liveProxiedStore{}
+		held.DisableConditionalWrites = incapable
+		message := rigProxiedStoreMessage(held)
+		if incapable && !strings.Contains(message, "claims refused") {
+			t.Errorf("incapable bd: %s", message)
+		}
+		if !incapable && !strings.Contains(message, "claims use --if-revision CAS") {
+			t.Errorf("capable bd: %s", message)
+		}
+	}
+}

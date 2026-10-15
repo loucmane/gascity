@@ -16,14 +16,6 @@
 // instrument shown to record the thing it is claiming the absence of — and the
 // assertion is the intersection of two observations rather than the absence of
 // one.
-//
-// The third row is a forward pin rather than a safety property: beads latches
-// GIT_AUTHOR_NAME/EMAIL onto the store instance AT OPEN, so the author of every
-// Dolt commit a proxied-window handle ever makes is decided by the env map PR2
-// projects. PR2 writes nothing through that handle on any product path, which is
-// exactly why the pin has to exist now: PR3's authorship is already determined by
-// code that has landed, and a beads bump that moved that read would otherwise
-// surface as mis-attributed commits in PR3 rather than as a failure here.
 package acceptance_test
 
 import (
@@ -38,6 +30,7 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	beadslib "github.com/steveyegge/beads"
 
 	"github.com/gastownhall/gascity/internal/beads"
 	helpers "github.com/gastownhall/gascity/test/acceptance/helpers"
@@ -286,15 +279,12 @@ func TestProxiedNativeSafety(t *testing.T) {
 	// library never dials a dead port there, and its auto-start fence
 	// (BEADS_DOLT_SERVER_MODE=1 makes the server externally managed,
 	// BEADS_DOLT_AUTO_START=0 opts out; beads v1.3.0 internal/storage/dolt/open.go:215 resolveAutoStart)
-	// is never exercised. A beads bump that stopped honouring it would pass
-	// them, and the admission-to-open race, or a reopen after the proxy died,
-	// would then have the library start a gc-parented `dolt sql-server` on
-	// bd's data dir. These two rows open the library in THIS process, through
-	// the production proxied window, against bd's stopped proxy — that race
-	// made deterministic — with the sentinel armed for this process in trap
-	// mode: first on this process's PATH (the library resolves dolt with
-	// exec.LookPath), recording every exec and refusing it, so neither the
-	// control nor a broken fence can start a server.
+	// is never exercised. The library-level rows below make the stopped-port
+	// condition deterministic. A writable-constructor control first proves
+	// that the sentinel records attempted auto-start from this process, then
+	// the production read-only window must execute no Dolt command. The
+	// sentinel refuses every launch from this process, so even the control
+	// cannot start a server.
 	//
 	// The endpoint map is the production shape, built while the proxy is still
 	// up (bd removes the record on an orderly stop, and the port is in it).
@@ -308,23 +298,9 @@ func TestProxiedNativeSafety(t *testing.T) {
 	}
 
 	t.Run("library-no-spawn-control", func(t *testing.T) {
-		// The instrument, before the claim: the library's auto-start, in this
-		// process, finds the sentinel, and every exec it makes is recorded with
-		// this process as its parent.
-		//
-		// Design 5.2's control clears BEADS_DOLT_SERVER_MODE and
-		// BEADS_DOLT_AUTO_START "against a stopped proxy". On a proxied-server
-		// scope that shape cannot reach the auto-start at beads v1.3.0, and is
-		// not safe to try: without BEADS_DOLT_SERVER_MODE=1,
-		// configfile.IsDoltServerMode is false for dolt_mode "proxied-server"
-		// (configfile.go:364-390), so OpenBestAvailable takes the EMBEDDED
-		// engine (beads_cgo.go:44-61) — no dolt exec at all, and bd's database
-		// opened in-process. So the control is a scratch scope whose metadata
-		// says plain dolt_mode "server" with no port (ResolveServerMode:
-		// owned), opened through the SAME production window, with the SAME
-		// endpoint map less the two gate keys, against the SAME dead port. The
-		// only differences from the row below are the two keys and the mode
-		// that makes the library server-backed without them.
+		// Prove the sentinel observes the library's attempted auto-start using
+		// its writable constructor in a disposable server-mode scope. The
+		// production constructor disables auto-start regardless of env keys.
 		sentinel.Reset()
 		sentinel.TrapThisProcess(t)
 
@@ -343,11 +319,24 @@ func TestProxiedNativeSafety(t *testing.T) {
 		delete(controlEnv, "BEADS_DOLT_SERVER_MODE")
 		delete(controlEnv, "BEADS_DOLT_AUTO_START")
 
+		for _, entry := range os.Environ() {
+			key, _, _ := strings.Cut(entry, "=")
+			if strings.HasPrefix(key, "BEADS_") || strings.HasPrefix(key, "BD_") {
+				t.Setenv(key, "")
+			}
+		}
+		for key, value := range controlEnv {
+			t.Setenv(key, value)
+		}
+		t.Setenv("HOME", scratch)
+		t.Setenv("DOLT_ROOT_PATH", scratch)
+		t.Setenv("BEADS_DOLT_AUTO_START", "1")
+		t.Setenv("BEADS_DOLT_SHARED_SERVER", "0")
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		store, err := beads.OpenNativeDoltStoreAtProxied(ctx, scratch, controlEnv)
+		store, err := beadslib.OpenFromConfig(ctx, filepath.Join(scratch, ".beads"))
 		if err == nil {
-			store.CloseStore() //nolint:errcheck // unexpected handle
+			store.Close() //nolint:errcheck // unexpected handle
 			t.Fatalf("the control's open SUCCEEDED against the stopped proxy's port %s, so something is serving it and neither row below is about a dead port",
 				productionEnv["BEADS_DOLT_SERVER_PORT"])
 		}
@@ -356,7 +345,7 @@ func TestProxiedNativeSafety(t *testing.T) {
 		mine := sentinel.FromThisProcess()
 		t.Logf("sentinel recorded %d dolt exec(s) from this process (pid %d):\n%s", len(mine), os.Getpid(), sentinel.Describe())
 		if len(mine) == 0 {
-			t.Fatalf("with the two gates cleared the library's auto-start recorded NO dolt exec from this process, so the sentinel is not the dolt the library resolves and the negative row below would pass by construction; open error: %v",
+			t.Fatalf("the writable constructor with auto-start enabled recorded NO dolt exec from this process, so the sentinel is not the dolt the library resolves and the negative row below would pass by construction; open error: %v",
 				err)
 		}
 		if leaked := waitForNoDoltProcesses(t, scratch, 10*time.Second); len(leaked) > 0 {
@@ -514,77 +503,14 @@ func TestProxiedNativeSafety(t *testing.T) {
 		}
 	})
 
-	t.Run("author-latched-at-open", func(t *testing.T) {
-		// The forward pin for PR3's authorship.
-		//
-		// beads reads GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL in applyConfigDefaults at
-		// OPEN (v1.3.0 internal/storage/dolt/store.go:1430,:1449,:1455), latches
-		// them onto the store instance (:1974-1975), and commitAuthorString
-		// (:3170) is what feeds DOLT_COMMIT(..., '--author', ?). So the author of
-		// every commit a proxied-window handle will ever make is decided by the
-		// env map PR2 projects — a map PR2 itself never writes through.
-		//
-		// The pin is therefore in two halves, and both are needed:
-		//
-		//   - cmd/gc's TestProxiedOpenEnvForPinGolden asserts the exact map
-		//     production projects, including the author pair;
-		//   - this row opens the library over a real proxy with that map's shape
-		//     and asserts the Dolt commit that comes out carries `gc <gc@city>`.
-		//
-		// It opens the store directly rather than through a gc command because
-		// there is no product path that writes through a proxied window in PR2 —
-		// which is exactly why the pin cannot wait for one.
-		//
-		// And it opens the BARE storage through the proxied window, not
-		// OpenNativeDoltStoreAtProxied (round3 review, completeness). Every
-		// handle that function returns is read-only latched, structurally
-		// (council B-F5), so a Create through it is refused before it reaches
-		// the library and this row could only fail. OpenNativeStorageAtProxied
-		// is the same window — the same BEADS_/BD_ withholding, the same
-		// projection of this env map, the same library open that latches the
-		// author — so the author the library commits with is decided exactly
-		// as it is for the read handle. The write goes through gc's own
-		// NativeDoltStore.Create over that storage, built with the exported
-		// test constructor, because a writable proxied handle is PR3's to ask
-		// for by name (WithProxiedWritable) and PR2 must not ship one.
-		writeEnv := proxiedAuthorWindowEnv(t, cityRoot, city)
-		storage, err := beads.OpenNativeStorageAtProxied(context.Background(), cityRoot, writeEnv)
+	t.Run("bare-storage-refuses-writes", func(t *testing.T) {
+		storage, err := beads.OpenNativeStorageAtProxied(t.Context(), cityRoot, proxiedAuthorWindowEnv(t, cityRoot, city))
 		if err != nil {
-			t.Fatalf("open the library over bd's proxy with the proxied window's env: %v", err)
+			t.Fatal(err)
 		}
-		store := beads.NewNativeDoltStoreOverStorageForTest(storage)
-		defer store.CloseStore() //nolint:errcheck // test handle
-
-		priority := 2
-		created, err := store.Create(beads.Bead{
-			Title:    "author pin " + strconv.FormatInt(time.Now().UnixNano(), 10),
-			Type:     "task",
-			Status:   "open",
-			Priority: &priority,
-		})
-		if err != nil {
-			t.Fatalf("write through the proxied window: %v", err)
-		}
-		t.Logf("wrote %s through a proxied-window handle", created.ID)
-
-		db := proxiedScopeSQL(t, cityRoot)
-		var committer, email string
-		if err := db.QueryRowContext(context.Background(),
-			"SELECT committer, email FROM dolt_log ORDER BY date DESC LIMIT 1").Scan(&committer, &email); err != nil {
-			t.Fatalf("read the top Dolt commit's author: %v", err)
-		}
-		wantEmail := "gc@" + proxiedCityName(t, city)
-		t.Logf("top Dolt commit author: %s <%s> (want gc <%s>)", committer, email, wantEmail)
-		if committer != "gc" {
-			t.Errorf("Dolt commit committer = %q, want %q: beads latches GIT_AUTHOR_NAME at open, so PR3's authorship is already decided by this projection",
-				committer, "gc")
-		}
-		if email != wantEmail {
-			t.Errorf("Dolt commit email = %q, want %q", email, wantEmail)
-		}
-		if strings.ContainsAny(email, "/\\ \t") {
-			t.Errorf("the author email %q carries a path or whitespace; decision Q4 forbids a path-derived anchor, because a moved or reinstalled city would rewrite the same logical city's authorship",
-				email)
+		defer storage.Close()
+		if err := storage.SetConfig(t.Context(), "issue_prefix", "forbidden"); err == nil {
+			t.Fatal("bare proxied read handle accepted a write")
 		}
 	})
 }
@@ -627,8 +553,7 @@ func assertProxiedSchemaSkewRefusal(t *testing.T, payload beadsStorePayloadDoc, 
 // It is assembled here rather than imported because that function lives in
 // package main. The exact map production projects is pinned by
 // TestProxiedOpenEnvForPinGolden in cmd/gc; what this row adds is the other end
-// of the chain — that a map of this shape, over a real proxy, produces a Dolt
-// commit authored `gc <gc@city>`.
+// of the chain — that the resolved endpoint can serve a read-only handle.
 func proxiedAuthorWindowEnv(t *testing.T, scopeRoot string, city *helpers.City) map[string]string {
 	t.Helper()
 	root := proxiedScopeProxyRoot(t, scopeRoot)
@@ -683,4 +608,73 @@ func formatDoctorResults(report doctorReport) string {
 		lines = append(lines, fmt.Sprintf("  %s (%s): %s", r.Name, r.Status, r.Message))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// This fixture is current-schema but lacks a canonical ignore row. Opening a
+// read handle must not repair it, even before the outer read-only latch exists.
+func TestProxiedNativeOpenDoesNotRepairIgnorePatterns(t *testing.T) {
+	bdPath, doltPath := requireProxiedTooling(t)
+	env, calls := proxiedEnvRecordingBD(t, bdPath, doltPath)
+	city := helpers.NewCity(t, env)
+	t.Cleanup(func() { helpers.RunGC(env, city.Dir, "stop", city.Dir) })
+	city.InitNoStart("claude")
+	openEnv := proxiedAuthorWindowEnv(t, city.Dir, city)
+	db := proxiedScopeSQL(t, city.Dir)
+	if n := proxiedExecAffected(t, db, "DELETE FROM dolt_ignore WHERE pattern = 'repo_mtimes'"); n != 1 {
+		t.Fatalf("removed %d patterns, want 1", n)
+	}
+	proxiedExec(t, db, "CALL DOLT_ADD('dolt_ignore')")
+	proxiedExec(t, db, "CALL DOLT_COMMIT('-m', 'fixture missing ignore pattern', '--author', 'test <test@test.local>')")
+	snapshot := func() string {
+		t.Helper()
+		var head string
+		if err := db.QueryRowContext(t.Context(), "SELECT DOLT_HASHOF('HEAD')").Scan(&head); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := db.QueryContext(t.Context(), "SELECT pattern, ignored FROM dolt_ignore ORDER BY pattern")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var pattern string
+			var ignored bool
+			if err := rows.Scan(&pattern, &ignored); err != nil {
+				t.Fatal(err)
+			}
+			head += fmt.Sprintf("\n%s=%t", pattern, ignored)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return head
+	}
+	before := snapshot()
+	// Snapshot CLI invocations after fixture setup: the opens below are the only
+	// actions under observation, with no doctor or provider repair in the window.
+	beforeCalls := len(calls.Invocations())
+	first, err := beads.OpenNativeDoltStoreAtProxied(t.Context(), city.Dir, openEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.CloseStore(); err != nil {
+		t.Fatal(err)
+	}
+	if after := snapshot(); after != before {
+		t.Fatalf("native open repaired database: before=%s after=%s", before, after)
+	}
+	reopened, err := beads.OpenNativeStorageAtProxied(t.Context(), city.Dir, openEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if err := reopened.SetConfig(t.Context(), "issue_prefix", "forbidden"); err == nil {
+		t.Fatal("bare reopened handle accepted a write")
+	}
+	if after := snapshot(); after != before {
+		t.Fatalf("reopen changed database: before=%s after=%s", before, after)
+	}
+	if n := len(calls.Invocations()); n != beforeCalls {
+		t.Fatalf("native-only window invoked bd: %d -> %d", beforeCalls, n)
+	}
 }

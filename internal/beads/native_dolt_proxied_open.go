@@ -23,6 +23,8 @@ import (
 // about the library's, and they must not ride into the window.
 const bdEnvPrefix = "BD_"
 
+var nativeDoltOpenReadOnlyFromConfig = beadslib.OpenReadOnlyFromConfig
+
 // proxiedOnlyOpenEnvKeys are the keys the proxied-native window decides that a
 // direct native open does not.
 //
@@ -155,7 +157,7 @@ func openNativeStorageProxied(ctx context.Context, scopeRoot string, env map[str
 	}
 	defer restoreEnv()
 
-	storage, err := nativeDoltOpenBestAvailable(ctx, filepath.Join(scopeRoot, ".beads"))
+	storage, err := nativeDoltOpenReadOnlyFromConfig(ctx, filepath.Join(scopeRoot, ".beads"))
 	if err != nil {
 		return nil, "", err
 	}

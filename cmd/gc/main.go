@@ -1664,6 +1664,13 @@ var openStoreFactoryForCity = beads.OpenStoreAtForCity
 // project pool; every other open is a one-shot CLI open and takes the
 // single-connection cap from nativeDoltOneShotOpenEnvForScope.
 func openStoreResultAtForCityWithConfig(storePath, cityPath string, cfg *config.City, modeOverride gate.Mode, haveMode, authoritative, longLived bool) (beads.StoreOpenResult, error) {
+	return openStoreResultAtForCityContext(context.Background(), storePath, cityPath, cfg, modeOverride, haveMode, authoritative, longLived, nil)
+}
+
+// openStoreResultAtForCityContext binds a short-lived store to its caller's
+// operation deadline and exact bd environment. Nil commandEnv retains the
+// ordinary city-scoped command runner.
+func openStoreResultAtForCityContext(ctx context.Context, storePath, cityPath string, cfg *config.City, modeOverride gate.Mode, haveMode, authoritative, longLived bool, commandEnv map[string]string) (beads.StoreOpenResult, error) {
 	runtimeCityPath := cityPath
 	if runtimeCityPath == "" {
 		runtimeCityPath = cityForStoreDir(storePath)
@@ -1699,9 +1706,12 @@ func openStoreResultAtForCityWithConfig(storePath, cityPath string, cfg *config.
 		if err := requireBdBinaryForCity(runtimeCityPath); err != nil {
 			return nil, err
 		}
+		if commandEnv != nil {
+			return beads.NewBdStore(scopeRoot, beads.ExecCommandRunnerWithExactEnvContext(ctx, commandEnv)), nil
+		}
 		return openBdStoreAtWithConfig(scopeRoot, runtimeCityPath, cfg)
 	}
-	result, err := openStoreFactoryForCity(context.Background(), beads.StoreOpenOptions{
+	result, err := openStoreFactoryForCity(ctx, beads.StoreOpenOptions{
 		ScopeRoot:         scopeRoot,
 		CityPath:          runtimeCityPath,
 		Provider:          provider,
@@ -1735,9 +1745,9 @@ func openStoreResultAtForCityWithConfig(storePath, cityPath string, cfg *config.
 			var env map[string]string
 			var err error
 			if longLived {
-				env, err = nativeDoltOpenEnvForScope(runtimeCityPath, cfg, scopeRoot)
+				env, err = nativeDoltOpenEnvForScopeContext(ctx, runtimeCityPath, cfg, scopeRoot)
 			} else {
-				env, err = nativeDoltOneShotOpenEnvForScope(runtimeCityPath, cfg, scopeRoot)
+				env, err = nativeDoltOneShotOpenEnvForScopeContext(ctx, runtimeCityPath, cfg, scopeRoot)
 			}
 			if err != nil {
 				return nil, fmt.Errorf("project native store env %s: %w", scopeRoot, err)
@@ -1764,7 +1774,7 @@ func openStoreResultAtForCityWithConfig(storePath, cityPath string, cfg *config.
 				}
 				return beads.OpenNativeStorage(ctx, scopeRoot, freshEnv)
 			}
-			return beads.OpenNativeDoltStoreAt(context.Background(), scopeRoot, env, beads.WithNativeReopen(reopen))
+			return beads.OpenNativeDoltStoreAt(ctx, scopeRoot, env, beads.WithNativeReopen(reopen), beads.WithNativeReadContext(ctx))
 		},
 	})
 	if err != nil {

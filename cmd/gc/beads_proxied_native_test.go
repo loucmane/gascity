@@ -1818,3 +1818,44 @@ func TestProxiedVerifiedContinuationPinsUseRequiredCAS(t *testing.T) {
 		})
 	}
 }
+
+type continuationClosingStore struct {
+	*beads.MemStore
+	closes int
+}
+
+func (s *continuationClosingStore) CloseStore() error { //nolint:unparam // implements the store close contract
+	s.closes++
+	return nil
+}
+
+func TestVerifiedContinuationReusesAndClosesStore(t *testing.T) {
+	v, _ := newVerifiedHookFixture(t)
+	rows := []beads.Bead{
+		{ID: "one", Status: "open", Revision: 1, Metadata: map[string]string{"gc.root_bead_id": "root", "gc.continuation_group": "group", "gc.routed_to": "rig-a/worker"}},
+		{ID: "two", Status: "open", Revision: 1, Metadata: map[string]string{"gc.root_bead_id": "root", "gc.continuation_group": "group", "gc.routed_to": "rig-a/worker"}},
+	}
+	store := &continuationClosingStore{MemStore: beads.NewMemStoreFrom(1, rows, nil)}
+	old := openVerifiedHookWorkStore
+	t.Cleanup(func() { openVerifiedHookWorkStore = old })
+	opens := 0
+	openVerifiedHookWorkStore = func(ctx context.Context, env []string, _ *VerifiedSession, _ *hookClaimClassRoute, _, _ string) (beads.Store, error) {
+		opens++
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("missing mutation deadline")
+		}
+		if len(env) != 1 || env[0] != "PIN_ENV=retained" {
+			t.Errorf("lost env: %v", env)
+		}
+		return store, nil
+	}
+	opts := hookClaimOptions{Verified: v, Assignee: v.ID, RouteTargets: []string{"rig-a/worker"}, Env: []string{"PIN_ENV=retained"}}
+	ops := hookClaimOps{ListContinuation: func(context.Context, string, []string, string, string) ([]beads.Bead, error) { return rows, nil }}
+	assigned, err := preassignHookContinuationGroup(beads.Bead{ID: "claimed", Metadata: rows[0].Metadata}, opts, ops, "")
+	if err != nil || len(assigned) != 2 {
+		t.Fatalf("pins=%v err=%v", assigned, err)
+	}
+	if opens != 1 || store.closes != 1 {
+		t.Fatalf("opens=%d closes=%d; want one each", opens, store.closes)
+	}
+}

@@ -59,11 +59,11 @@ func TestProxiedHermeticOpenScrubsUnlocksAndProjectsAuthorPair(t *testing.T) {
 	t.Setenv("BEADS_DOLT_SERVER_PORT", "9999")
 	t.Setenv("BEADS_FUTURE_AUTHORITY", "ambient-authority")
 
-	oldOpen := nativeDoltOpenBestAvailable
-	t.Cleanup(func() { nativeDoltOpenBestAvailable = oldOpen })
+	oldOpen := nativeDoltOpenReadOnlyFromConfig
+	t.Cleanup(func() { nativeDoltOpenReadOnlyFromConfig = oldOpen })
 
 	var seen map[string]string
-	nativeDoltOpenBestAvailable = func(ctx context.Context, _ string) (beadslib.Storage, error) {
+	nativeDoltOpenReadOnlyFromConfig = func(ctx context.Context, _ string) (beadslib.Storage, error) {
 		if _, ok := ctx.Deadline(); !ok {
 			t.Error("proxied native open context has no deadline")
 		}
@@ -217,11 +217,11 @@ func TestProcessEnvSnapshotSeesAmbientDuringProxiedWindow(t *testing.T) {
 	t.Setenv("BEADS_FUTURE_AUTHORITY", "ambient-authority")
 	t.Setenv("GIT_AUTHOR_NAME", "op")
 
-	oldOpen := nativeDoltOpenBestAvailable
-	t.Cleanup(func() { nativeDoltOpenBestAvailable = oldOpen })
+	oldOpen := nativeDoltOpenReadOnlyFromConfig
+	t.Cleanup(func() { nativeDoltOpenReadOnlyFromConfig = oldOpen })
 	inWindow := make(chan struct{})
 	release := make(chan struct{})
-	nativeDoltOpenBestAvailable = func(context.Context, string) (beadslib.Storage, error) {
+	nativeDoltOpenReadOnlyFromConfig = func(context.Context, string) (beadslib.Storage, error) {
 		close(inWindow)
 		<-release
 		return &nativeDoltStorageSpy{
@@ -309,9 +309,9 @@ func TestWithNativeReadRetryBudgetIsAProductionOption(t *testing.T) {
 // This opens with NO options at all, which is the shape of the caller the
 // finding is about.
 func TestProxiedOpenIsReadOnlyWithoutBeingAsked(t *testing.T) {
-	oldOpen := nativeDoltOpenBestAvailable
-	t.Cleanup(func() { nativeDoltOpenBestAvailable = oldOpen })
-	nativeDoltOpenBestAvailable = func(context.Context, string) (beadslib.Storage, error) {
+	oldOpen := nativeDoltOpenReadOnlyFromConfig
+	t.Cleanup(func() { nativeDoltOpenReadOnlyFromConfig = oldOpen })
+	nativeDoltOpenReadOnlyFromConfig = func(context.Context, string) (beadslib.Storage, error) {
 		return &nativeDoltStorageSpy{
 			getConfig: func(context.Context, string) (string, error) { return "gc", nil },
 		}, nil
@@ -369,9 +369,9 @@ func TestProxiedAuthorPinWritesThroughTheWindowWithoutAWritableProxiedOpen(t *te
 		openedName, openedEmail    string
 		openedPort, openedDatabase string
 	)
-	oldOpen := nativeDoltOpenBestAvailable
-	t.Cleanup(func() { nativeDoltOpenBestAvailable = oldOpen })
-	nativeDoltOpenBestAvailable = func(context.Context, string) (beadslib.Storage, error) {
+	oldOpen := nativeDoltOpenReadOnlyFromConfig
+	t.Cleanup(func() { nativeDoltOpenReadOnlyFromConfig = oldOpen })
+	nativeDoltOpenReadOnlyFromConfig = func(context.Context, string) (beadslib.Storage, error) {
 		// What the library's applyConfigDefaults would latch, read at the
 		// moment of the open.
 		openedName, openedEmail = os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL")
@@ -501,5 +501,16 @@ func TestProxiedOpenedObservationReadsOverTheLibrarysOwnPool(t *testing.T) {
 	// A closed leaf is refused before anything is asked.
 	if _, err := ProxiedLeafObservation(context.Background(), nil); err == nil {
 		t.Fatal("a nil leaf produced an observation")
+	}
+}
+
+func TestNativeReadHonorsOwningOperationCancellation(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	store := newNativeDoltStoreWithStorageAndPrefix(&nativeDoltStorageSpy{}, "gc", "gc")
+	WithNativeReadContext(parent)(store)
+	cancel()
+	err := store.withReadRetry(func(ctx context.Context, _ beadslib.Storage) error { return ctx.Err() })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("read ignored owning operation: %v", err)
 	}
 }

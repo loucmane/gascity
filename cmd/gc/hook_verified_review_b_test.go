@@ -17,7 +17,7 @@ func installVerifiedWorkStore(t *testing.T, v *VerifiedSession, store beads.Stor
 	t.Helper()
 	old := openVerifiedHookWorkStore
 	t.Cleanup(func() { openVerifiedHookWorkStore = old })
-	openVerifiedHookWorkStore = func(got *VerifiedSession, _ *hookClaimClassRoute, _, _ string) (beads.Store, error) {
+	openVerifiedHookWorkStore = func(_ context.Context, _ []string, got *VerifiedSession, _ *hookClaimClassRoute, _, _ string) (beads.Store, error) {
 		if got.ID != v.ID {
 			t.Fatal("foreign verified work store")
 		}

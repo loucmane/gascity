@@ -106,3 +106,26 @@ func TestRequireBdSchemaParityAcceptsAMatchedPair(t *testing.T) {
 		t.Fatalf("a matched bd failed parity: %v", err)
 	}
 }
+
+func TestBdSchemaProbeIsolatesHostConfiguration(t *testing.T) {
+	path := stubBd(t, schema.LatestVersion())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BEADS_DOLT_SHARED_SERVER", "1")
+	t.Setenv("BD_PROBE_AMBIENT_SENTINEL", "must-not-leak")
+	body := `#!/bin/sh
+set -eu
+[ "$HOME" = "$PWD" ]
+[ "$DOLT_ROOT_PATH" = "$PWD" ]
+[ "$BEADS_DOLT_SHARED_SERVER" = 0 ]
+[ "$BEADS_DOLT_SERVER_MODE" = 0 ]
+[ "$BEADS_DOLT_AUTO_START" = 0 ]
+[ -z "${BD_PROBE_AMBIENT_SENTINEL:-}" ]
+echo 'Schema already at v` + strconv.Itoa(schema.LatestVersion()) + `'
+`
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil { //nolint:gosec // executable test fixture
+		t.Fatal(err)
+	}
+	if err := RequireBdSchemaParity(path); err != nil {
+		t.Fatal(err)
+	}
+}

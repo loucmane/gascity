@@ -45,7 +45,9 @@ var globalBoolFlags = map[string]bool{
 // compound bd subcommands, "parent child" ("mol pour"). The key set here
 // defines every subcommand this package knows about — see Known/Subcommands.
 //
-// Sourced from `bd <sub> --help` (bd 1.3.1, 2026-09-29).
+// Regenerated from `bd <sub> --help` on 2026-10-15 using the bd 1.3.1 fork
+// at 4b171fa486f9ee45404bf12315edbe728505c41c (scripts/build-vfug.sh).
+// Retains newer-known flags absent from that binary as a superset allowlist.
 var valueFlagsBySub = map[string]map[string]bool{
 	"create": {
 		"--acceptance": true, "--append-notes": true, "-a": true, "--assignee": true,
@@ -73,18 +75,21 @@ var valueFlagsBySub = map[string]map[string]bool{
 		"--title": true, "--spec-id": true, "--unset-metadata": true,
 		// The compare-and-set guards. Pinned as well as discovered: help
 		// discovery swallows its own errors, so a bd that is missing, renamed
-		// or slow leaves the pinned table as the only answer, and these two
+		// or slow leaves the pinned table as the only answer, and these guards
 		// are the flags whose absence broke fenced dispatch in every rig.
-		"--if-assignee": true, "--if-status": true,
+		"--if-assignee": true, "--if-status": true, "--if-revision": true,
 	},
 	"close": {
-		"-r": true, "--reason": true, "--reason-file": true, "--session": true,
+		"-r": true, "--reason": true, "--reason-file": true, "--session": true, "--if-revision": true,
+	},
+	"assign": {
+		"--if-revision": true,
 	},
 	"reopen": {
-		"-r": true, "--reason": true,
+		"-r": true, "--reason": true, "--if-revision": true,
 	},
 	"delete": {
-		"--from-file": true,
+		"--from-file": true, "--if-revision": true,
 	},
 	"ready": {
 		"-a": true, "--assignee": true, "--exclude-label": true, "--exclude-type": true,
@@ -142,8 +147,8 @@ var valueFlagsBySub = map[string]map[string]bool{
 // boolFlagsBySub holds each subcommand's boolean (no-value) flags beyond the
 // global set. Same keying convention as valueFlagsBySub.
 //
-// Sourced from `bd <sub> --help` (bd 1.3.1, 2026-09-29). A flag whose
-// help renders as `string[="default"]` — cobra's NoOptDefVal — belongs here,
+// Regenerated from the same pinned bd help on 2026-10-15 (see valueFlagsBySub).
+// A flag whose help renders as `string[="default"]` — cobra's NoOptDefVal — belongs here,
 // not in valueFlagsBySub: it never consumes the next argv token, so
 // `bd list --deps all` leaves "all" positional.
 var boolFlagsBySub = map[string]map[string]bool{
@@ -160,6 +165,9 @@ var boolFlagsBySub = map[string]map[string]bool{
 	"close": {
 		"--claim-next": true, "--continue": true, "-f": true, "--force": true,
 		"--no-auto": true, "--suggest-next": true,
+	},
+	"assign": {
+		"--force": true,
 	},
 	"reopen": {},
 	"delete": {

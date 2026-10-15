@@ -485,6 +485,7 @@ type relocatedClassGuard interface {
 func (s *ProxiedStore) withMutation(op string, write func(Store) error) error {
 	s.mu.RLock()
 	pinned := s.pin.PoolKey()
+	scopeRoot, database := s.pin.ScopeRoot(), s.database
 	s.mu.RUnlock()
 	before, beforeOK := s.currentGeneration()
 	err := write(s.writeLeaf())
@@ -496,7 +497,7 @@ func (s *ProxiedStore) withMutation(op string, write func(Store) error) error {
 	if moved {
 		s.standDown(NewNonTerminalProxiedVerdictError(ProxiedVerdictProxyGone,
 			fmt.Sprintf("proxy generation no longer proven after %s; re-admitting on the next open", op), nil))
-		ForgetProxiedPin(s.scopeRootForPin(), s.database)
+		ForgetProxiedPin(scopeRoot, database)
 	}
 	return err
 }
@@ -504,14 +505,17 @@ func (s *ProxiedStore) withMutation(op string, write func(Store) error) error {
 // currentGeneration reads bd's ownership record and derives the pool key. The
 // bool reports whether the record was readable at all.
 func (s *ProxiedStore) currentGeneration() (proxyendpoint.PoolKey, bool) {
-	if s.root == "" {
+	s.mu.RLock()
+	root, database := s.root, s.database
+	s.mu.RUnlock()
+	if root == "" {
 		return proxyendpoint.PoolKey{}, false
 	}
-	record, err := proxyendpoint.Read(s.root)
+	record, err := proxyendpoint.Read(root)
 	if err != nil {
 		return proxyendpoint.PoolKey{}, false
 	}
-	return proxyendpoint.NewPoolKey(record, s.database), true
+	return proxyendpoint.NewPoolKey(record, database), true
 }
 
 // scopeRootForPin is the key the pin memo is stored under. Admit keys the memo on

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"testing"
@@ -19,7 +20,7 @@ func installCommandVerifiedWorkStore(t *testing.T) {
 	old := openVerifiedHookWorkStore
 	t.Cleanup(func() { openVerifiedHookWorkStore = old })
 	stores := map[string]*commandWorkCASFixture{}
-	openVerifiedHookWorkStore = func(v *VerifiedSession, route *hookClaimClassRoute, dir, id string) (beads.Store, error) {
+	openVerifiedHookWorkStore = func(_ context.Context, _ []string, v *VerifiedSession, route *hookClaimClassRoute, dir, id string) (beads.Store, error) {
 		if route != nil && route.knownResident(id) {
 			return route.class, nil
 		}
@@ -61,6 +62,10 @@ func (s *commandWorkCASFixture) Get(id string) (beads.Bead, error) {
 		return beads.Bead{}, err
 	}
 	current, err := s.MemStore.Get(id)
+	if errors.Is(err, beads.ErrNotFound) {
+		row.Revision = 1
+		current, err = s.Create(row)
+	}
 	if err != nil {
 		return beads.Bead{}, err
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -180,7 +181,7 @@ func TestVerifiedHookWorkFenceUsesConfiguredFileStoreAndClassResidence(t *testin
 		t.Fatal(err)
 	}
 	v.AllowedWorkStores = []hookStore{{dir: dir}}
-	store, err := openVerifiedHookWorkStore(v, nil, dir, "work")
+	store, err := openVerifiedHookWorkStore(context.Background(), nil, v, nil, dir, "work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,16 +197,30 @@ func TestVerifiedHookWorkFenceUsesConfiguredFileStoreAndClassResidence(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, _ := store.Get(bead.ID)
+	// Read the persisted result through a fresh observer. FileStore's own
+	// conformance owns refresh of already-held readers across atomic rewrites.
+	readWork := func() beads.Bead {
+		t.Helper()
+		observer, err := openVerifiedHookWorkStore(context.Background(), nil, v, nil, dir, bead.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row, err := observer.Get(bead.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return row
+	}
+	before := readWork()
 	second, err := fenceVerifiedHookWork(bead, hookClaimOptions{Verified: v}, hookClaimOps{}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, _ := store.Get(bead.ID)
+	after := readWork()
 	if after.Revision <= before.Revision || first.Metadata[verifiedHookAttemptKey] == second.Metadata[verifiedHookAttemptKey] {
-		t.Fatal("file-store adoption did not advance fence")
+		t.Fatalf("file-store adoption did not advance fence: revision %d -> %d, attempt %s -> %s", before.Revision, after.Revision, first.Metadata[verifiedHookAttemptKey], second.Metadata[verifiedHookAttemptKey])
 	}
-	if _, err := openVerifiedHookWorkStore(v, nil, filepath.Join(v.cityPath, "foreign"), bead.ID); err == nil {
+	if _, err := openVerifiedHookWorkStore(context.Background(), nil, v, nil, filepath.Join(v.cityPath, "foreign"), bead.ID); err == nil {
 		t.Fatal("foreign work store admitted")
 	}
 	// A proven relocated class copy stays on that ledger even if a work copy

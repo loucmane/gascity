@@ -395,6 +395,8 @@ func (o *proxiedNativeOpener) open(parent context.Context, longLived bool) (bead
 		return nil, pin.Report(), err
 	}
 
+	beads.WithNativeReadContext(parent)(native)
+
 	bd, err := o.openBd()
 	if err != nil {
 		closeProxiedLeafQuietly(native)

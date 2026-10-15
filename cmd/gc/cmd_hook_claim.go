@@ -1513,7 +1513,7 @@ func writeHookClaimDrain(label, reason string, jsonOut, drainAck bool, drainAckF
 	return 1
 }
 
-func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) ([]string, error) {
+func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) (assigned []string, retErr error) {
 	rootID := strings.TrimSpace(bead.Metadata[beadmeta.RootBeadIDMetadataKey])
 	group := strings.TrimSpace(bead.Metadata[beadmeta.ContinuationGroupMetadataKey])
 	if rootID == "" || group == "" {
@@ -1531,7 +1531,19 @@ func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops 
 		return nil, err
 	}
 	pinAssignee := continuationPinAssignee(opts)
-	assigned := make([]string, 0, len(siblings))
+	assigned = make([]string, 0, len(siblings))
+	var workStore beads.Store
+	defer func() {
+		if workStore != nil {
+			// A class-route store is borrowed from the enclosing claim operation.
+			if ops.ClassRoute != nil && workStore == ops.ClassRoute.class {
+				return
+			}
+			if closer, ok := workStore.(interface{ CloseStore() error }); ok {
+				retErr = errors.Join(retErr, closer.CloseStore())
+			}
+		}
+	}()
 	for _, sibling := range siblings {
 		if strings.TrimSpace(sibling.ID) == "" ||
 			sibling.ID == bead.ID ||
@@ -1547,7 +1559,12 @@ func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops 
 		}
 		var err error
 		if opts.Verified != nil {
-			err = pinVerifiedHookContinuation(sibling, opts, ops, dir, pinAssignee)
+			if workStore == nil {
+				workStore, err = openVerifiedHookWorkStore(ctx, opts.Env, opts.Verified, ops.ClassRoute, dir, sibling.ID)
+			}
+			if err == nil {
+				err = pinVerifiedHookContinuation(ctx, workStore, sibling, opts, pinAssignee)
+			}
 		} else {
 			err = ops.AssignContinuation(ctx, dir, opts.Env, sibling.ID, pinAssignee)
 		}
@@ -2982,8 +2999,8 @@ func hookEmitClaimReclaimedStale(beadID, previousOwner, newAssignee string) {
 	}
 }
 
-func hookListContinuationWithBdStore(_ context.Context, dir string, env []string, rootID, group string) ([]beads.Bead, error) {
-	store := hookClaimBdStore(dir, env, "")
+func hookListContinuationWithBdStore(ctx context.Context, dir string, env []string, rootID, group string) ([]beads.Bead, error) {
+	store := hookClaimBdStoreContext(ctx, dir, env, "")
 	return store.List(beads.ListQuery{
 		Status: "open",
 		Metadata: map[string]string{

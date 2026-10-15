@@ -783,7 +783,7 @@ func (c *BeadsStoreCheck) Run(_ *CheckContext) *CheckResult {
 			r.Message = proxiedDemotedStoreMessage(proxied)
 			return r
 		}
-		r.Message = proxiedNativeStoreMessage(proxied)
+		r.Message = proxiedNativeStoreMessage(proxied, result.Store)
 		return r
 	}
 	if result.Diagnostic.Store == beads.BeadsStoreNameBdStore && result.Diagnostic.PreflightGate == beads.BeadsGateProxiedProvider {

@@ -430,7 +430,8 @@ type NativeDoltStore struct {
 	// the store factory (which owns managed-Dolt port discovery + restart); a
 	// nil reopen disables reconnect and preserves fail-fast behavior for test
 	// handles built directly from a storage value.
-	reopen NativeReopenFunc
+	reopen      NativeReopenFunc
+	readContext context.Context
 	// reconnectGate is a single token used to serialize reconnects. Readers wait
 	// on it with their retry context, so a reconnect already in progress cannot
 	// make another read outlive its wall-clock budget.
@@ -674,10 +675,7 @@ func openNativeStorageWithCredentialCommand(ctx context.Context, scopeRoot strin
 // a NativeDoltStore, for tests in OTHER packages that need a real leaf — one
 // whose CloseStore reaches the storage's Close. cmd/gc's proxied opener tests
 // use it without a Dolt server to prove a refused open closes the leaf it
-// opened (council pr2 E-I5). The proxied-native safety acceptance row uses it
-// over OpenNativeStorageAtProxied's storage to WRITE through the proxied
-// window's author latch, because every handle OpenNativeDoltStoreAtProxied
-// returns is read-only latched (council B-F5) and PR2 ships no writable one.
+// opened (council pr2 E-I5).
 // The handle it returns carries no read-only latch, no reopen hook and no
 // issue prefix. Production opens only through OpenNativeDoltStoreAt* and
 // OpenNativeDoltStoreAtProxied.
@@ -788,7 +786,11 @@ func (s *NativeDoltStore) withReadRetry(fn func(context.Context, beadslib.Storag
 	// (env re-resolution + recovery + reopen), the retried read, and the backoff.
 	// Every step derives its deadline from this ctx and is canceled in-flight
 	// when it expires, so the total cannot stack per-call timeouts past budget.
-	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	parent := s.readContext
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, budget)
 	defer cancel()
 	for {
 		storage, gen, release, err := s.acquireStorageGen()
@@ -3350,4 +3352,10 @@ func metadataMapFromNative(raw json.RawMessage) (map[string]string, error) {
 		metadata[k] = string(raw)
 	}
 	return metadata, nil
+}
+
+// WithNativeReadContext binds reads, including reconnects, to the owning operation.
+// Apply only at construction, before sharing the handle with readers.
+func WithNativeReadContext(ctx context.Context) NativeDoltStoreOption {
+	return func(s *NativeDoltStore) { s.readContext = ctx }
 }

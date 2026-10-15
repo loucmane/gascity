@@ -88,7 +88,7 @@ func TestBoolFlagsIncorporatesDiscovered(t *testing.T) {
 
 func TestSubcommandsListsAllKnownKeys(t *testing.T) {
 	want := []string{
-		"close", "create", "delete", "dep add", "dep list", "dep remove",
+		"assign", "close", "create", "delete", "dep add", "dep list", "dep remove",
 		"gate check", "gate list", "list", "mol burn", "mol current",
 		"mol pour", "mol wisp", "ready", "reopen", "show", "update",
 	}
@@ -469,4 +469,19 @@ func TestUpdateCompareAndSetFlagsArePinned(t *testing.T) {
 
 func updateValueFlags() map[string]bool {
 	return valueFlagsBySub["update"]
+}
+
+// TestRevisionCASFlagsConsumeValuesWithoutDiscovery protects the fallback used
+// when bd help cannot run; revision tokens must never become positional IDs.
+func TestRevisionCASFlagsConsumeValuesWithoutDiscovery(t *testing.T) {
+	for _, sub := range []string{"update", "close", "assign", "delete", "reopen"} {
+		t.Run(sub, func(t *testing.T) {
+			if !ValueFlags(sub)["--if-revision"] || BoolFlags(sub)["--if-revision"] {
+				t.Fatal("--if-revision must consume a value in the pinned manifest")
+			}
+			if findings := ScanUnknownFlags([]byte("bd " + sub + " --if-revision 123 bd-abc")); len(findings) != 0 {
+				t.Fatalf("revision CAS invocation rejected: %v", findings)
+			}
+		})
+	}
 }

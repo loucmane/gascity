@@ -25,7 +25,18 @@ var flagNameRE = regexp.MustCompile(`(?m)^\s*(?:-([A-Za-z0-9]), )?--([A-Za-z0-9]
 // subcommand's own.
 func parseHelpFlagNames(help string) map[string]bool {
 	names := make(map[string]bool)
+	inFlags := false
 	for _, line := range strings.Split(help, "\n") {
+		if strings.TrimSpace(line) == "Flags:" || strings.TrimSpace(line) == "Global Flags:" {
+			inFlags = true
+			continue
+		}
+		if line != "" && line[0] != ' ' && line[0] != '\t' {
+			inFlags = false
+		}
+		if !inFlags {
+			continue
+		}
 		m := flagNameRE.FindStringSubmatch(line)
 		if m == nil {
 			continue
@@ -109,5 +120,29 @@ func TestBdFlagManifestCurrent(t *testing.T) {
 					sub, sub, missingFromManifest)
 			}
 		})
+	}
+}
+
+func TestParseHelpFlagNamesIgnoresWrappedDescription(t *testing.T) {
+	help := `Assign an issue.
+Refuses another live claim, matching
+--claim. Use update to claim instead.
+
+Flags:
+      --force                      Allow overwrite
+      --if-revision bd show --json  Expected revision
+  -h, --help                       Help for assign
+
+Global Flags:
+      --actor string               Actor name
+`
+	got := parseHelpFlagNames(help)
+	if got["--claim"] || got["--json"] {
+		t.Fatalf("description text became a flag: %v", got)
+	}
+	for _, flag := range []string{"--force", "--if-revision", "-h", "--help", "--actor"} {
+		if !got[flag] {
+			t.Errorf("missing declared flag %s", flag)
+		}
 	}
 }

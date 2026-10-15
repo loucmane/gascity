@@ -3607,3 +3607,14 @@ printf '{"id":"gc-1","status":"in_progress"}\n'
 		t.Fatalf("warning = %q, want one line naming ignored BD_BIN %q", msg, stale)
 	}
 }
+
+func TestBdMutationWriteIDsRevisionIsNotAnID(t *testing.T) {
+	for _, sub := range []string{"update", "close", "delete", "reopen"} {
+		t.Run(sub, func(t *testing.T) {
+			ids, ok, ambiguous := bdMutationWriteIDs([]string{sub, "--if-revision", "123", "gcy-real"})
+			if !ok || ambiguous || len(ids) != 1 || ids[0] != "gcy-real" {
+				t.Fatalf("revision scan = (%v, %v, %v), want ([gcy-real], true, false)", ids, ok, ambiguous)
+			}
+		})
+	}
+}
