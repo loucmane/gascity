@@ -1532,12 +1532,13 @@ func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops 
 	}
 	pinAssignee := continuationPinAssignee(opts)
 	assigned = make([]string, 0, len(siblings))
-	var workStore beads.Store
+	// One handle per ledger: the route's residence memo is per sibling.
+	stores := make(map[bool]beads.Store, 2)
 	defer func() {
-		if workStore != nil {
+		for _, workStore := range stores {
 			// A class-route store is borrowed from the enclosing claim operation.
 			if ops.ClassRoute != nil && workStore == ops.ClassRoute.class {
-				return
+				continue
 			}
 			if closer, ok := workStore.(interface{ CloseStore() error }); ok {
 				retErr = errors.Join(retErr, closer.CloseStore())
@@ -1559,8 +1560,13 @@ func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops 
 		}
 		var err error
 		if opts.Verified != nil {
+			classResident := ops.ClassRoute != nil && ops.ClassRoute.knownResident(sibling.ID)
+			workStore := stores[classResident]
 			if workStore == nil {
 				workStore, err = openVerifiedHookWorkStore(ctx, opts.Env, opts.Verified, ops.ClassRoute, dir, sibling.ID)
+				if err == nil {
+					stores[classResident] = workStore
+				}
 			}
 			if err == nil {
 				err = pinVerifiedHookContinuation(ctx, workStore, sibling, opts, pinAssignee)
