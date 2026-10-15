@@ -4,7 +4,9 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -17,6 +19,61 @@ spec.loader.exec_module(host)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_namespace_is_reserved_for_supervisor_acceptance(self):
+        steps = host.suites('all', Path('/fixture/bin'))
+        namespaced = [step.name for step in steps if getattr(step, 'private_home', False)]
+        self.assertEqual(namespaced, ['proxied-acceptance'])
+        for step in steps:
+            command = host.step_command(step, Path('/runner'))
+            self.assertEqual('--private-home' in command, step.name == 'proxied-acceptance')
+        self.assertEqual(host.GC, Path(__file__).resolve().parents[1])
+
+    def test_plain_command_keeps_host_identity_and_isolates_environment(self):
+        script = Path(__file__).with_name('vfug-env.sh')
+        code = '''import json, os
+from pathlib import Path
+print(json.dumps({
+    'home': os.environ['HOME'], 'tmp': os.environ['TMPDIR'],
+    'gotmp': os.environ['GOTMPDIR'], 'tmux': os.environ['TMUX_TMPDIR'],
+    'root_uid': Path('/').stat().st_uid,
+    'leaked': 'VFUG_TEST_UNTRUSTED' in os.environ,
+    'uid_map': Path('/proc/self/uid_map').read_text(),
+    'cap_eff': next(line for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('CapEff:')),
+}))'''
+        result = subprocess.run(['bash', str(script), '--', 'python3', '-c', code],
+                                env={**os.environ, 'VFUG_TEST_UNTRUSTED': 'present'},
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        values = json.loads(result.stdout.splitlines()[-1])
+        for key in ('home', 'tmp', 'gotmp', 'tmux'):
+            self.assertTrue(values[key].startswith('/work/ga-vfug/'), values)
+        self.assertFalse(values['leaked'])
+        self.assertEqual(values['root_uid'], Path('/').stat().st_uid)
+        self.assertEqual(values['uid_map'], Path('/proc/self/uid_map').read_text())
+        expected_caps = next(line for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('CapEff:'))
+        self.assertEqual(values['cap_eff'], expected_caps)
+
+    def test_inside_refuses_host_namespace_before_mount(self):
+        script = Path(__file__).with_name('vfug-env.sh')
+        with tempfile.TemporaryDirectory(prefix='inside.', dir='/work/ga-vfug') as temporary:
+            root = Path(temporary)
+            marker = root / 'mounted'
+            mount = root / 'mount'
+            mount.write_text('#!/bin/sh\ntouch "' + str(marker) + '"\nexit 0\n')
+            mount.chmod(0o755)
+            result = subprocess.run(['bash', str(script), '--inside', str(root), '/bin/true'],
+                                    env={'PATH': str(root) + ':/usr/bin:/bin'},
+                                    capture_output=True, text=True, timeout=15)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('requires a private user namespace', result.stderr)
+            self.assertFalse(marker.exists(), 'attempted mount before validating namespace')
+
+    def test_private_home_drops_capabilities_before_command(self):
+        source = Path(__file__).with_name('vfug-env.sh').read_text()
+        inside = source.split('if [[ ${1:-} == --inside ]]; then', 1)[1].split('\nfi', 1)[0]
+        self.assertIn('exec setpriv --inh-caps=-all --ambient-caps=-all --bounding-set=-all -- "$@"', inside)
+        self.assertLess(inside.rindex('mount '), inside.index('exec setpriv'))
+
     def run_fixture(self, *, launch_error=False, drift=False):
         base = Path('/work/ga-vfug')
         base.mkdir(parents=True, exist_ok=True)

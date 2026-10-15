@@ -13,7 +13,7 @@ import tempfile
 import time
 
 ROOT = Path('/home/loucmane/scratch/ga-vfug')
-GC = ROOT / 'port'
+GC = Path(__file__).resolve().parents[1]
 BD = ROOT / 'bd-src'
 
 
@@ -23,6 +23,12 @@ class Step:
     cwd: Path
     args: list
     pair: bool = True
+    private_home: bool = False
+
+
+def step_command(step, runner):
+    options = ['--private-home'] if step.private_home else []
+    return ['bash', str(runner / 'vfug-env.sh'), *options, '--', *step.args]
 
 
 def suites(group, pair):
@@ -68,7 +74,7 @@ def suites(group, pair):
         steps.append(Step('proxied-acceptance', GC, ['env', 'GC_REQUIRE_ACCEPTANCE_TOOLING=1',
             'GC_ACCEPTANCE_BD_BIN=' + str(bd), 'GC_ACCEPTANCE_GC_BIN=' + str(gc),
             'go', 'test', '-tags=acceptance_a', './test/acceptance', '-run', pattern,
-            '-count=1', '-timeout=45m', '-v']))
+            '-count=1', '-timeout=45m', '-v'], private_home=True))
     if group in ('all', 'cas', 'safety'):
         steps.append(Step('gc-cas', GC, ['env', 'GC_TEST_PROXIED_CAS=1', 'GC_ACCEPTANCE_BD_BIN=' + str(bd),
             'go', 'test', '-tags=integration', './cmd/gc', '-run', '^TestProxiedNativeClaimCAS$',
@@ -86,7 +92,7 @@ def main():
     if opts.mode == 'plan':
         print('build-1\nbuild-2\ncompare-builds')
         for step in suites('all', ROOT / 'host-r9/OUTPUT/build-1/bin'):
-            print(step.name + ': ' + ' '.join(step.args))
+            print(step.name + ': ' + ' '.join(step_command(step, GC / 'scripts')))
         return 0
     base = ROOT / 'host-r9'
     base.mkdir(exist_ok=True)
@@ -106,7 +112,7 @@ def main():
     def step_run(step):
         folder = Path(tempfile.mkdtemp(prefix=step.name + '.', dir=run))
         log = folder / 'output.log'
-        command = ['bash', str(snapshot / 'vfug-env.sh'), '--', *step.args]
+        command = step_command(step, snapshot)
         (folder / 'command.json').write_text(json.dumps({'cwd': str(step.cwd), 'argv': command}, indent=2) + '\n')
         print(f'START {step.name}: {log}', flush=True)
         begin = time.monotonic()
