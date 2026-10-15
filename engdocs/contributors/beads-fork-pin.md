@@ -59,24 +59,31 @@ it from the reviewed worktree.
 
 All test HOME, GC_HOME, temporary files, and fixtures live below
 `/work/ga-vfug`. Logs, source, and binary artifacts stay under `~/scratch/ga-vfug`.
-The host needs writable `/work/ga-vfug`, Linux unprivileged user/mount/PID
-namespaces, Docker for the required Dolt container suites, tmux, and the cached
+The host needs writable `/work/ga-vfug`, sudo for the mount/PID namespace entry,
+Docker for the required Dolt container suites, tmux, and the cached
 Go dependencies. Put a standalone Dolt executable in
 `~/scratch/ga-vfug/r9/tools/dolt`; the runner checks it before the suites.
 It does not include the live city's executable directory in PATH.
 
-Ordinary builds, unit tests, and CAS tests run with the host UID mapping and
-the scrubbed fixture environment. `TMUX_TMPDIR` is also beneath the fixture.
-Only `proxied-acceptance`, which starts a supervisor, uses a private mount
-namespace to map the test user's account home to its temporary HOME so
-supervisor ownership checks remain enabled. It masks the personal
-`.beads` directory inside that namespace, without reading or changing its
-contents. A private PID namespace contains test services. The host account,
-live city, and personal workspace are unchanged. Unsupported namespace setup
-fails; the runner never substitutes the operator HOME.
-After mounting, the runner drops inherited, ambient, and bounding-set
-capabilities before executing tests. Direct `--inside` invocation outside the
-runner's private user namespace refuses before attempting a mount.
+Tests (`pinRealHome`, `pinRealHomeEnv`) and the supervisor's ownership guard
+resolve the account home from passwd, not from `HOME`, so every check must see a
+passwd home below `/work/ga-vfug`. The operator starts the full run with
+`sudo bash scripts/vfug-host-root.sh [mode]`. Root only builds a private mount and
+PID namespace (no user namespace, so file ownership stays real), binds a private
+passwd whose operator home is `/work/ga-vfug/hr/h`, makes the operator's home
+read-only except `~/scratch/ga-vfug` and `~/go`, and masks `~/.beads` with an
+empty directory. It proves that layout, then drops to the operator UID with no
+capabilities and `no_new_privs` and runs `vfug-host.py`. The mounts end with the
+namespace.
+
+`vfug-env.sh` refuses any command whose passwd home is not below `/work/ga-vfug`,
+unless `--private-home` builds its own user namespace (standalone acceptance runs
+only; inside the sudo entry it is unnecessary and skipped). The global git config
+is a writable file in the fixture, because gc sets `beads.role` when it starts a
+city. `TMUX_TMPDIR` is also beneath the fixture. Direct `--inside` invocation
+outside the runner's private user namespace refuses before attempting a mount, and
+the user-namespace path drops inherited, ambient, and bounding-set capabilities
+before executing tests.
 
 ## Proxied initialization refusal
 

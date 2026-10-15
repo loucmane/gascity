@@ -28,9 +28,27 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual('--private-home' in command, step.name == 'proxied-acceptance')
         self.assertEqual(host.GC, Path(__file__).resolve().parents[1])
 
-    def test_plain_command_keeps_host_identity_and_isolates_environment(self):
+    @staticmethod
+    def passwd_home():
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_dir
+
+    def test_plain_command_refuses_operator_passwd_home(self):
+        if self.passwd_home().startswith('/work/ga-vfug/'):
+            self.skipTest('already isolated by host-run.sh')
         script = Path(__file__).with_name('vfug-env.sh')
-        code = '''import json, os
+        marker = Path('/work/ga-vfug') / ('plain-ran.' + str(os.getpid()))
+        result = subprocess.run(['bash', str(script), '--', 'touch', str(marker)],
+                                env={'PATH': '/usr/bin:/bin'}, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('refusing: passwd home is', result.stderr)
+        self.assertFalse(marker.exists(), 'plain command ran with the operator passwd home')
+
+    def test_plain_command_keeps_host_identity_and_isolates_environment(self):
+        if not self.passwd_home().startswith('/work/ga-vfug/'):
+            self.skipTest('needs the host-run.sh private passwd; the refusal test covers this host')
+        script = Path(__file__).with_name('vfug-env.sh')
+        code = '''import json, os, pwd
 from pathlib import Path
 print(json.dumps({
     'home': os.environ['HOME'], 'tmp': os.environ['TMPDIR'],
@@ -39,6 +57,8 @@ print(json.dumps({
     'leaked': 'VFUG_TEST_UNTRUSTED' in os.environ,
     'uid_map': Path('/proc/self/uid_map').read_text(),
     'cap_eff': next(line for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('CapEff:')),
+    'passwd_home': pwd.getpwuid(os.getuid()).pw_dir,
+    'git_global': os.environ['GIT_CONFIG_GLOBAL'],
 }))'''
         result = subprocess.run(['bash', str(script), '--', 'python3', '-c', code],
                                 env={**os.environ, 'VFUG_TEST_UNTRUSTED': 'present'},
@@ -48,6 +68,10 @@ print(json.dumps({
         for key in ('home', 'tmp', 'gotmp', 'tmux'):
             self.assertTrue(values[key].startswith('/work/ga-vfug/'), values)
         self.assertFalse(values['leaked'])
+        self.assertTrue(values['passwd_home'].startswith('/work/ga-vfug/'), values)
+        self.assertTrue(values['git_global'].startswith('/work/ga-vfug/'), values)
+        self.assertEqual(values['root_uid'], 0, 'a user namespace would show root as 65534')
+        self.assertEqual(values['cap_eff'].split()[-1], '0000000000000000')
         self.assertEqual(values['root_uid'], Path('/').stat().st_uid)
         self.assertEqual(values['uid_map'], Path('/proc/self/uid_map').read_text())
         expected_caps = next(line for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('CapEff:'))

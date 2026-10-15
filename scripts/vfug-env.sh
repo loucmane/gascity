@@ -36,10 +36,29 @@ if [[ ${1:-} != -- ]]; then
   exit 2
 fi
 shift
+# Tests (pinRealHome, pinRealHomeEnv) and gc's supervisor code resolve the account
+# home from passwd, not from HOME. Every command must therefore see a passwd home
+# under /work/ga-vfug: either from the outer sudo entry (~/scratch/ga-vfug/host-run.sh,
+# which binds a private passwd in a private mount namespace without a user namespace)
+# or from --private-home below. Never run with the operator's real passwd home
+# (Review A3, 2026-10-15).
+vfug_passwd_home=$(getent passwd "$(id -u)" | cut -d: -f6)
+case "$vfug_passwd_home" in
+  /work/ga-vfug/*) vfug_private_home=false ;;
+  *)
+    if ! "$vfug_private_home"; then
+      echo "refusing: passwd home is $vfug_passwd_home; run through host-run.sh (sudo) so tests cannot reach the operator HOME" >&2
+      exit 2
+    fi ;;
+esac
 mkdir -p /work/ga-vfug
 vfug_fixture=$(mktemp -d -p /work/ga-vfug e.XXXX)
 mkdir -p "$vfug_fixture"/{h,t,g,x,c,d,run,masked}
 chmod 700 "$vfug_fixture/h" "$vfug_fixture/run"
+# A writable fixture-local global git config: gc sets beads.role there when it
+# starts a city. /dev/null made every acceptance city fail ("could not lock config
+# file /dev/null", 2026-10-15).
+: > "$vfug_fixture/gitconfig"
 mkdir -p "$vfug_root/go-cache"
 ln -s "$vfug_root/go-cache" "$vfug_fixture/c/go-build"
 if "$vfug_private_home"; then
@@ -82,7 +101,7 @@ exec /usr/bin/env -i \
   GOPATH=/home/loucmane/go GOMODCACHE=/home/loucmane/go/pkg/mod \
   GOENV=off GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off \
   GOFLAGS='-mod=readonly -buildvcs=false' \
-  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$vfug_fixture/gitconfig" \
   GC_DISABLE_USAGE_METRICS=1 BD_DISABLE_METRICS=1 DO_NOT_TRACK=1 \
   PATH="${VFUG_PAIR_BIN:-$vfug_root/r9/tools}:$vfug_root/r9/tools:$vfug_root/local-r5/bin:/home/loucmane/.local/share/go/1.26.7/bin:/usr/local/bin:/usr/bin:/bin" \
   "$@"
