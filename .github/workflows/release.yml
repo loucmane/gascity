@@ -30,14 +30,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Reject replace directives in go.mod
-        run: |
-          if grep -qE '^replace\s' go.mod; then
-            echo "ERROR: go.mod contains replace directives — aborting release."
-            echo "Replace directives break 'go install ...@latest' and bottle builds in homebrew-core."
-            grep -n '^replace' go.mod
-            exit 1
-          fi
+      - name: Verify the operator-approved bd fork replacement
+        run: bash scripts/check-gomod-replace.sh go.mod
 
       - name: Verify release tag is stable
         run: make check-version-tag

@@ -238,10 +238,10 @@ check-residency-boundary:
 	./scripts/check-residency-boundary.sh --self-test
 	./scripts/check-residency-boundary.sh
 
-## check-gomod-replace: block unreleased replace directives (pseudo-version, local path, git ref)
+## check-gomod-replace: allow only the verified operator-approved bd fork replacement
 ## Tripwire for the 2026-06-11 incident where PR #3489 shipped a pseudo-version replace
 ## (=> v1.0.5-0.20260611054652-dc0561af28e9) that violated the public-project release policy.
-## Policy: only released semver tags allowed; human-operator bypass required for exceptions.
+## Policy: scripts/beads-fork-pin.json is the sole operator-approved exception.
 check-gomod-replace:
 	bash scripts/check-gomod-replace.sh go.mod
 

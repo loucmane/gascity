@@ -16,14 +16,15 @@ package main
 //     so an out-of-tree provider cannot leak back here by accident;
 //   - the whole storage surface compiles identically with CGO on and off, so
 //     the pure-Go driver choice is a checked property rather than a comment;
-//   - the module graph carries no replace directive, so a build of this repo
-//     resolves the dependencies its manifest names and nothing else.
+//   - the module graph permits only the operator-approved, pinned bd fork;
+//     the release gate verifies its commit and complete checkout hash.
 //
 // The last two are what a downstream fork relies on. A fork appends its own
 // factory in its own tree; these arms are what keep the seam it appends to
 // honest here.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -202,30 +203,63 @@ func TestStorageSurfaceCompilesIdenticallyWithAndWithoutCGO(t *testing.T) {
 	}
 }
 
-// TestModuleGraphCarriesNoReplaceDirective is the module-graph guarantee a
-// downstream fork builds on: this repo's dependencies are exactly what its
-// manifest names, at released versions, with nothing redirected. It is the
-// tree-side companion to scripts/check-gomod-replace.sh's released-semver-only
-// policy — that script gates what a change adds, this arm gates the result.
-//
-// A replace this parser cannot read is a violation, not a pass: silently
-// ignoring a line we cannot parse is how a guard goes blind.
-func TestModuleGraphCarriesNoReplaceDirective(t *testing.T) {
+// TestModuleGraphUsesOnlyPinnedBeadsFork retains the no-replace boundary with
+// one operator-approved exception. The release gate independently verifies the
+// pinned checkout commit and content hash; this arm checks the module graph.
+func TestModuleGraphUsesOnlyPinnedBeadsFork(t *testing.T) {
 	root := moduleRoot(t)
 	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
-		t.Fatalf("reading go.mod: %v", err)
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "beads-fork-pin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pin struct{ Module, Path, Commit, SHA256 string }
+	if err := json.Unmarshal(data, &pin); err != nil {
+		t.Fatal(err)
+	}
+	if pin.Module != "github.com/steveyegge/beads" || len(pin.Commit) != 40 || len(pin.SHA256) != 64 || pin.Path != "../beads-vfug-"+pin.Commit {
+		t.Fatal("invalid operator-approved bd fork pin")
 	}
 	directives, malformed := replaceDirectives(string(goMod))
 	if len(malformed) > 0 {
-		t.Fatalf("go.mod has replace directives this guard cannot parse (lines %v); a manifest we cannot read is a violation, not a pass", malformed)
+		t.Fatalf("unparseable replace directives at lines %v", malformed)
+	}
+	if len(directives) > 1 {
+		t.Error("only one pinned bd replacement is allowed")
 	}
 	for _, directive := range directives {
-		t.Errorf("go.mod line %d replaces %q with %q; this module graph carries no replace directive, so a build resolves the dependencies the manifest names and nothing else",
-			directive.line, directive.oldPath, directive.newPath)
+		if !allowedBeadsForkReplacement(directive, pin.Path) {
+			t.Errorf("go.mod line %d has a non-allowlisted replacement", directive.line)
+		}
 	}
 	if anyGoWorkFile(t, root) {
-		t.Error("the tree commits a go.work; a workspace redirects the module graph for every go invocation started at or below it")
+		t.Error("the tree commits a go.work; a workspace redirects the module graph")
+	}
+}
+
+func allowedBeadsForkReplacement(d replaceDirective, path string) bool {
+	return d.oldPath == "github.com/steveyegge/beads" && d.oldVersion == "" && d.newPath == path && d.newVersion == ""
+}
+
+func TestModuleGraphForkAllowlistRejectsOtherReplacements(t *testing.T) {
+	path := "../beads-vfug-" + strings.Repeat("a", 40)
+	allowed := replaceDirective{oldPath: "github.com/steveyegge/beads", newPath: path}
+	if !allowedBeadsForkReplacement(allowed, path) {
+		t.Fatal("exact fork refused")
+	}
+	for _, d := range []replaceDirective{
+		{oldPath: "example.org/other", newPath: path},
+		{oldPath: allowed.oldPath, newPath: "../other"},
+		{oldPath: allowed.oldPath, oldVersion: "v1.3.1", newPath: path},
+		{oldPath: allowed.oldPath, newPath: path, newVersion: "v1.3.1"},
+		{oldPath: allowed.oldPath, newPath: allowed.oldPath, newVersion: "v1.3.1"},
+	} {
+		if allowedBeadsForkReplacement(d, path) {
+			t.Errorf("accepted non-allowlisted replacement: %+v", d)
+		}
 	}
 }
 

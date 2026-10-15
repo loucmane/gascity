@@ -13,7 +13,7 @@ import (
 // TestCheckGomodReplaceGuard verifies the check-gomod-replace script:
 //   - FAILS on pseudo-version, local-path, and git-ref replace targets
 //   - PASSES when no replace directives are present
-//   - PASSES when all replaces point to released semver tags
+//   - FAILS even on released replacements outside the operator-approved fork
 //
 // Regression guard for the 2026-06-11 incident where PR #3489 shipped a
 // pseudo-version replace (`=> v1.0.5-0.20260611054652-dc0561af28e9`) that
@@ -53,12 +53,12 @@ func TestCheckGomodReplaceGuard(t *testing.T) {
 		}
 	})
 
-	t.Run("passes_released_semver_replace", func(t *testing.T) {
+	t.Run("rejects_other_released_replace", func(t *testing.T) {
 		gomod := fmt.Sprintf("module github.com/example/mod\n\ngo 1.22\n\nreplace %s\n",
 			"github.com/steveyegge/beads v1.0.4 => github.com/steveyegge/beads v1.0.5")
 		out, code := runScript(t, gomod)
-		if code != 0 {
-			t.Fatalf("expected exit 0 for released semver replace, got %d\n%s", code, out)
+		if code == 0 {
+			t.Fatalf("expected rejection of non-allowlisted released replace, got %d\n%s", code, out)
 		}
 	})
 
@@ -164,20 +164,16 @@ func TestCheckGomodReplaceGuard(t *testing.T) {
 			"module github.com/example/mod\n\ngo 1.22\n\nreplace (\n\tgithub.com/steveyegge/beads => ./local/beads\n)\n",
 		},
 		{
-			"multi_line_block_passes_released",
+			"multi_line_block_rejects_released",
 			"module github.com/example/mod\n\ngo 1.22\n\nreplace (\n\tgithub.com/steveyegge/beads v1.0.4 => github.com/steveyegge/beads v1.0.5\n)\n",
 		},
 	}
 	for _, tc := range multiLineBlockCases {
 		tc := tc
-		wantFail := !strings.HasSuffix(tc.name, "_released")
 		t.Run(tc.name, func(t *testing.T) {
 			out, code := runScript(t, tc.gomod)
-			if wantFail && code == 0 {
+			if code == 0 {
 				t.Fatalf("expected non-zero exit for multi-line block case %q, got 0\n%s", tc.name, out)
-			}
-			if !wantFail && code != 0 {
-				t.Fatalf("expected exit 0 for multi-line block released case %q, got %d\n%s", tc.name, code, out)
 			}
 		})
 	}
@@ -203,9 +199,9 @@ func TestCheckGomodReplaceGuard(t *testing.T) {
 			true,
 		},
 		{
-			"inline_comment_released_semver",
+			"inline_comment_other_released_semver",
 			"module github.com/example/mod\n\ngo 1.22\n\nreplace github.com/steveyegge/beads v1.0.4 => github.com/steveyegge/beads v1.0.5 // bump\n",
-			false,
+			true,
 		},
 		{
 			"multi_line_block_inline_comment_pseudo_version",
@@ -213,9 +209,9 @@ func TestCheckGomodReplaceGuard(t *testing.T) {
 			true,
 		},
 		{
-			"multi_line_block_inline_comment_released",
+			"multi_line_block_inline_comment_other_released",
 			"module github.com/example/mod\n\ngo 1.22\n\nreplace (\n\tgithub.com/steveyegge/beads v1.0.4 => github.com/steveyegge/beads v1.0.5 // bump\n)\n",
-			false,
+			true,
 		},
 	}
 	for _, tc := range inlineCommentCases {

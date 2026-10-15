@@ -146,14 +146,9 @@ jobs:
             push "https://x-access-token:${TAGGER_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$TAG_NAME"
           echo "Created tag $TAG_NAME at $TARGET_COMMIT"
 
-      - name: Reject replace directives in go.mod
+      - name: Verify the operator-approved bd fork replacement
         if: ${{ steps.rc.outputs.needs_create != 'true' }}
-        run: |
-          if grep -qE '^replace\s' go.mod; then
-            echo "ERROR: go.mod contains replace directives; aborting RC release." >&2
-            grep -n '^replace' go.mod
-            exit 1
-          fi
+        run: bash scripts/check-gomod-replace.sh go.mod
 
       - name: Run GoReleaser draft prerelease
         if: ${{ steps.rc.outputs.needs_create != 'true' }}
