@@ -31,10 +31,20 @@ local sibling `bd-src` repository if absent. CI must provision the same checkout
 a missing checkout is a release failure. Updating the pin requires review of
 both the new commit and the digest, followed by the qualification run.
 
+CI and release jobs must provision `../beads-vfug-<full-commit>` **before**
+`make check-gomod-replace`, Go module resolution, or a build. The existing
+CI/release verifier steps do not fetch this fork. Their checkout of Gas City
+alone is insufficient: those jobs fail until the reviewed fork is available
+at the manifest's sibling path. Supply the reviewed fork through an accessible
+Git repository or a staged local `bd-src` clone, and check out the manifest's
+full commit detached. Preserve Git metadata for the HEAD and clean-index checks.
+The verifier must then pass against the manifest's content hash; do not replace
+it with a branch-head checkout or update the digest during CI.
+
 On the integration host, run:
 
 ```bash
-bash ~/scratch/ga-vfug/host-r9.sh all
+python3 -B scripts/vfug-host.py all
 ```
 
 The runner builds bd and gc twice with Go 1.26.7, compares both binary hashes,
@@ -44,6 +54,8 @@ suites sequentially. Each check has its own log directory under
 30 seconds. The final table and `summary.json` retain failures and skip counts.
 A failed build comparison blocks checks that require the pair. Any failure or
 blocked check makes the runner exit nonzero.
+The runner selects the Gas City checkout containing its own script, so invoke
+it from the reviewed worktree.
 
 All test HOME, GC_HOME, temporary files, and fixtures live below
 `/work/ga-vfug`. Logs, source, and binary artifacts stay under `~/scratch/ga-vfug`.
@@ -53,12 +65,28 @@ Go dependencies. Put a standalone Dolt executable in
 `~/scratch/ga-vfug/r9/tools/dolt`; the runner checks it before the suites.
 It does not include the live city's executable directory in PATH.
 
-A private mount namespace maps the test user's account home to its temporary
-HOME so supervisor ownership checks remain enabled. It masks the personal
+Ordinary builds, unit tests, and CAS tests run with the host UID mapping and
+the scrubbed fixture environment. `TMUX_TMPDIR` is also beneath the fixture.
+Only `proxied-acceptance`, which starts a supervisor, uses a private mount
+namespace to map the test user's account home to its temporary HOME so
+supervisor ownership checks remain enabled. It masks the personal
 `.beads` directory inside that namespace, without reading or changing its
 contents. A private PID namespace contains test services. The host account,
 live city, and personal workspace are unchanged. Unsupported namespace setup
 fails; the runner never substitutes the operator HOME.
+After mounting, the runner drops inherited, ambient, and bounding-set
+capabilities before executing tests. Direct `--inside` invocation outside the
+runner's private user namespace refuses before attempting a mount.
+
+## Proxied initialization refusal
+
+For an existing proxied workspace, `bd init --force` refuses with
+`cannot observe` when checking whether existing issues would be overwritten.
+The non-mutating observation path cannot route the proxied store, so it cannot
+prove that the workspace is empty. `--force` does not override this refusal.
+Keep the existing workspace intact; use the supported proxied migration path
+or initialize a separate empty workspace. Do not remove metadata or point the
+observation at another ledger to bypass the check.
 
 ## Remove the exception
 
