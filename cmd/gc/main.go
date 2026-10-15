@@ -1707,7 +1707,8 @@ func openStoreResultAtForCityContext(ctx context.Context, storePath, cityPath st
 			return nil, err
 		}
 		if commandEnv != nil {
-			return beads.NewBdStore(scopeRoot, beads.ExecCommandRunnerWithExactEnvContext(ctx, commandEnv)), nil
+			return beads.NewBdStoreWithPrefix(scopeRoot, beads.ExecCommandRunnerWithExactEnvContext(ctx, commandEnv),
+				issuePrefixForScope(scopeRoot, runtimeCityPath, cfg), bdStoreOptionsForConfig(cfg)...), nil
 		}
 		return openBdStoreAtWithConfig(scopeRoot, runtimeCityPath, cfg)
 	}
