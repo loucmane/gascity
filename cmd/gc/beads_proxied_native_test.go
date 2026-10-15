@@ -1847,7 +1847,7 @@ func TestVerifiedContinuationReusesAndClosesStore(t *testing.T) {
 		if len(env) != 1 || env[0] != "PIN_ENV=retained" {
 			t.Errorf("lost env: %v", env)
 		}
-		return store, nil
+		return wrapStoreWithBeadPolicies(store, nil), nil
 	}
 	opts := hookClaimOptions{Verified: v, Assignee: v.ID, RouteTargets: []string{"rig-a/worker"}, Env: []string{"PIN_ENV=retained"}}
 	ops := hookClaimOps{ListContinuation: func(context.Context, string, []string, string, string) ([]beads.Bead, error) { return rows, nil }}

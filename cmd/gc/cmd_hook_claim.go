@@ -1536,13 +1536,7 @@ func preassignHookContinuationGroup(bead beads.Bead, opts hookClaimOptions, ops 
 	stores := make(map[bool]beads.Store, 2)
 	defer func() {
 		for _, workStore := range stores {
-			// A class-route store is borrowed from the enclosing claim operation.
-			if ops.ClassRoute != nil && workStore == ops.ClassRoute.class {
-				continue
-			}
-			if closer, ok := workStore.(interface{ CloseStore() error }); ok {
-				retErr = errors.Join(retErr, closer.CloseStore())
-			}
+			retErr = errors.Join(retErr, closeVerifiedHookWorkStore(workStore, ops.ClassRoute))
 		}
 	}()
 	for _, sibling := range siblings {

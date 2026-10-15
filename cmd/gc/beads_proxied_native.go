@@ -474,14 +474,11 @@ func (o *proxiedNativeOpener) openNativeLeaf(ctx context.Context, pin beads.Pin,
 // openUnmoved is the post-open half of the observation (council pr2 D-F3,
 // E-S4).
 //
-// The library open gc just performed is WRITABLE — beads exports no read-only
-// open to an embedder at v1.3.0 — and on a database the schema gate admits it
-// can still seed dolt_ignore, heal the tracked cursor table or add a
-// content_hash column (see beads/schema_cursor.go, "The residual"). No cursor
-// comparison can see any of that. A HEAD hash sees each of those writes that
-// COMMITS; the dolt_ignore'd plane is never committed, so the same statement
-// also reads that plane's cursor table and sentinel reality, and what that half
-// can and cannot conclude is on beads.ProxiedOpenUnmoved.
+// The library handle is opened read-only, with schema initialization and
+// migration disabled. The post-open observation still checks for concurrent
+// movement: HEAD covers committed state, while the ignored plane requires its
+// cursor and sentinel checks. beads.ProxiedOpenUnmoved defines what those
+// observations can and cannot conclude.
 //
 // The pre-open hash came free with the probe session's first statement; the
 // re-read is read(), over the library's own pool. The opener requests fresh
