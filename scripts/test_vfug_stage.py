@@ -51,16 +51,22 @@ class AncestorDiscoveryCases:
         marker.mkdir()
         (marker / 'machine-id').write_text('fixture')
         redirect = marker / 'redirect'
-        for kind in ('file', 'dangling-symlink'):
+        real_target = self.discovery_parent / 'real-target'
+        real_target.mkdir()
+        for kind in ('file', 'dangling-symlink', 'symlink-to-real', 'directory'):
             with self.subTest(kind=kind):
                 if kind == 'file':
                     redirect.write_text('/elsewhere/.beads\n')
-                else:
+                elif kind == 'dangling-symlink':
                     redirect.symlink_to(self.discovery_parent / 'absent-target')
+                elif kind == 'symlink-to-real':
+                    redirect.symlink_to(real_target, target_is_directory=True)
+                else:
+                    redirect.mkdir()
                 try:
                     self.assert_discovery(redirect)
                 finally:
-                    redirect.unlink()
+                    redirect.rmdir() if kind == 'directory' else redirect.unlink()
 
     def test_ancestor_symlinks_and_git_directory_refuse(self):
         for name in ('.beads', '.git'):
@@ -244,7 +250,7 @@ class StageTests(AncestorDiscoveryCases, unittest.TestCase):
         if refused_path is None:
             self.stage.refuse_ancestor_discovery(self.root / 'nested' / 'run')
         else:
-            with self.assertRaisesRegex(ValueError, 'ancestor discovery marker refused: ' + re.escape(str(refused_path))):
+            with self.assertRaisesRegex(ValueError, 'ancestor discovery marker refused: ' + re.escape(str(refused_path)) + '$'):
                 self.stage.refuse_ancestor_discovery(self.root / 'nested' / 'run')
 
     def test_run_refuses_ancestor_discovery_before_stage_or_writes(self):

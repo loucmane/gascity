@@ -88,13 +88,8 @@ state, such as `machine-id` and `eventsData`, is allowed. Project configuration
 (`metadata.json`, `config.yaml`), database directories (`dolt/`, `embeddeddolt/`),
 and non-backup `*.db` entries other than `vc.db` trigger refusal, as does any
 `redirect` entry, because bd follows `.beads/redirect` before it checks project
-files. Symlinked or uninspectable markers also trigger refusal.
-
-On a server-mode workspace, human-output classified reads (`bd list`, `show`,
-`ready`) skip the tip bookkeeping write when the read-only store refuses it, so
-a tip may be shown again on a later run; v1.3.1 recorded it. The command still
-exits 0, and HEAD is unchanged. The entry verifies the manifest,
-copies inputs into
+files. Symlinked or uninspectable markers also trigger refusal. The entry
+verifies the manifest, copies inputs into
 `/work/vfugtest/ga-vfug/run.*/inputs`, verifies the copy, and makes its own
 repositories and module cache writable. Qualification executes the copied host runner.
 Logs and built binaries live in that account's run tree; log directories and
@@ -103,6 +98,11 @@ GOBIN, tmux paths and a writable global Git config are under a short
 `/work/vfugtest/f.*` fixture root beside the run tree. `proxied-acceptance` alone sets HOME to the account's
 passwd home so the supervisor ownership check agrees. Existing tests that
 restore passwd HOME still land in the dedicated account's /work home.
+
+On a server-mode workspace, human-output classified reads (`bd list`, `show`,
+`ready`) skip the tip bookkeeping write when the read-only store refuses it, so
+a tip may be shown again on a later run; v1.3.1 recorded it. The command still
+exits 0, and HEAD is unchanged.
 
 `vfug-env.sh` refuses a user other than vfugtest, a passwd home outside
 /work, and a fixture root outside that account home. The old `--private-home`
