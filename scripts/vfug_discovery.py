@@ -20,6 +20,11 @@ def discovery_marker(marker):
         with os.scandir(marker) as entries:
             for entry in entries:
                 name = entry.name
+                # bd follows .beads/redirect (FollowRedirect) before applying
+                # hasBeadsProjectFiles to the target, so any redirect entry is
+                # a discovery path; refuse it without following it (Review A8).
+                if name == 'redirect':
+                    return Path(entry.path)
                 # Match bd's hasBeadsProjectFiles, including its legacy DB
                 # exclusions. Named project symlinks are refused even dangling.
                 if name in ('metadata.json', 'config.yaml'):

@@ -45,6 +45,23 @@ class AncestorDiscoveryCases:
                 finally:
                     path.rmdir() if path.is_dir() else path.unlink()
 
+    def test_beads_redirect_refuses_exact_path(self):
+        # bd follows .beads/redirect before checking project files (Review A8).
+        marker = self.discovery_parent / '.beads'
+        marker.mkdir()
+        (marker / 'machine-id').write_text('fixture')
+        redirect = marker / 'redirect'
+        for kind in ('file', 'dangling-symlink'):
+            with self.subTest(kind=kind):
+                if kind == 'file':
+                    redirect.write_text('/elsewhere/.beads\n')
+                else:
+                    redirect.symlink_to(self.discovery_parent / 'absent-target')
+                try:
+                    self.assert_discovery(redirect)
+                finally:
+                    redirect.unlink()
+
     def test_ancestor_symlinks_and_git_directory_refuse(self):
         for name in ('.beads', '.git'):
             path = self.discovery_parent / name

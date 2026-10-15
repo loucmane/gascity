@@ -48,7 +48,8 @@ if [[ -n ${VFUG_PAIR_BIN:-} ]]; then
 fi
 # Check both roots on every entry, including direct per-check invocations.
 # Share bd project-file classification with staging; per-user .beads is safe.
-python3 -B "$(dirname "${BASH_SOURCE[0]}")/vfug_discovery.py" "$VFUG_ROOT" "$VFUG_WORK_ROOT"
+# -I (isolated): no PYTHONPATH or user site can shadow the helper (Review A8).
+python3 -I -B "$(dirname "${BASH_SOURCE[0]}")/vfug_discovery.py" "$VFUG_ROOT" "$VFUG_WORK_ROOT"
 mkdir -p "$VFUG_WORK_ROOT"
 vfug_fixture=$(mktemp -d -p "$VFUG_WORK_ROOT" e.XXXXXX)
 mkdir -p "$vfug_fixture"/{h,t,g,x,c,d,run,gobin,gopath}

@@ -86,8 +86,14 @@ The test entry refuses ancestor `.git` markers and `.beads` project directories
 above its work and fixture roots. A `.beads` directory containing only per-user
 state, such as `machine-id` and `eventsData`, is allowed. Project configuration
 (`metadata.json`, `config.yaml`), database directories (`dolt/`, `embeddeddolt/`),
-and non-backup `*.db` entries other than `vc.db` trigger refusal. Symlinked or
-uninspectable markers also trigger refusal. The entry verifies the manifest,
+and non-backup `*.db` entries other than `vc.db` trigger refusal, as does any
+`redirect` entry, because bd follows `.beads/redirect` before it checks project
+files. Symlinked or uninspectable markers also trigger refusal.
+
+On a server-mode workspace, human-output classified reads (`bd list`, `show`,
+`ready`) skip the tip bookkeeping write when the read-only store refuses it, so
+a tip may be shown again on a later run; v1.3.1 recorded it. The command still
+exits 0, and HEAD is unchanged. The entry verifies the manifest,
 copies inputs into
 `/work/vfugtest/ga-vfug/run.*/inputs`, verifies the copy, and makes its own
 repositories and module cache writable. Qualification executes the copied host runner.
