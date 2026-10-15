@@ -255,4 +255,4 @@ require (
 )
 
 // Offline fork pin: bash scripts/build-vfug.sh <output-dir> prepares this exact commit.
-replace github.com/steveyegge/beads => ../beads-vfug-51ebd325331ef23bfd1adc72ffc5f3ad7e0552c5
+replace github.com/steveyegge/beads => ../beads-vfug-63da09433aef5537184c4a732ab8820a6d4051e2

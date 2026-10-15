@@ -45,11 +45,13 @@ class RunnerTests(unittest.TestCase):
             root = Path(temporary)
             gc = root / 'port'
             (gc / 'scripts').mkdir(parents=True)
-            for filename in ('vfug-host.py', 'vfug-env.sh', 'build-vfug.sh'):
+            for filename in ('vfug-host.py', 'vfug-env.sh', 'build-vfug.sh', 'vfug_discovery.py'):
                 (gc / 'scripts' / filename).write_text('fixture runner\n')
             executed = []
 
             def popen(command, *, cwd, stdout, stderr, env):
+                helper = Path(command[1]).with_name('vfug_discovery.py')
+                self.assertEqual(helper.read_text(), 'fixture runner\n')
                 executed.append(command[-1])
                 if launch_error and command[-1] == 'fail-launch':
                     raise OSError('fixture executable unavailable')

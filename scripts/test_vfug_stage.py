@@ -13,10 +13,97 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import vfug_discovery as discovery
+
 HERE = Path(__file__).resolve().parent
 
 
-class EnvironmentTests(unittest.TestCase):
+
+class AncestorDiscoveryCases:
+    """Run the same on-disk discovery cases through both entry points."""
+
+    def test_user_state_only_beads_passes(self):
+        marker = self.discovery_parent / '.beads'
+        marker.mkdir()
+        (marker / 'machine-id').write_text('fixture')
+        (marker / 'eventsData').mkdir()
+        (marker / 'registry.json').write_text('{}')
+        self.assert_discovery(None)
+
+    def test_beads_project_files_refuse_exact_path(self):
+        marker = self.discovery_parent / '.beads'
+        marker.mkdir()
+        for name in ('metadata.json', 'config.yaml', 'dolt', 'embeddeddolt', 'issues.db'):
+            path = marker / name
+            with self.subTest(name=name):
+                if name in ('dolt', 'embeddeddolt'):
+                    path.mkdir()
+                else:
+                    path.write_text('fixture')
+                try:
+                    self.assert_discovery(path)
+                finally:
+                    path.rmdir() if path.is_dir() else path.unlink()
+
+    def test_ancestor_symlinks_and_git_directory_refuse(self):
+        for name in ('.beads', '.git'):
+            path = self.discovery_parent / name
+            with self.subTest(name=name):
+                path.symlink_to(self.discovery_parent / 'absent')
+                try:
+                    self.assert_discovery(path)
+                finally:
+                    path.unlink()
+        git = self.discovery_parent / '.git'
+        git.mkdir()
+        self.assert_discovery(git)
+
+    def test_uninspectable_beads_refuses(self):
+        marker = self.discovery_parent / '.beads'
+        marker.mkdir(mode=0)
+        try:
+            self.assert_discovery(marker)
+        finally:
+            marker.chmod(0o700)
+
+
+class DiscoveryTests(AncestorDiscoveryCases, unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='vfug-discovery.', dir=os.environ.get('TMPDIR', '/work/ga-vfug'))
+        self.addCleanup(self.temp.cleanup)
+        self.discovery_parent = Path(self.temp.name)
+
+    def assert_discovery(self, refused_path):
+        # Control only ancestors outside the fixture. The host may legitimately
+        # carry a .git marker (including one exposed by a sandbox).
+        actual = discovery.discovery_marker
+        def marker(path):
+            return actual(path) if path.is_relative_to(self.discovery_parent) else None
+        with patch.object(discovery, 'discovery_marker', side_effect=marker):
+            root = self.discovery_parent / 'nested' / 'run'
+            if refused_path is None:
+                discovery.refuse_ancestor_discovery(root)
+            else:
+                with self.assertRaisesRegex(ValueError, 'ancestor discovery marker refused: ' + re.escape(str(refused_path)) + '$'):
+                    discovery.refuse_ancestor_discovery(root)
+
+    def test_legacy_non_project_entries_pass(self):
+        marker = self.discovery_parent / '.beads'
+        marker.mkdir()
+        for name in ('vc.db', 'issues.backup.db', 'dolt', 'embeddeddolt'):
+            (marker / name).write_text('not a project')
+        self.assert_discovery(None)
+
+    def test_inspection_errors_fail_closed(self):
+        marker = self.discovery_parent / '.beads'
+        with patch.object(Path, 'lstat', side_effect=PermissionError('fixture')):
+            self.assertEqual(discovery.discovery_marker(marker), marker)
+        marker.mkdir()
+        with patch.object(discovery.os, 'scandir', side_effect=PermissionError('fixture')):
+            self.assertEqual(discovery.discovery_marker(marker), marker)
+
+
+class EnvironmentTests(AncestorDiscoveryCases, unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='vfug-policy.', dir=os.environ.get('TMPDIR', '/work/ga-vfug'))
         self.addCleanup(self.temp.cleanup)
@@ -29,6 +116,15 @@ class EnvironmentTests(unittest.TestCase):
         self.mock = self.root / 'mock'
         self.mock.mkdir()
         self.identity('vfugtest', self.account_home)
+        self.discovery_parent = self.account_home
+
+    def assert_discovery(self, refused_path):
+        result = self.command('--', '/bin/true')
+        if refused_path is None:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        else:
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn('ancestor discovery marker refused: ' + str(refused_path), result.stderr)
 
     def identity(self, user, home):
         for name, body in {'id': 'echo ' + user, 'getent': 'echo "' + user + ':x:12345:12345::' + str(home) + ':/bin/bash"'}.items():
@@ -117,7 +213,7 @@ Path(os.environ['GIT_CONFIG_GLOBAL']).write_text('[fixture]\\n')
         self.assertEqual(result.returncode, 2, result.stderr)
 
 
-class StageTests(unittest.TestCase):
+class StageTests(AncestorDiscoveryCases, unittest.TestCase):
     def setUp(self):
         spec = importlib.util.spec_from_file_location('vfug_stage', HERE / 'vfug-stage.py')
         self.stage = importlib.util.module_from_spec(spec)
@@ -125,6 +221,14 @@ class StageTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='vfug-stage.', dir=os.environ.get('TMPDIR', '/work/ga-vfug'))
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.discovery_parent = self.root
+
+    def assert_discovery(self, refused_path):
+        if refused_path is None:
+            self.stage.refuse_ancestor_discovery(self.root / 'nested' / 'run')
+        else:
+            with self.assertRaisesRegex(ValueError, 'ancestor discovery marker refused: ' + re.escape(str(refused_path))):
+                self.stage.refuse_ancestor_discovery(self.root / 'nested' / 'run')
 
     def test_run_refuses_ancestor_discovery_before_stage_or_writes(self):
         home = self.root / 'account'

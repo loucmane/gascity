@@ -127,7 +127,7 @@ def main():
     # Copy executable runner sources before starting any long command.
     snapshot = run / 'runner'
     snapshot.mkdir()
-    for filename in ('vfug-host.py', 'vfug-env.sh', 'build-vfug.sh'):
+    for filename in ('vfug-host.py', 'vfug-env.sh', 'build-vfug.sh', 'vfug_discovery.py'):
         shutil.copy2(GC / 'scripts' / filename, snapshot / filename)
     results = []
     source_commit = subprocess.check_output(['git', '--no-optional-locks', '-C', str(GC), 'rev-parse', 'HEAD'], text=True).strip()

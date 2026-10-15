@@ -50,19 +50,21 @@ used. The former `vfug-host-root.sh` and its tests are removed.
 
 As loucmane, stage the committed inputs into a **new** directory under /work.
 All sources are explicit; nothing in the test environment falls back to the
-operator home. Substitute the reviewed checkout/tool paths on this host:
+operator home. Substitute the reviewed checkout/tool paths on this host and
+choose a fresh stage directory:
 
 ```bash
+vfug_stage="/work/ga-vfug/stage-<reviewed-id>"
 VFUG_GC_SOURCE="$PWD" \
 VFUG_BD_SOURCE="$PWD/../bd-src" \
 VFUG_GO_SOURCE="$HOME/.local/share/go/1.26.7" \
 VFUG_MODCACHE_SOURCE="$HOME/go/pkg/mod" \
 VFUG_TOOLS_SOURCE="$PWD/../r9/tools" \
 VFUG_LINT_SOURCE="$PWD/../local-r5/bin" \
-bash scripts/vfug-stage.sh /work/ga-vfug/stage-r11
+bash scripts/vfug-stage.sh "$vfug_stage"
 sudo -u vfugtest /usr/bin/env -i PATH=/usr/bin:/bin \
-  bash /work/ga-vfug/stage-r11/gc/scripts/vfug-test-run.sh \
-  /work/ga-vfug/stage-r11 all
+  bash "$vfug_stage/gc/scripts/vfug-test-run.sh" \
+  "$vfug_stage" all
 ```
 
 Staging refuses dirty gc/bd sources and a mismatched fork pin. It locally clones
@@ -80,8 +82,13 @@ controls the reviewed stage. The stage must be writable only by the coordinator
 account, loucmane: `vfug-test-run.sh` executes the stage's `vfug-stage.py` before
 that program verifies the manifest. Never reuse or change a stage during a run.
 
-The test entry refuses ancestor `.beads` or `.git` markers above its work and
-fixture roots, verifies the manifest, copies inputs into
+The test entry refuses ancestor `.git` markers and `.beads` project directories
+above its work and fixture roots. A `.beads` directory containing only per-user
+state, such as `machine-id` and `eventsData`, is allowed. Project configuration
+(`metadata.json`, `config.yaml`), database directories (`dolt/`, `embeddeddolt/`),
+and non-backup `*.db` entries other than `vc.db` trigger refusal. Symlinked or
+uninspectable markers also trigger refusal. The entry verifies the manifest,
+copies inputs into
 `/work/vfugtest/ga-vfug/run.*/inputs`, verifies the copy, and makes its own
 repositories and module cache writable. Qualification executes the copied host runner.
 Logs and built binaries live in that account's run tree; log directories and

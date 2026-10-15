@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 
 import gomod_replace_policy as policy
+from vfug_discovery import refuse_ancestor_discovery
 
 
 def git(repo, *args):
@@ -173,16 +174,6 @@ def stage_inputs(destination):
     verify_manifest(destination)
     print('Stage ready: ' + str(destination), flush=True)
     print('Manifest SHA256: ' + hashlib.sha256((destination / 'manifest.json').read_bytes()).hexdigest(), flush=True)
-
-
-def refuse_ancestor_discovery(root):
-    """Reject ambient Git/beads discovery before creating any run fixtures."""
-    root = root.resolve()
-    for parent in (root, *root.parents):
-        for name in ('.beads', '.git'):
-            marker = parent / name
-            if marker.exists() or marker.is_symlink():
-                raise ValueError('ancestor discovery marker refused: ' + str(marker))
 
 
 def run_stage(stage, mode):

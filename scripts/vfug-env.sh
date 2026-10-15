@@ -47,20 +47,8 @@ if [[ -n ${VFUG_PAIR_BIN:-} ]]; then
   VFUG_PAIR_BIN=$(realpath -m "$VFUG_PAIR_BIN")
 fi
 # Check both roots on every entry, including direct per-check invocations.
-# Git also accepts .git files; dangling symlinks must not evade this refusal.
-for vfug_base in "$VFUG_ROOT" "$VFUG_WORK_ROOT"; do
-  vfug_parent=$vfug_base
-  while :; do
-    for vfug_marker in .beads .git; do
-      if [[ -e "$vfug_parent/$vfug_marker" || -L "$vfug_parent/$vfug_marker" ]]; then
-        echo "ancestor discovery marker refused: $vfug_parent/$vfug_marker" >&2
-        exit 2
-      fi
-    done
-    [[ $vfug_parent == / ]] && break
-    vfug_parent=$(dirname "$vfug_parent")
-  done
-done
+# Share bd project-file classification with staging; per-user .beads is safe.
+python3 -B "$(dirname "${BASH_SOURCE[0]}")/vfug_discovery.py" "$VFUG_ROOT" "$VFUG_WORK_ROOT"
 mkdir -p "$VFUG_WORK_ROOT"
 vfug_fixture=$(mktemp -d -p "$VFUG_WORK_ROOT" e.XXXXXX)
 mkdir -p "$vfug_fixture"/{h,t,g,x,c,d,run,gobin,gopath}
