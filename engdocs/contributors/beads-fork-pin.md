@@ -76,15 +76,18 @@ The world-readable stage records `manifest.json` with SHA-256 for each input
 tree, including Git metadata, directory/file inventory, executable bits and
 file bytes. Staging prints the manifest's SHA-256 for the coordinator's record.
 This is an integrity manifest, not an authentication mechanism: the coordinator
-controls the reviewed stage. Never reuse or change a stage during a run.
+controls the reviewed stage. The stage must be writable only by the coordinator
+account, loucmane: `vfug-test-run.sh` executes the stage's `vfug-stage.py` before
+that program verifies the manifest. Never reuse or change a stage during a run.
 
-The test entry verifies the manifest, copies inputs into
+The test entry refuses ancestor `.beads` or `.git` markers above its work and
+fixture roots, verifies the manifest, copies inputs into
 `/work/vfugtest/ga-vfug/run.*/inputs`, verifies the copy, and makes its own
-repositories and module cache writable. It executes only the copied runner.
+repositories and module cache writable. Qualification executes the copied host runner.
 Logs and built binaries live in that account's run tree; log directories and
 files are readable by loucmane. Ordinary fixture HOME, TMPDIR, GC_HOME, GOPATH,
-GOBIN, tmux paths and a writable global Git config are under that run's
-`fixtures` directory. `proxied-acceptance` alone sets HOME to the account's
+GOBIN, tmux paths and a writable global Git config are under a short
+`/work/vfugtest/f.*` fixture root beside the run tree. `proxied-acceptance` alone sets HOME to the account's
 passwd home so the supervisor ownership check agrees. Existing tests that
 restore passwd HOME still land in the dedicated account's /work home.
 
@@ -94,7 +97,13 @@ and `--inside` entry paths no longer exist. The child receives an explicit
 environment, offline Go module settings, staged tools and fixture-only GOBIN.
 No operator session, endpoint, credential or runtime environment is inherited.
 Docker, tmux, a C compiler and other standard host utilities must be installed;
-the runner does not provision accounts, tools or services.
+the runner does not provision accounts, tools or services. Docker group
+membership is root-equivalent and is a trusted host capability.
+
+There is no network namespace or port filter. Host services on `127.0.0.1`
+remain reachable, including ports 53381 and 3308. Those two ports and the live
+city/store are off-limits: environment scrubbing and coordinator endpoint and
+fixture discipline enforce that rule, rather than network isolation.
 
 The runner builds bd/gc twice with Go 1.26.7 and compares binary hashes before
 running dependent suites. Each check has its own log below the printed

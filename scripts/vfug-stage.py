@@ -175,8 +175,20 @@ def stage_inputs(destination):
     print('Manifest SHA256: ' + hashlib.sha256((destination / 'manifest.json').read_bytes()).hexdigest(), flush=True)
 
 
+def refuse_ancestor_discovery(root):
+    """Reject ambient Git/beads discovery before creating any run fixtures."""
+    root = root.resolve()
+    for parent in (root, *root.parents):
+        for name in ('.beads', '.git'):
+            marker = parent / name
+            if marker.exists() or marker.is_symlink():
+                raise ValueError('ancestor discovery marker refused: ' + str(marker))
+
+
 def run_stage(stage, mode):
     home = require_test_account()
+    refuse_ancestor_discovery(home / 'ga-vfug')
+    refuse_ancestor_discovery(home)
     os.umask(0o022)  # Logs and copied inputs remain readable by the coordinator.
     stage = work_path(stage)
     manifest = verify_manifest(stage)
@@ -237,4 +249,3 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
-

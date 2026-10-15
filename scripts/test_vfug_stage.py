@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Dedicated-account policy, environment and staged-input integrity tests."""
+import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,6 +24,8 @@ class EnvironmentTests(unittest.TestCase):
         self.account_home = self.root / 'account'
         self.work = self.account_home / 'work'
         self.work.mkdir(parents=True)
+        self.run_root = self.account_home / "run"
+        self.run_root.mkdir()
         self.mock = self.root / 'mock'
         self.mock.mkdir()
         self.identity('vfugtest', self.account_home)
@@ -35,7 +40,7 @@ class EnvironmentTests(unittest.TestCase):
         config = {
             'PATH': str(self.mock) + ':/usr/bin:/bin',
             'VFUG_WORK_ROOT': str(self.work),
-            'VFUG_ROOT': str(self.work),
+            'VFUG_ROOT': str(self.run_root),
             'VFUG_GO_ROOT': str(self.work / 'go'),
             'VFUG_MODCACHE': str(self.work / 'modcache'),
             'VFUG_TOOLS': str(self.work / 'tools'),
@@ -88,6 +93,20 @@ Path(os.environ['GIT_CONFIG_GLOBAL']).write_text('[fixture]\\n')
         result = self.command('--supervisor-home', '--', '/usr/bin/python3', '-c', code, str(self.account_home))
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_ancestor_discovery_refuses_before_command(self):
+        for marker in ('.beads', '.git'):
+            for root in (self.work, self.run_root, self.account_home, self.root):
+                with self.subTest(marker=marker, root=root):
+                    path = root / marker
+                    path.write_text('fixture discovery marker')
+                    try:
+                        result = self.command('--', '/bin/true')
+                        self.assertEqual(result.returncode, 2, result.stderr)
+                        self.assertIn('ancestor discovery marker', result.stderr)
+                        self.assertIn(str(path), result.stderr)
+                    finally:
+                        path.unlink()
+
     def test_work_tree_escape_refuses(self):
         # Resolve path identity, not only its spelling.
         outside = self.root / 'outside'
@@ -106,6 +125,24 @@ class StageTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='vfug-stage.', dir=os.environ.get('TMPDIR', '/work/ga-vfug'))
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+
+    def test_run_refuses_ancestor_discovery_before_stage_or_writes(self):
+        home = self.root / 'account'
+        home.mkdir()
+        for marker in ('.beads', '.git'):
+            for parent in (home, home / 'ga-vfug', self.root):
+                parent.mkdir(exist_ok=True)
+                path = parent / marker
+                path.write_text('fixture discovery marker')
+                try:
+                    with self.subTest(marker=marker, parent=parent), \
+                            patch.object(self.stage, 'require_test_account', return_value=home), \
+                            patch.object(self.stage, 'verify_manifest') as verify, \
+                            self.assertRaisesRegex(ValueError, 'ancestor discovery marker.*' + re.escape(str(path))):
+                        self.stage.run_stage(self.root / 'absent-stage', 'plan')
+                    verify.assert_not_called()
+                finally:
+                    path.unlink()
 
     def test_manifest_covers_every_input_and_detects_drift(self):
         inputs = ['gc', 'bd-src', 'beads-vfug-' + 'a' * 40, 'go', 'modcache', 'tools', 'lint-bin']
@@ -160,6 +197,10 @@ class StageTests(unittest.TestCase):
         commit = git(bd, 'rev-parse', 'HEAD').strip()
         gc = repo('gc')
         (gc / 'scripts').mkdir()
+        (gc / '.githooks').mkdir()
+        (gc / '.githooks/pre-commit').write_text('# fixture hook\n')
+        shutil.copyfile(HERE / 'check-githooks-owner.sh', gc / 'scripts/check-githooks-owner.sh')
+        git(gc, 'config', 'core.hooksPath', '.githooks')
         (gc / 'external-bazel').symlink_to('/home/nonexistent/bazel-output')
         import gomod_replace_policy as policy
         pin = {'module': policy.MODULE, 'path': '../beads-vfug-' + commit, 'commit': commit, 'sha256': policy.checkout_hash(bd)}
@@ -176,9 +217,11 @@ class StageTests(unittest.TestCase):
             (directory / 'input').write_text(name)
             config[var] = str(directory)
         (source / 'lint-bin' / 'linked-tool').symlink_to(source / 'tools' / 'input')
+        source_config = hashlib.sha256((gc / '.git/config').read_bytes()).digest()
         destination = self.root / 'staged'
         with patch.dict(os.environ, config), patch.object(self.stage, 'require_operator'):
             self.stage.stage_inputs(destination)
+        self.assertEqual(hashlib.sha256((gc / '.git/config').read_bytes()).digest(), source_config)
         manifest = self.stage.verify_manifest(destination)
         self.assertEqual(manifest['inputs']['gc']['commit'], git(gc, 'rev-parse', 'HEAD').strip())
         self.assertEqual(git(destination / 'bd-src', 'rev-parse', 'HEAD').strip(), commit)
@@ -192,6 +235,13 @@ class StageTests(unittest.TestCase):
         with patch.object(self.stage, 'require_test_account', return_value=account_home), \
                 patch.object(self.stage.subprocess, 'call', return_value=0) as launch:
             self.assertEqual(self.stage.run_stage(destination, 'plan'), 0)
+        copied_gc = Path(launch.call_args.kwargs['env']['VFUG_GC_REPO'])
+        gate = subprocess.run(['bash', 'scripts/check-githooks-owner.sh'], cwd=copied_gc,
+                              env={'PATH': '/usr/bin:/bin', 'HOME': str(account_home),
+                                   'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null'},
+                              capture_output=True, text=True)
+        self.assertEqual(gate.returncode, 0, gate.stderr)
+        self.assertEqual(hashlib.sha256((gc / '.git/config').read_bytes()).digest(), source_config)
         command = launch.call_args.args[0]
         child_env = launch.call_args.kwargs['env']
         copied = Path(child_env['VFUG_GC_REPO']).parent
@@ -206,4 +256,3 @@ class StageTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
