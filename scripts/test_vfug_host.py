@@ -33,9 +33,17 @@ class RunnerTests(unittest.TestCase):
         import pwd
         return pwd.getpwuid(os.getuid()).pw_dir
 
+    def test_private_home_is_cancelled_only_for_an_isolated_passwd_home(self):
+        source = Path(__file__).with_name('vfug-env.sh').read_text()
+        guard = source.split('vfug_passwd_home=$(getent passwd', 1)[1].split('\nesac', 1)[0]
+        self.assertIn('/work/ga-vfug/*) vfug_private_home=false ;;', guard)
+        self.assertIn('if ! "$vfug_private_home"; then', guard)
+        self.assertIn('exit 2', guard)
+        self.assertLess(source.index('vfug_passwd_home=$(getent passwd'), source.index('vfug_fixture=$(mktemp'))
+
     def test_plain_command_refuses_operator_passwd_home(self):
         if self.passwd_home().startswith('/work/ga-vfug/'):
-            self.skipTest('already isolated by host-run.sh')
+            self.skipTest('already isolated by vfug-host-root.sh')
         script = Path(__file__).with_name('vfug-env.sh')
         marker = Path('/work/ga-vfug') / ('plain-ran.' + str(os.getpid()))
         result = subprocess.run(['bash', str(script), '--', 'touch', str(marker)],
@@ -46,7 +54,7 @@ class RunnerTests(unittest.TestCase):
 
     def test_plain_command_keeps_host_identity_and_isolates_environment(self):
         if not self.passwd_home().startswith('/work/ga-vfug/'):
-            self.skipTest('needs the host-run.sh private passwd; the refusal test covers this host')
+            self.skipTest('needs the vfug-host-root.sh private passwd; the refusal test covers this host')
         script = Path(__file__).with_name('vfug-env.sh')
         code = '''import json, os, pwd
 from pathlib import Path
@@ -97,6 +105,69 @@ print(json.dumps({
         inside = source.split('if [[ ${1:-} == --inside ]]; then', 1)[1].split('\nfi', 1)[0]
         self.assertIn('exec setpriv --inh-caps=-all --ambient-caps=-all --bounding-set=-all -- "$@"', inside)
         self.assertLess(inside.rindex('mount '), inside.index('exec setpriv'))
+
+    ROOT_SCRIPT = Path(__file__).with_name('vfug-host-root.sh')
+
+    def root_stage(self, name):
+        source = self.ROOT_SCRIPT.read_text()
+        if name == 'stage1':
+            return source.split('# Stage 1:', 1)[1]
+        return source.split('if [[ ${1:-} == --' + name + ' ]]; then', 1)[1].split('\nfi\n', 1)[0]
+
+    def test_root_entry_refuses_without_root_or_from_operator_file(self):
+        for args in (['all', 'a' * 64], ['--stage2', 'all', '/x'], ['--stage3', 'all', '/x'], ['bogus', 'a' * 64]):
+            result = subprocess.run(['bash', str(self.ROOT_SCRIPT), *args], env={'PATH': '/usr/bin:/bin'},
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 2, (args, result.stderr))
+
+    def test_root_stage1_runs_only_from_verified_root_copy(self):
+        stage = self.root_stage('stage1')
+        self.assertIn('[[ ${BASH_SOURCE[0]} == "$state/entry.sh" ]]', stage)
+        self.assertLess(stage.index('sha256sum < "$state/entry.sh"'), stage.index('exec bash "$state/entry.sh" --stage2'))
+        self.assertIn('[[ $got == "$want" ]]', stage)
+        self.assertNotIn('install ', stage.split('usage=', 1)[1].split('\n', 1)[1])
+
+    def test_root_never_changes_operator_writable_paths(self):
+        stage = self.root_stage('stage2')
+        for line in stage.splitlines():
+            if '$fixture' in line and any(word in line for word in ('mkdir', 'chmod', 'chown', 'install ')):
+                self.assertTrue(line.strip().startswith('as_operator '), line)
+        code = [line for line in self.ROOT_SCRIPT.read_text().splitlines() if not line.lstrip().startswith('#')]
+        self.assertFalse([line for line in code if 'chown' in line])
+        self.assertIn('! -L $path', stage)
+        self.assertIn('realpath -e "$fixture/h"', stage)
+
+    def test_root_passwd_rewrite_changes_exactly_the_operator_home(self):
+        stage = self.root_stage('stage2')
+        program = stage.split("awk -F: -v OFS=: -v uid=\"$op_uid\" -v home=\"$fixture/h\" '", 1)[1].split("'", 1)[0]
+        with tempfile.TemporaryDirectory(prefix='passwd.', dir='/work/ga-vfug') as temporary:
+            sample = Path(temporary) / 'passwd'
+            sample.write_text('root:x:0:0:root:/root:/bin/bash\nloucmane:x:1000:1000::/home/loucmane:/usr/bin/zsh\n'
+                              'other:x:10000:10000::/home/other:/bin/sh\n')
+            out = subprocess.run(['awk', '-F:', '-v', 'OFS=:', '-v', 'uid=1000', '-v', 'home=/work/ga-vfug/hr/h',
+                                  program, str(sample)], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0)
+            self.assertEqual(out.stdout.splitlines(), ['root:x:0:0:root:/root:/bin/bash',
+                                                       'loucmane:x:1000:1000::/work/ga-vfug/hr/h:/usr/bin/zsh',
+                                                       'other:x:10000:10000::/home/other:/bin/sh'])
+            sample.write_text('root:x:0:0:root:/root:/bin/bash\n')
+            missing = subprocess.run(['awk', '-F:', '-v', 'OFS=:', '-v', 'uid=1000', '-v', 'home=/h', program, str(sample)],
+                                     capture_output=True, text=True)
+            self.assertNotEqual(missing.returncode, 0)
+
+    def test_root_stage3_guards_isolates_and_drops(self):
+        stage = self.root_stage('stage3')
+        self.assertLess(stage.index('[[ $$ -eq 1 && $EUID -eq 0 ]]'), stage.index('mount '))
+        self.assertEqual(stage.index('mount '), stage.index('mount --make-rprivate /'))
+        for masked in ('$op_home/.beads', '$op_home/gascity', '/run/user/$op_uid', '/tmp/tmux-$op_uid'):
+            self.assertIn(masked, stage)
+        self.assertIn('/proc/self/mountinfo', stage)
+        self.assertNotIn('mount --bind "$op_home/go" ', stage)
+        drop = stage[stage.index('exec setpriv'):]
+        for flag in ('--reuid="$op_uid"', '--regid="$op_gid"', '--inh-caps=-all', '--ambient-caps=-all',
+                     '--bounding-set=-all', '--no-new-privs', '/usr/bin/env -i'):
+            self.assertIn(flag, drop)
+        self.assertLess(stage.index('ABORT: operator home is writable'), stage.index('exec setpriv'))
 
     def run_fixture(self, *, launch_error=False, drift=False):
         base = Path('/work/ga-vfug')

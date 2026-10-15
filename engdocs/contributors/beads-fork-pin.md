@@ -68,20 +68,30 @@ It does not include the live city's executable directory in PATH.
 Tests (`pinRealHome`, `pinRealHomeEnv`) and the supervisor's ownership guard
 resolve the account home from passwd, not from `HOME`, so every check must see a
 passwd home below `/work/ga-vfug`. The operator starts the full run with
-`sudo bash scripts/vfug-host-root.sh [mode]`. Root only builds a private mount and
-PID namespace (no user namespace, so file ownership stays real), binds a private
-passwd whose operator home is `/work/ga-vfug/hr/h`, makes the operator's home
-read-only except `~/scratch/ga-vfug` and `~/go`, and masks `~/.beads` with an
-empty directory. It proves that layout, then drops to the operator UID with no
-capabilities and `no_new_privs` and runs `vfug-host.py`. The mounts end with the
-namespace.
+`sudo sh -c 'install -D -m 0700 -o root -g root <checkout>/scripts/vfug-host-root.sh /run/vfug-host/entry.sh && exec bash /run/vfug-host/entry.sh MODE SHA256'`,
+naming the reviewed hash of the script, so root executes only a root-owned copy
+with that hash. Root never changes operator-writable paths: the operator UID creates
+`/work/ga-vfug/hr/h`, and root only checks that it is a real directory. Root then
+builds a private mount and PID namespace (no user namespace, so file ownership stays
+real), binds a private passwd whose operator home is `/work/ga-vfug/hr/h`, makes the
+operator's home read-only except `~/scratch/ga-vfug` and `~/go/pkg/mod`, and masks
+`~/.beads`, `~/gascity`, `/run/user/<uid>` and `/tmp/tmux-<uid>` with empty
+read-only directories. It proves that layout from `/proc/self/mountinfo` and with
+write probes, then drops to the operator UID with no capabilities and
+`no_new_privs` and runs `vfug-host.py`. The mounts end with the namespace. `GOBIN`
+is a fixture directory, so `go install` never replaces the operator's tools.
+Residual by design: the docker group stays (the Dolt container suites need it), there
+is no network namespace (so 127.0.0.1 ports stay reachable), and the Windows drives
+and WSL interop stay available.
 
 `vfug-env.sh` refuses any command whose passwd home is not below `/work/ga-vfug`,
 unless `--private-home` builds its own user namespace (standalone acceptance runs
 only; inside the sudo entry it is unnecessary and skipped). The global git config
 is a writable file in the fixture, because gc sets `beads.role` when it starts a
-city. `TMUX_TMPDIR` is also beneath the fixture. Direct `--inside` invocation
-outside the runner's private user namespace refuses before attempting a mount, and
+city. `TMUX_TMPDIR` is also beneath the fixture. A direct `vfug-env.sh --inside`
+outside its private user namespace refuses before attempting a mount, as do
+`vfug-host-root.sh --stage2` outside the verified root copy and `--stage3`
+anywhere but PID 1 of the new namespace, and
 the user-namespace path drops inherited, ambient, and bounding-set capabilities
 before executing tests.
 
