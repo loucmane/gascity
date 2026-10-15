@@ -21,7 +21,11 @@ max_modules="${GC_NATIVE_DEP_MAX_MODULES:-737}"
 # grows the binary ~90KB/day, so 180,000,000 gives ~88 days of headroom.
 # Re-baseline with fresh measurement + growth-rate evidence, not an
 # arbitrary bump, when this next fails.
-max_binary_bytes="${GC_NATIVE_DEP_MAX_BINARY_BYTES:-180000000}"
+# Re-baselined 2026-10-15 (ga-vfug): native reads over bd's proxied server
+# (upstream backport) plus the pinned bd fork. Measured 180,876,596 bytes
+# (round-9 host qualification), about 0.9 MB over the old cap. 182,000,000
+# keeps about 1.1 MB of headroom. Re-measure when the beads fork pin is removed.
+max_binary_bytes="${GC_NATIVE_DEP_MAX_BINARY_BYTES:-182000000}"
 max_aws_modules="${GC_NATIVE_DEP_MAX_AWS_MODULES:-25}"
 max_azure_modules="${GC_NATIVE_DEP_MAX_AZURE_MODULES:-9}"
 max_dolthub_modules="${GC_NATIVE_DEP_MAX_DOLTHUB_MODULES:-15}"

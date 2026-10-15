@@ -46,8 +46,8 @@ func TestNativeDependencyGuard(t *testing.T) {
 		fixture{name: "google_over_limit", modules: nativeGuardModules("", 0, 1, 2), want: "google.golang.org/api count 2 exceeds 1", beforeBuild: true},
 		fixture{name: "missing_beads", modules: nativeGuardModules("", 0, 0, 0), want: "expected exactly one github.com/steveyegge/beads module, got 0", beforeBuild: true},
 		fixture{name: "duplicate_beads", modules: nativeGuardModules("", 0, 2, 0), want: "expected exactly one github.com/steveyegge/beads module, got 2", beforeBuild: true},
-		fixture{name: "binary_at_limit", modules: reviewed, size: "180000000"},
-		fixture{name: "binary_over_limit", modules: reviewed, size: "180000001", want: "gc binary is 180000001 bytes; max is 180000000"},
+		fixture{name: "binary_at_limit", modules: reviewed, size: "182000000"},
+		fixture{name: "binary_over_limit", modules: reviewed, size: "182000001", want: "gc binary is 182000001 bytes; max is 182000000"},
 		fixture{name: "help_failure", modules: reviewed, helpFails: true, want: "normal gc metrics --help failed"},
 		fixture{name: "help_testhook", modules: reviewed, help: "__testhook-record-help", want: "metrics --help exposes the product-metrics testhook command"},
 	)
