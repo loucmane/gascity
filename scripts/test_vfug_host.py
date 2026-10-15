@@ -19,6 +19,14 @@ spec.loader.exec_module(host)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_bd_mode_covers_public_and_concrete_readonly_contracts(self):
+        steps = {step.name: step for step in host.suites('bd', Path('/fixture/bin'))}
+        self.assertIn('bd-readonly', steps)
+        boundary = steps['bd-readonly-boundaries']
+        self.assertIn('./internal/storage/dolt', boundary.args)
+        self.assertIn('BEADS_SCHEMA_INIT_HELPER=1', boundary.args)
+        self.assertFalse(boundary.pair)
+
     def test_passwd_home_is_reserved_for_supervisor_acceptance(self):
         steps = host.suites('all', Path('/fixture/bin'))
         namespaced = [step.name for step in steps if getattr(step, 'supervisor_home', False)]
