@@ -72,6 +72,11 @@ assert all('/home/loucmane' not in v for v in os.environ.values())
 base = Path(sys.argv[1])
 for name in ('HOME', 'GOPATH', 'GOBIN', 'GC_HOME', 'TMPDIR', 'GOTMPDIR', 'GIT_CONFIG_GLOBAL', 'XDG_RUNTIME_DIR'):
     assert Path(os.environ[name]).is_relative_to(base), name
+seed = Path(os.environ['GIT_CONFIG_GLOBAL']).read_text()
+assert 'role = maintainer' in seed and '[beads]' in seed, 'gitconfig must seed beads.role'
+proxy = os.environ['GOPROXY']
+assert proxy.startswith('file://') and proxy.endswith('/cache/download'), 'GOPROXY must stay offline'
+assert Path(proxy[len('file://'):]).is_relative_to(Path(os.environ['GOMODCACHE'])), 'GOPROXY must be the staged cache'
 Path(os.environ['GIT_CONFIG_GLOBAL']).write_text('[fixture]\\n')
 (Path(os.environ['GOBIN']) / 'fixture').write_text('fixture')
 """

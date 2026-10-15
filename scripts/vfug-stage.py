@@ -198,8 +198,15 @@ def run_stage(stage, mode):
     verify_manifest(inputs)
     readable_tree(inputs, writable=True)
     check_pin(inputs / 'gc')
-    fixture_root = root / 'fixtures'
-    fixture_root.mkdir()
+    # The copied clone is the runner's own checkout: activate its .githooks
+    # exactly as `make setup` does, so check-hooks tests the repository, not
+    # the staging step (2026-10-16: the fresh clone had no core.hooksPath).
+    subprocess.run(['git', '-C', str(inputs / 'gc'), 'config', 'core.hooksPath', '.githooks'], check=True)
+    # Fixtures sit on a short path beside the run tree. Long fixture paths
+    # pushed Unix sockets past 108 bytes, and gc then fell back to shared
+    # /tmp paths owned by other accounts (2026-10-16).
+    fixture_root = home / ('f.' + root.name.split('.', 1)[1])
+    fixture_root.mkdir(mode=0o755)
     environment = {
         'PATH': '/usr/bin:/bin', 'HOME': str(home),
         'VFUG_ROOT': str(root), 'VFUG_WORK_ROOT': str(fixture_root),

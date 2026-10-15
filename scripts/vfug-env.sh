@@ -50,7 +50,10 @@ mkdir -p "$VFUG_WORK_ROOT"
 vfug_fixture=$(mktemp -d -p "$VFUG_WORK_ROOT" e.XXXXXX)
 mkdir -p "$vfug_fixture"/{h,t,g,x,c,d,run,gobin,gopath}
 chmod 700 "$vfug_fixture/h" "$vfug_fixture/run"
-: > "$vfug_fixture/gitconfig"
+# Same seed as scripts/test-gitconfig-path and the acceptance helper: gc doctor
+# requires beads.role, and acceptance passes this file through to its children.
+printf '[user]\n\tname = gc-test\n\temail = gc-test@test.local\n[beads]\n\trole = maintainer\n[safe]\n\tdirectory = *\n' \
+  > "$vfug_fixture/gitconfig"
 mkdir -p "$VFUG_ROOT/go-cache"
 ln -s "$VFUG_ROOT/go-cache" "$vfug_fixture/c/go-build"
 vfug_command_home="$vfug_fixture/h"
@@ -67,7 +70,7 @@ exec /usr/bin/env -i \
   GC_TEST_TMUX_SOCKET_PARENT_ROOT="$vfug_fixture/t" TMUX_TMPDIR="$vfug_fixture/t" \
   BEADS_CENTRAL_CONFIG="$vfug_fixture/absent-central.json" \
   GOPATH="$vfug_fixture/gopath" GOMODCACHE="$VFUG_MODCACHE" GOBIN="$vfug_fixture/gobin" \
-  GOENV=off GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off \
+  GOENV=off GOTOOLCHAIN=local GOPROXY="file://$VFUG_MODCACHE/cache/download" GOSUMDB=off GOWORK=off \
   GOFLAGS='-mod=readonly -buildvcs=false' \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$vfug_fixture/gitconfig" \
   GC_DISABLE_USAGE_METRICS=1 BD_DISABLE_METRICS=1 DO_NOT_TRACK=1 \
