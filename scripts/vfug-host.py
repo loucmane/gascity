@@ -12,9 +12,26 @@ import sys
 import tempfile
 import time
 
-ROOT = Path('/home/loucmane/scratch/ga-vfug')
+ROOT = None
 GC = Path(__file__).resolve().parents[1]
-BD = ROOT / 'bd-src'
+BD = None
+CONFIG_KEYS = ('VFUG_ROOT', 'VFUG_WORK_ROOT', 'VFUG_GC_REPO', 'VFUG_BD_REPO',
+               'VFUG_GO_ROOT', 'VFUG_MODCACHE', 'VFUG_TOOLS', 'VFUG_LINT_BIN')
+
+
+def configure():
+    global ROOT, GC, BD
+    for key in CONFIG_KEYS:
+        if key not in os.environ or not Path(os.environ[key]).resolve().is_relative_to('/work'):
+            raise ValueError(key + ' must explicitly name a staged /work path')
+    ROOT = Path(os.environ['VFUG_ROOT'])
+    GC = Path(os.environ['VFUG_GC_REPO'])
+    BD = Path(os.environ['VFUG_BD_REPO'])
+
+
+def step_environment(pair):
+    return {'PATH': '/usr/bin:/bin', 'VFUG_PAIR_BIN': str(pair),
+            **{key: os.environ[key] for key in CONFIG_KEYS}}
 
 
 @dataclass
@@ -23,11 +40,11 @@ class Step:
     cwd: Path
     args: list
     pair: bool = True
-    private_home: bool = False
+    supervisor_home: bool = False
 
 
 def step_command(step, runner):
-    options = ['--private-home'] if step.private_home else []
+    options = ['--supervisor-home'] if step.supervisor_home else []
     return ['bash', str(runner / 'vfug-env.sh'), *options, '--', *step.args]
 
 
@@ -39,7 +56,7 @@ def suites(group, pair):
     steps = []
     if group in ('all', 'bd', 'gc', 'acceptance', 'cas', 'safety'):
         steps.append(Step('tooling', GC, ['bash', '-c',
-            'set -e; for tool in dolt tmux docker; do command -v "$tool"; done; dolt version; tmux -V; docker --version']))
+            'set -e; for tool in dolt tmux docker golangci-lint oapi-codegen; do command -v "$tool"; done; dolt version; tmux -V; docker --version']))
     if group in ('all', 'bd'):
         for mode in ('count-init', 'guarded', 'lifecycle', 'row-lock', 'races', 'readonly', 'vet'):
             steps.append(Step('bd-' + mode, source,
@@ -51,7 +68,7 @@ def suites(group, pair):
             steps.append(Step(label, GC, ['make', target, 'LOCAL_TEST_JOBS=2']))
     if group in ('all', 'gates', 'gc'):
         steps += [
-            Step('runner-policy', GC, ['python3', '-B', 'scripts/test_vfug_host.py', '-v'], False),
+            Step('runner-policy', GC, ['python3', '-B', '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_vfug*.py', '-v'], False),
             Step('fork-policy', GC, ['python3', '-B', 'scripts/test_gomod_replace_policy.py', '-v'], False),
             Step('release-replace', GC, ['make', 'check-gomod-replace']),
             Step('release-core', GC, ['make', 'check-core-boundary']),
@@ -61,7 +78,7 @@ def suites(group, pair):
             Step('release-generated', GC, ['make', 'spec-ci']),
             Step('release-hooks-docs', GC, ['make', 'check-hooks', 'check-docs']),
             Step('gc-vet', GC, ['go', 'vet', './...']),
-            Step('gc-lint', GC, ['make', 'lint-changed', 'LINT_CHANGED_REF=fc0f8a966', 'LINT_CHANGED_SCOPE=tracked', 'LINT_FLAGS=--new-from-rev=fc0f8a966 --whole-files']),
+            Step('gc-lint', GC, ['bash', '-c', 'set -e; lint=$(command -v golangci-lint); exec make lint-changed "GOLANGCI_LINT=$lint" LINT_CHANGED_REF=fc0f8a966 LINT_CHANGED_SCOPE=tracked "LINT_FLAGS=--new-from-rev=fc0f8a966 --whole-files"']),
             Step('custody-resolver-module', GC, ['go', 'test', './internal/beads/beadstest',
                 './internal/platforminstall', './cmd/gc', './scripts',
                 '-run', 'Test(Pinned|RepositorySource|MetadataCustody|ModuleGraph|CheckGomodReplace|ReplaceDirective)', '-count=1', '-timeout=15m']),
@@ -74,7 +91,7 @@ def suites(group, pair):
         steps.append(Step('proxied-acceptance', GC, ['env', 'GC_REQUIRE_ACCEPTANCE_TOOLING=1',
             'GC_ACCEPTANCE_BD_BIN=' + str(bd), 'GC_ACCEPTANCE_GC_BIN=' + str(gc),
             'go', 'test', '-tags=acceptance_a', './test/acceptance', '-run', pattern,
-            '-count=1', '-timeout=45m', '-v'], private_home=True))
+            '-count=1', '-timeout=45m', '-v'], supervisor_home=True))
     if group in ('all', 'cas', 'safety'):
         steps.append(Step('gc-cas', GC, ['env', 'GC_TEST_PROXIED_CAS=1', 'GC_ACCEPTANCE_BD_BIN=' + str(bd),
             'go', 'test', '-tags=integration', './cmd/gc', '-run', '^TestProxiedNativeClaimCAS$',
@@ -89,15 +106,20 @@ def main():
     parser.add_argument('mode', nargs='?', default='all',
                         choices=['all', 'build', 'bd', 'gc', 'gates', 'acceptance', 'cas', 'safety', 'plan'])
     opts = parser.parse_args()
+    try:
+        configure()
+    except ValueError as exc:
+        parser.error(str(exc))
     if opts.mode == 'plan':
         print('build-1\nbuild-2\ncompare-builds')
-        for step in suites('all', ROOT / 'host-r9/OUTPUT/build-1/bin'):
+        for step in suites('all', ROOT / 'logs/OUTPUT/build-1/bin'):
             print(step.name + ': ' + ' '.join(step_command(step, GC / 'scripts')))
         return 0
-    base = ROOT / 'host-r9'
+    base = ROOT / 'logs'
     base.mkdir(exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix='run.', dir=base))
-    print('Round-9 logs: ' + str(run), flush=True)
+    run.chmod(0o755)
+    print('Qualification logs: ' + str(run), flush=True)
     # Copy executable runner sources before starting any long command.
     snapshot = run / 'runner'
     snapshot.mkdir()
@@ -111,6 +133,7 @@ def main():
 
     def step_run(step):
         folder = Path(tempfile.mkdtemp(prefix=step.name + '.', dir=run))
+        folder.chmod(0o755)
         log = folder / 'output.log'
         command = step_command(step, snapshot)
         (folder / 'command.json').write_text(json.dumps({'cwd': str(step.cwd), 'argv': command}, indent=2) + '\n')
@@ -119,7 +142,7 @@ def main():
         with log.open('w') as stream:
             try:
                 proc = subprocess.Popen(command, cwd=step.cwd, stdout=stream, stderr=subprocess.STDOUT,
-                                        env={'PATH': '/usr/bin:/bin', 'VFUG_PAIR_BIN': str(pair)})
+                                        env=step_environment(pair))
             except OSError as exc:
                 stream.write('Cannot start check: ' + str(exc) + '\n')
                 code = 127

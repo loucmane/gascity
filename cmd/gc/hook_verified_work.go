@@ -3,8 +3,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"slices"
 	"strings"
@@ -47,7 +47,7 @@ var openVerifiedHookWorkStore = func(ctx context.Context, env []string, v *Verif
 // adoption whose display metadata is unchanged advances the work revision.
 // The attempt ID also fences an undelivered invocation from a later adoption
 // or same-assignee reacquisition within the SAME session incarnation.
-func fenceVerifiedHookWork(bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) (_ beads.Bead, retErr error) {
+func fenceVerifiedHookWork(bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) (beads.Bead, error) {
 	v := opts.Verified
 	if err := v.mayClaim(); err != nil {
 		return beads.Bead{}, err
@@ -56,7 +56,7 @@ func fenceVerifiedHookWork(bead beads.Bead, opts hookClaimOptions, ops hookClaim
 	if err != nil {
 		return beads.Bead{}, err
 	}
-	defer func() { retErr = errors.Join(retErr, closeVerifiedHookWorkStore(store, ops.ClassRoute)) }()
+	defer reportVerifiedHookWorkStoreClose(store, ops.ClassRoute, bead.ID)
 	live, err := store.Get(bead.ID)
 	if err != nil {
 		return beads.Bead{}, err
@@ -93,7 +93,7 @@ func fenceVerifiedHookWork(bead beads.Bead, opts hookClaimOptions, ops hookClaim
 	return live, nil
 }
 
-func restampVerifiedHookWork(v *VerifiedSession, route *hookClaimClassRoute, dir, id, from, to string) (_ bool, retErr error) {
+func restampVerifiedHookWork(v *VerifiedSession, route *hookClaimClassRoute, dir, id, from, to string) (bool, error) {
 	if err := v.mayClaim(); err != nil {
 		return false, err
 	}
@@ -104,7 +104,7 @@ func restampVerifiedHookWork(v *VerifiedSession, route *hookClaimClassRoute, dir
 	if err != nil {
 		return false, err
 	}
-	defer func() { retErr = errors.Join(retErr, closeVerifiedHookWorkStore(store, route)) }()
+	defer reportVerifiedHookWorkStoreClose(store, route, id)
 	live, err := store.Get(id)
 	if err != nil {
 		return false, err
@@ -140,7 +140,7 @@ func verifiedHookOwnsWork(v *VerifiedSession, b beads.Bead) bool {
 // only the exact claim attempt it fenced, never an assignee or a fresh own-row
 // lookup. Missing markers (including a claim whose fence failed) stay parked
 // for controller recovery; there is no unconditional release fallback.
-func releaseVerifiedHookPending(bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) (_ bool, retErr error) {
+func releaseVerifiedHookPending(bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) (bool, error) {
 	v := opts.Verified
 	if !verifiedHookOwnsWork(v, bead) {
 		return false, nil
@@ -149,7 +149,7 @@ func releaseVerifiedHookPending(bead beads.Bead, opts hookClaimOptions, ops hook
 	if err != nil {
 		return false, err
 	}
-	defer func() { retErr = errors.Join(retErr, closeVerifiedHookWorkStore(store, ops.ClassRoute)) }()
+	defer reportVerifiedHookWorkStoreClose(store, ops.ClassRoute, bead.ID)
 	live, err := store.Get(bead.ID)
 	if err != nil {
 		return false, err
@@ -171,6 +171,14 @@ func releaseVerifiedHookPending(bead beads.Bead, opts hookClaimOptions, ops hook
 
 // The class ledger belongs to the enclosing claim operation; only work handles
 // opened here are owned here. Unwrap policy stores to reach their close boundary.
+// Cleanup cannot change a completed CAS into a failure: callers use that result
+// to deliver the fence and emit the release event. Report cleanup independently.
+func reportVerifiedHookWorkStoreClose(store beads.Store, route *hookClaimClassRoute, id string) {
+	if err := closeVerifiedHookWorkStore(store, route); err != nil {
+		log.Printf("gc hook --claim: closing work store for %s: %v", id, err)
+	}
+}
+
 func closeVerifiedHookWorkStore(store beads.Store, route *hookClaimClassRoute) error {
 	if route != nil && store == route.class {
 		return nil

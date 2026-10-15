@@ -5,9 +5,11 @@
 set -euo pipefail
 
 vfug_repo=${3:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
-for vfug_name in HOME TMPDIR GOTMPDIR GC_HOME; do
+: "${VFUG_WORK_ROOT:?set the dedicated-account fixture root}"
+case "$(realpath -m "$VFUG_WORK_ROOT")" in /work/*) ;; *) echo 'fixture root must be under /work/' >&2; exit 2;; esac
+for vfug_name in HOME TMPDIR GOTMPDIR GC_HOME GOBIN GIT_CONFIG_GLOBAL; do
   vfug_value=${!vfug_name:-}
-  case "$(realpath -m "$vfug_value")" in /work/ga-vfug/*) ;; *) echo "$vfug_name must be under /work/ga-vfug" >&2; exit 2;; esac
+  case "$(realpath -m "$vfug_value")" in "$VFUG_WORK_ROOT"/*) ;; *) echo "$vfug_name must be under VFUG_WORK_ROOT" >&2; exit 2;; esac
 done
 if [[ -n "$(git --no-optional-locks -C "$vfug_repo" status --porcelain --untracked-files=all)" ]]; then
   echo "Refusing to build an uncommitted gc checkout" >&2
@@ -35,17 +37,17 @@ fi
 mkdir -p "$vfug_output"
 vfug_output=$(cd "$vfug_output" && pwd)
 bash "$vfug_repo/scripts/check-gomod-replace.sh" "$vfug_repo/go.mod"
-vfug_gopath=${GOPATH:-"$HOME/go"}
-vfug_modcache=${GOMODCACHE:-"$vfug_gopath/pkg/mod"}
-vfug_cachehome=${XDG_CACHE_HOME:-"$HOME/.cache"}
+vfug_gopath=${GOPATH:?set fixture GOPATH}
+vfug_modcache=${GOMODCACHE:?set staged GOMODCACHE}
+vfug_cachehome=${XDG_CACHE_HOME:?set fixture cache}
 
 build() {
   /usr/bin/env -i HOME="$HOME" GC_HOME="$GC_HOME" PATH="$PATH" \
     XDG_CACHE_HOME="$vfug_cachehome" GOPATH="$vfug_gopath" GOMODCACHE="$vfug_modcache" \
-    TMPDIR="$TMPDIR" GOTMPDIR="$GOTMPDIR" \
+    TMPDIR="$TMPDIR" GOTMPDIR="$GOTMPDIR" GOBIN="$GOBIN" \
     GOENV=off GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off \
     GOFLAGS='-mod=readonly -buildvcs=false' GOOS=linux GOARCH=amd64 \
-    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL" \
     "$@"
 }
 if [[ "$(build go version)" != 'go version go1.26.7 linux/amd64' ]]; then

@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""Dedicated-account policy, environment and staged-input integrity tests."""
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+HERE = Path(__file__).resolve().parent
+
+
+class EnvironmentTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='vfug-policy.', dir=os.environ.get('TMPDIR', '/work/ga-vfug'))
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.account_home = self.root / 'account'
+        self.work = self.account_home / 'work'
+        self.work.mkdir(parents=True)
+        self.mock = self.root / 'mock'
+        self.mock.mkdir()
+        self.identity('vfugtest', self.account_home)
+
+    def identity(self, user, home):
+        for name, body in {'id': 'echo ' + user, 'getent': 'echo "' + user + ':x:12345:12345::' + str(home) + ':/bin/bash"'}.items():
+            path = self.mock / name
+            path.write_text('#!/bin/sh\n' + body + '\n')
+            path.chmod(0o755)
+
+    def command(self, *args):
+        config = {
+            'PATH': str(self.mock) + ':/usr/bin:/bin',
+            'VFUG_WORK_ROOT': str(self.work),
+            'VFUG_ROOT': str(self.work),
+            'VFUG_GO_ROOT': str(self.work / 'go'),
+            'VFUG_MODCACHE': str(self.work / 'modcache'),
+            'VFUG_TOOLS': str(self.work / 'tools'),
+            'VFUG_LINT_BIN': str(self.work / 'lint-bin'),
+            'VFUG_PAIR_BIN': str(self.work / 'pair'),
+            'VFUG_TEST_UNTRUSTED': 'must disappear',
+        }
+        return subprocess.run(['bash', str(HERE / 'vfug-env.sh'), *args],
+                              env=config, capture_output=True, text=True, timeout=15)
+
+    def test_wrong_user_refuses_before_command(self):
+        self.identity('operator', self.account_home)
+        result = self.command('--', '/bin/true')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('requires vfugtest', result.stderr)
+
+    def test_passwd_home_outside_work_refuses(self):
+        self.identity('vfugtest', '/home/fixture')
+        result = self.command('--', '/bin/true')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('passwd home must be under /work/', result.stderr)
+
+    def test_removed_namespace_entry_refuses(self):
+        for option in ('--private-home', '--inside'):
+            result = self.command(option, '--', '/bin/true')
+            self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_environment_has_only_staged_and_fixture_paths(self):
+        # Assert policy inside the child; never print the environment.
+        code = """import os, sys
+from pathlib import Path
+assert 'VFUG_TEST_UNTRUSTED' not in os.environ
+assert all('/home/loucmane' not in v for v in os.environ.values())
+base = Path(sys.argv[1])
+for name in ('HOME', 'GOPATH', 'GOBIN', 'GC_HOME', 'TMPDIR', 'GOTMPDIR', 'GIT_CONFIG_GLOBAL', 'XDG_RUNTIME_DIR'):
+    assert Path(os.environ[name]).is_relative_to(base), name
+Path(os.environ['GIT_CONFIG_GLOBAL']).write_text('[fixture]\\n')
+(Path(os.environ['GOBIN']) / 'fixture').write_text('fixture')
+"""
+        result = self.command('--', '/usr/bin/python3', '-c', code, str(self.work))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_supervisor_uses_passwd_home(self):
+        code = "import os,sys; assert os.environ['HOME'] == sys.argv[1]"
+        result = self.command('--supervisor-home', '--', '/usr/bin/python3', '-c', code, str(self.account_home))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_work_tree_escape_refuses(self):
+        # Resolve path identity, not only its spelling.
+        outside = self.root / 'outside'
+        outside.mkdir()
+        self.work.rmdir()
+        self.work.symlink_to(outside, target_is_directory=True)
+        result = self.command('--', '/bin/true')
+        self.assertEqual(result.returncode, 2, result.stderr)
+
+
+class StageTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('vfug_stage', HERE / 'vfug-stage.py')
+        self.stage = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.stage)
+        self.temp = tempfile.TemporaryDirectory(prefix='vfug-stage.', dir=os.environ.get('TMPDIR', '/work/ga-vfug'))
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def test_manifest_covers_every_input_and_detects_drift(self):
+        inputs = ['gc', 'bd-src', 'beads-vfug-' + 'a' * 40, 'go', 'modcache', 'tools', 'lint-bin']
+        for name in inputs:
+            directory = self.root / name
+            directory.mkdir()
+            (directory / 'input').write_text(name)
+        self.stage.write_manifest(self.root, {name: {'commit': 'a' * 40} if name in inputs[:3] else {} for name in inputs})
+        manifest = self.stage.verify_manifest(self.root)
+        self.assertEqual(set(manifest['inputs']), set(inputs))
+        self.assertTrue(all(len(item['sha256']) == 64 for item in manifest['inputs'].values()))
+        for name in inputs:
+            path = self.root / name / 'input'
+            original = path.read_text()
+            path.write_text('changed')
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'digest'):
+                self.stage.verify_manifest(self.root)
+            path.write_text(original)
+        (self.root / 'extra').write_text('unrecorded')
+        with self.assertRaisesRegex(ValueError, 'inventory'):
+            self.stage.verify_manifest(self.root)
+
+    def test_manifest_refuses_traversal_and_symlinks(self):
+        (self.root / 'go').mkdir()
+        (self.root / 'go' / 'input').write_text('go')
+        self.stage.write_manifest(self.root, {'go': {}})
+        (self.root / 'go' / 'outside').symlink_to('/etc/passwd')
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            self.stage.verify_manifest(self.root)
+        data = json.loads((self.root / 'manifest.json').read_text())
+        data['inputs']['../outside'] = data['inputs'].pop('go')
+        (self.root / 'manifest.json').write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, 'input name'):
+            self.stage.verify_manifest(self.root)
+
+    def test_stage_preserves_commit_and_relative_pin_and_dereferences_tools(self):
+        source = self.root / 'source'
+        source.mkdir()
+        def git(repo, *args):
+            return self.stage.git(repo, *args)
+        def repo(name):
+            path = source / name
+            path.mkdir()
+            git(path, 'init', '-q')
+            git(path, 'config', 'user.name', 'fixture')
+            git(path, 'config', 'user.email', 'fixture@local')
+            return path
+        bd = repo('bd-src')
+        (bd / 'go.mod').write_text('module fixture\n')
+        git(bd, 'add', '.')
+        git(bd, '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture')
+        commit = git(bd, 'rev-parse', 'HEAD').strip()
+        gc = repo('gc')
+        (gc / 'scripts').mkdir()
+        (gc / 'external-bazel').symlink_to('/home/nonexistent/bazel-output')
+        import gomod_replace_policy as policy
+        pin = {'module': policy.MODULE, 'path': '../beads-vfug-' + commit, 'commit': commit, 'sha256': policy.checkout_hash(bd)}
+        (gc / 'scripts' / 'beads-fork-pin.json').write_text(json.dumps(pin))
+        (gc / 'go.mod').write_text('module fixture\nreplace ' + policy.MODULE + ' => ' + pin['path'] + '\n')
+        git(gc, 'add', '.')
+        git(gc, '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture')
+        self.stage.clone_commit(bd, source / ('beads-vfug-' + commit), commit)
+        config = {'VFUG_GC_SOURCE': str(gc), 'VFUG_BD_SOURCE': str(bd)}
+        for var, name in [('VFUG_GO_SOURCE', 'go'), ('VFUG_MODCACHE_SOURCE', 'modcache'),
+                          ('VFUG_TOOLS_SOURCE', 'tools'), ('VFUG_LINT_SOURCE', 'lint-bin')]:
+            directory = source / name
+            directory.mkdir()
+            (directory / 'input').write_text(name)
+            config[var] = str(directory)
+        (source / 'lint-bin' / 'linked-tool').symlink_to(source / 'tools' / 'input')
+        destination = self.root / 'staged'
+        with patch.dict(os.environ, config), patch.object(self.stage, 'require_operator'):
+            self.stage.stage_inputs(destination)
+        manifest = self.stage.verify_manifest(destination)
+        self.assertEqual(manifest['inputs']['gc']['commit'], git(gc, 'rev-parse', 'HEAD').strip())
+        self.assertEqual(git(destination / 'bd-src', 'rev-parse', 'HEAD').strip(), commit)
+        self.assertEqual(git(destination / 'gc' / pin['path'], 'rev-parse', 'HEAD').strip(), commit)
+        self.assertFalse((destination / 'lint-bin' / 'linked-tool').is_symlink())
+        self.assertEqual((destination / 'lint-bin' / 'linked-tool').read_text(), 'tools')
+        self.assertEqual(os.readlink(destination / 'gc' / 'external-bazel'), '/home/nonexistent/bazel-output')
+        policy.verify_checkout(destination / 'gc' / pin['path'], pin)
+        account_home = self.root / 'account'
+        account_home.mkdir()
+        with patch.object(self.stage, 'require_test_account', return_value=account_home), \
+                patch.object(self.stage.subprocess, 'call', return_value=0) as launch:
+            self.assertEqual(self.stage.run_stage(destination, 'plan'), 0)
+        command = launch.call_args.args[0]
+        child_env = launch.call_args.kwargs['env']
+        copied = Path(child_env['VFUG_GC_REPO']).parent
+        self.assertNotEqual(copied, destination)
+        self.assertTrue(copied.is_relative_to(account_home))
+        self.assertTrue(Path(command[2]).is_relative_to(copied))
+        self.assertTrue(all('/home/loucmane' not in value for value in child_env.values()))
+        self.stage.verify_manifest(destination)
+        policy.verify_checkout(copied / 'gc' / pin['path'], pin)
+        self.assertEqual(os.readlink(copied / 'gc' / 'external-bazel'), '/home/nonexistent/bazel-output')
+
+
+if __name__ == '__main__':
+    unittest.main()
+

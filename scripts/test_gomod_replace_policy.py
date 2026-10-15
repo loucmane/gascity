@@ -47,7 +47,7 @@ class PolicyTests(unittest.TestCase):
 
 class CheckoutTests(unittest.TestCase):
     def setUp(self):
-        root = Path("/work/ga-vfug")
+        root = Path(os.environ.get("TMPDIR", "/work/ga-vfug"))
         root.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(prefix="pin.", dir=root)
         self.addCleanup(self.temp.cleanup)

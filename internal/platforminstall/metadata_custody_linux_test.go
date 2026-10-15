@@ -1,9 +1,37 @@
 package platforminstall
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"testing"
 )
+
+// The build gate permits this exact fork, but runtime metadata custody does not.
+// Keep the owning policy strict until the replacement itself is removed.
+func TestMetadataCustodyRefusesPinnedBeadsFork(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "scripts", "beads-fork-pin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pin struct{ Module, Path string }
+	if err := json.Unmarshal(data, &pin); err != nil {
+		t.Fatal(err)
+	}
+	if pin.Module != "github.com/steveyegge/beads" || !strings.HasPrefix(pin.Path, "../beads-vfug-") {
+		t.Fatalf("invalid pin: %+v", pin)
+	}
+	info := metadataCustodyBuildFixture()
+	info.Deps = append(info.Deps, &debug.Module{
+		Path: pin.Module, Version: "v1.3.1",
+		Replace: &debug.Module{Path: pin.Path, Version: "(devel)"},
+	})
+	if err := validateMetadataCustodyBuild(info); err == nil || !strings.Contains(err.Error(), "dependency replacements refused") {
+		t.Fatalf("fork build must refuse metadata custody: %v", err)
+	}
+}
 
 func metadataCustodyBuildFixture() *debug.BuildInfo {
 	return &debug.BuildInfo{

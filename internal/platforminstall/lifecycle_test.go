@@ -128,6 +128,11 @@ func TestApplyIdenticalReplayVerifiesWithoutRestart(t *testing.T) {
 func TestAdoptAlreadyActivatedPlatformPublishesMetadataWithoutRestart(t *testing.T) {
 	dir := t.TempDir()
 	manifest := activationManifest(t, dir)
+	// Full adoption without a metadata section uses the ordinary lifecycle,
+	// even on a fork build that cannot satisfy metadata custody.
+	if manifest.Metadata != nil {
+		t.Fatal("ordinary adoption fixture must have no metadata section")
+	}
 	installCandidateFilesystem(t, manifest)
 	lifecycle := exactFakeLifecycle(manifest)
 

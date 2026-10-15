@@ -41,59 +41,86 @@ full commit detached. Preserve Git metadata for the HEAD and clean-index checks.
 The verifier must then pass against the manifest's content hash; do not replace
 it with a branch-head checkout or update the digest during CI.
 
-On the integration host, run:
+## Dedicated host qualification
+
+The operator provisions the unprivileged Linux account `vfugtest` with passwd
+home `/work/vfugtest` and the Docker group, and allows `sudo -u vfugtest`.
+The operator home remains mode 0750. No root runner or user/mount namespace is
+used. The former `vfug-host-root.sh` and its tests are removed.
+
+As loucmane, stage the committed inputs into a **new** directory under /work.
+All sources are explicit; nothing in the test environment falls back to the
+operator home. Substitute the reviewed checkout/tool paths on this host:
 
 ```bash
-python3 -B scripts/vfug-host.py all
+VFUG_GC_SOURCE="$PWD" \
+VFUG_BD_SOURCE="$PWD/../bd-src" \
+VFUG_GO_SOURCE="$HOME/.local/share/go/1.26.7" \
+VFUG_MODCACHE_SOURCE="$HOME/go/pkg/mod" \
+VFUG_TOOLS_SOURCE="$PWD/../r9/tools" \
+VFUG_LINT_SOURCE="$PWD/../local-r5/bin" \
+bash scripts/vfug-stage.sh /work/ga-vfug/stage-r11
+sudo -u vfugtest /usr/bin/env -i PATH=/usr/bin:/bin \
+  bash /work/ga-vfug/stage-r11/gc/scripts/vfug-test-run.sh \
+  /work/ga-vfug/stage-r11 all
 ```
 
-The runner builds bd and gc twice with Go 1.26.7, compares both binary hashes,
-and runs the selected bd, gc, release, proxied acceptance, and CAS/safety
-suites sequentially. Each check has its own log directory under
-`~/scratch/ga-vfug/host-r9`; a heartbeat identifies the active log every
-30 seconds. The final table and `summary.json` retain failures and skip counts.
-A failed build comparison blocks checks that require the pair. Any failure or
-blocked check makes the runner exit nonzero.
-The runner selects the Gas City checkout containing its own script, so invoke
-it from the reviewed worktree.
+Staging refuses dirty gc/bd sources and a mismatched fork pin. It locally clones
+the gc and bd commits and places the detached beads checkout at the exact
+sibling path required by go.mod. Clones have no origin. It copies Go, the module
+cache, Dolt tools, lint and codegen tools; installed tool symlinks are
+dereferenced into standalone files. gc's tracked symlinks are preserved and
+hashed as link text, without reading or chmodding their targets.
 
-All test HOME, GC_HOME, temporary files, and fixtures live below
-`/work/ga-vfug`. Logs, source, and binary artifacts stay under `~/scratch/ga-vfug`.
-The host needs writable `/work/ga-vfug`, sudo for the mount/PID namespace entry,
-Docker for the required Dolt container suites, tmux, and the cached
-Go dependencies. Put a standalone Dolt executable in
-`~/scratch/ga-vfug/r9/tools/dolt`; the runner checks it before the suites.
-It does not include the live city's executable directory in PATH.
+The world-readable stage records `manifest.json` with SHA-256 for each input
+tree, including Git metadata, directory/file inventory, executable bits and
+file bytes. Staging prints the manifest's SHA-256 for the coordinator's record.
+This is an integrity manifest, not an authentication mechanism: the coordinator
+controls the reviewed stage. Never reuse or change a stage during a run.
 
-Tests (`pinRealHome`, `pinRealHomeEnv`) and the supervisor's ownership guard
-resolve the account home from passwd, not from `HOME`, so every check must see a
-passwd home below `/work/ga-vfug`. The operator starts the full run with
-`sudo sh -c 'install -D -m 0700 -o root -g root <checkout>/scripts/vfug-host-root.sh /run/vfug-host/entry.sh && exec bash /run/vfug-host/entry.sh MODE SHA256'`,
-naming the reviewed hash of the script, so root executes only a root-owned copy
-with that hash. Root never changes operator-writable paths: the operator UID creates
-`/work/ga-vfug/hr/h`, and root only checks that it is a real directory. Root then
-builds a private mount and PID namespace (no user namespace, so file ownership stays
-real), binds a private passwd whose operator home is `/work/ga-vfug/hr/h`, makes the
-operator's home read-only except `~/scratch/ga-vfug` and `~/go/pkg/mod`, and masks
-`~/.beads`, `~/gascity`, `/run/user/<uid>` and `/tmp/tmux-<uid>` with empty
-read-only directories. It proves that layout from `/proc/self/mountinfo` and with
-write probes, then drops to the operator UID with no capabilities and
-`no_new_privs` and runs `vfug-host.py`. The mounts end with the namespace. `GOBIN`
-is a fixture directory, so `go install` never replaces the operator's tools.
-Residual by design: the docker group stays (the Dolt container suites need it), there
-is no network namespace (so 127.0.0.1 ports stay reachable), and the Windows drives
-and WSL interop stay available.
+The test entry verifies the manifest, copies inputs into
+`/work/vfugtest/ga-vfug/run.*/inputs`, verifies the copy, and makes its own
+repositories and module cache writable. It executes only the copied runner.
+Logs and built binaries live in that account's run tree; log directories and
+files are readable by loucmane. Ordinary fixture HOME, TMPDIR, GC_HOME, GOPATH,
+GOBIN, tmux paths and a writable global Git config are under that run's
+`fixtures` directory. `proxied-acceptance` alone sets HOME to the account's
+passwd home so the supervisor ownership check agrees. Existing tests that
+restore passwd HOME still land in the dedicated account's /work home.
 
-`vfug-env.sh` refuses any command whose passwd home is not below `/work/ga-vfug`,
-unless `--private-home` builds its own user namespace (standalone acceptance runs
-only; inside the sudo entry it is unnecessary and skipped). The global git config
-is a writable file in the fixture, because gc sets `beads.role` when it starts a
-city. `TMUX_TMPDIR` is also beneath the fixture. A direct `vfug-env.sh --inside`
-outside its private user namespace refuses before attempting a mount, as do
-`vfug-host-root.sh --stage2` outside the verified root copy and `--stage3`
-anywhere but PID 1 of the new namespace, and
-the user-namespace path drops inherited, ambient, and bounding-set capabilities
-before executing tests.
+`vfug-env.sh` refuses a user other than vfugtest, a passwd home outside
+/work, and a fixture root outside that account home. The old `--private-home`
+and `--inside` entry paths no longer exist. The child receives an explicit
+environment, offline Go module settings, staged tools and fixture-only GOBIN.
+No operator session, endpoint, credential or runtime environment is inherited.
+Docker, tmux, a C compiler and other standard host utilities must be installed;
+the runner does not provision accounts, tools or services.
+
+The runner builds bd/gc twice with Go 1.26.7 and compares binary hashes before
+running dependent suites. Each check has its own log below the printed
+`logs/run.*` directory, with a 30-second heartbeat. `summary.json` records
+failures and skip counts; a failed pair blocks dependent checks and yields a
+nonzero exit. Independent policy checks still run. The final fork and gc
+integrity checks detect changes to the reviewed sources.
+
+## Metadata custody on the fork build
+
+Metadata-only adoption is unavailable on this fork build. Manifests with a
+`metadata` section are also unavailable: runtime metadata custody deliberately
+refuses **every** dependency replacement, including the approved beads pin.
+The build allowlist does not relax `validateMetadataCustodyBuild`.
+`TestMetadataCustodyRefusesPinnedBeadsFork` pins this decision using the current
+manifest's exact replacement. Remove this limitation when the fork pin itself
+is removed and the normal custody qualification passes.
+
+Full `gc platform adopt --apply` without `--metadata-only`, with
+`manifest.Metadata == nil`, uses the ordinary lifecycle. See
+`cmd/gc/cmd_platform.go`'s call to `platforminstall.Adopt`,
+`internal/platforminstall/adopt.go:adoptPrepared` and
+`cmd/gc/platform_lifecycle.go:Verify`; this route does not call metadata
+custody. `TestAdoptAlreadyActivatedPlatformPublishesMetadataWithoutRestart`
+asserts a nil metadata section and completes through a fake ordinary lifecycle.
+This qualification does not authorize changes to a live installation.
 
 ## Proxied initialization refusal
 
