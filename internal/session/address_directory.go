@@ -132,13 +132,16 @@ func (s *Store) mailboxMatches(selector string, closed bool) ([]beads.Bead, erro
 // filter loosely, and a loose answer here delivers someone else's mail.
 func mailboxMatchesByMetadata(store beads.Store, key, selector, status string) ([]beads.Bead, error) {
 	query := beads.ListQuery{
-		Metadata: map[string]string{key: selector},
-		TierMode: beads.TierBoth,
+		Metadata:         map[string]string{key: selector},
+		TierMode:         beads.TierBoth,
+		SkipDependencies: true,
 	}
 	if status != "" {
 		query.Status = status
 	}
-	items, err := store.List(query)
+	// The type+label union includes label-lost sessions and repairable empty
+	// types without scanning unrelated beads for each address key.
+	items, err := ListAllSessionBeads(store, query)
 	if err != nil {
 		return nil, err
 	}

@@ -333,10 +333,11 @@ func (s *Store) listAllBeads(opts ListAllOptions) ([]beads.Bead, error) {
 		return nil, nil
 	}
 	base := beads.ListQuery{
-		IncludeClosed: opts.IncludeClosed,
-		Sort:          opts.Sort,
-		Limit:         opts.Limit,
-		Live:          opts.Live,
+		IncludeClosed:    opts.IncludeClosed,
+		Sort:             opts.Sort,
+		Limit:            opts.Limit,
+		Live:             opts.Live,
+		SkipDependencies: true, // Info, response, circuit and fingerprint projections use no dependencies or ParentID.
 	}
 	if !opts.IncludeClosed && !opts.Live {
 		// Session bead status is open/closed; richer lifecycle states live in
@@ -388,8 +389,8 @@ func (s *Store) cachedListUnion(opts ListAllOptions) ([]beads.Bead, bool) {
 	if !ok {
 		return nil, false
 	}
-	typeQuery := beads.ListQuery{Type: BeadType, Sort: opts.Sort, IncludeClosed: opts.IncludeClosed}
-	labelQuery := beads.ListQuery{Label: LabelSession, Sort: opts.Sort, IncludeClosed: opts.IncludeClosed}
+	typeQuery := beads.ListQuery{Type: BeadType, Sort: opts.Sort, IncludeClosed: opts.IncludeClosed, SkipDependencies: true}
+	labelQuery := beads.ListQuery{Label: LabelSession, Sort: opts.Sort, IncludeClosed: opts.IncludeClosed, SkipDependencies: true}
 	typeRows, typeOK := cached.CachedList(typeQuery)
 	labelRows, labelOK := cached.CachedList(labelQuery)
 	if !typeOK || !labelOK {
