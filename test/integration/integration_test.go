@@ -39,6 +39,7 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/fsys"
+	"github.com/gastownhall/gascity/internal/testutil"
 	"github.com/gastownhall/gascity/test/dolttest"
 	"github.com/gastownhall/gascity/test/tmuxtest"
 )
@@ -401,23 +402,15 @@ func binaryOverride(envName string) (string, bool, error) {
 // older host bd open the database after gc has migrated it, producing a schema
 // skew that obscures the workflow under test.
 func buildPinnedIntegrationBDBinary(tmpDir string) (string, error) {
-	version, err := pinnedIntegrationBeadsModuleVersion()
-	if err != nil {
-		return "", err
-	}
-	binDir := filepath.Join(tmpDir, "pinned-bd")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return "", fmt.Errorf("create pinned bd directory: %w", err)
-	}
-	// CGO_ENABLED=1 + gms_pure_go is the embedded-capable bd build (per beads
-	// INSTALLING.md): the pinned bd's `bd init` defaults to embedded Dolt,
-	// which a CGO_ENABLED=0 binary refuses at runtime.
-	cmd := exec.Command("go", "install", "-tags", "gms_pure_go", "github.com/steveyegge/beads/cmd/bd@"+version)
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=1", "GOBIN="+binDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("go install github.com/steveyegge/beads/cmd/bd@%s: %w\n%s", version, err, out)
-	}
-	return filepath.Join(binDir, "bd"), nil
+	// Integration exercises the fork shipped with gc when go.mod replaces
+	// beads. Keep CGO enabled for the embedded-capable integration binary.
+	return testutil.BuildPinnedBD(findModuleRoot(), filepath.Join(tmpDir, "pinned-bd"), "1", newPinnedBDCommandForTests)
+}
+
+// Keep the process constructor in this suite so its source resource census
+// continues to account for the pinned bd build and verification boundary.
+func newPinnedBDCommandForTests(name string, args ...string) *exec.Cmd {
+	return exec.Command(name, args...)
 }
 
 // pinnedBdStoreCommandRunner keeps direct BdStore integration tests on the
@@ -460,10 +453,9 @@ func TestPinnedIntegrationBeadsModuleVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pinnedIntegrationBeadsModuleVersion() error = %v", err)
 	}
-	// A deliberate second anchor on go.mod's beads pin: this suite installs
-	// bd from whatever go.mod names (installPinnedBd above), so a bump must be
-	// a reviewed edit here too rather than silently changing which bd the
-	// integration tests run against.
+	// Keep the required release as a deliberate second anchor. The build
+	// helper separately honors the approved local replacement, if present;
+	// without a replacement this release is the integration bd source.
 	//
 	// This test only runs in the `rest-full` integration shard, which is gated
 	// on `push` — i.e. after merge, which is how v1.3.0-rc.2 sat stale here

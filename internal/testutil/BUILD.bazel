@@ -6,11 +6,15 @@ go_library(
         "failure_artifacts.go",
         "git.go",
         "path.go",
+        "pinned_bd.go",
         "timeout.go",
     ],
     importpath = "github.com/gastownhall/gascity/internal/testutil",
     visibility = ["//:__subpackages__"],
-    deps = ["//internal/pathutil"],
+    deps = [
+        "//internal/pathutil",
+        "@org_golang_x_mod//modfile",
+    ],
 )
 
 # --- bazel_repo_srcs (managed by tools/bazel/repo_tree.py) ---
