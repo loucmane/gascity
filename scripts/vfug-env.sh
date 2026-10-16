@@ -16,12 +16,16 @@ case "$(realpath -m "$vfug_passwd_home")" in
 esac
 vfug_passwd_home=$(realpath -e "$vfug_passwd_home")
 vfug_supervisor_home=false
-if [[ ${1:-} == --supervisor-home ]]; then
-  vfug_supervisor_home=true
+vfug_empty_gitconfig=false
+while [[ ${1:-} == --supervisor-home || ${1:-} == --empty-gitconfig ]]; do
+  case $1 in
+    --supervisor-home) vfug_supervisor_home=true ;;
+    --empty-gitconfig) vfug_empty_gitconfig=true ;;
+  esac
   shift
-fi
+done
 if [[ ${1:-} != -- || $# -lt 2 ]]; then
-  echo 'usage: vfug-env.sh [--supervisor-home] -- COMMAND [ARG...]' >&2
+  echo 'usage: vfug-env.sh [--supervisor-home] [--empty-gitconfig] -- COMMAND [ARG...]' >&2
   exit 2
 fi
 shift
@@ -56,8 +60,14 @@ mkdir -p "$vfug_fixture"/{h,t,g,x,c,d,run,gobin,gopath}
 chmod 700 "$vfug_fixture/h" "$vfug_fixture/run"
 # Same seed as scripts/test-gitconfig-path and the acceptance helper: gc doctor
 # requires beads.role, and acceptance passes this file through to its children.
-printf '[user]\n\tname = gc-test\n\temail = gc-test@test.local\n[beads]\n\trole = maintainer\n[safe]\n\tdirectory = *\n' \
-  > "$vfug_fixture/gitconfig"
+# bd's own suites assert an unconfigured role, so --empty-gitconfig keeps the file
+# writable but empty for them (2026-10-16: TestInitPromptRoleConfig).
+if "$vfug_empty_gitconfig"; then
+  : > "$vfug_fixture/gitconfig"
+else
+  printf '[user]\n\tname = gc-test\n\temail = gc-test@test.local\n[beads]\n\trole = maintainer\n[safe]\n\tdirectory = *\n' \
+    > "$vfug_fixture/gitconfig"
+fi
 mkdir -p "$VFUG_ROOT/go-cache"
 ln -s "$VFUG_ROOT/go-cache" "$vfug_fixture/c/go-build"
 vfug_command_home="$vfug_fixture/h"

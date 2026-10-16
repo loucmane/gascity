@@ -182,6 +182,12 @@ class EnvironmentTests(AncestorDiscoveryCases, unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn('passwd home must be under /work/', result.stderr)
 
+    def test_empty_gitconfig_option_keeps_a_writable_empty_file(self):
+        code = ("import os; from pathlib import Path; p = Path(os.environ['GIT_CONFIG_GLOBAL']); "
+                "assert p.read_text() == '', 'must be empty'; p.write_text('[x]\\n')")
+        result = self.command('--empty-gitconfig', '--', '/usr/bin/python3', '-c', code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_removed_namespace_entry_refuses(self):
         for option in ('--private-home', '--inside'):
             result = self.command(option, '--', '/bin/true')

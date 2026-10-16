@@ -29,6 +29,12 @@ class RunnerTests(unittest.TestCase):
         self.assertFalse(boundary.pair)
         self.assertIn('ReviewB3', boundary.args[boundary.args.index('-run') + 1])
 
+    def test_bd_steps_use_an_empty_gitconfig_and_gc_steps_the_seeded_one(self):
+        # bd asserts an unconfigured beads.role; gc doctor/acceptance need it seeded.
+        for step in host.suites('all', Path('/fixture/bin')):
+            command = host.step_command(step, Path('/runner'))
+            self.assertEqual('--empty-gitconfig' in command, step.name.startswith('bd-'), step.name)
+
     def test_passwd_home_is_reserved_for_supervisor_acceptance(self):
         steps = host.suites('all', Path('/fixture/bin'))
         namespaced = [step.name for step in steps if getattr(step, 'supervisor_home', False)]

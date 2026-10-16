@@ -41,10 +41,13 @@ class Step:
     args: list
     pair: bool = True
     supervisor_home: bool = False
+    empty_gitconfig: bool = False
 
 
 def step_command(step, runner):
     options = ['--supervisor-home'] if step.supervisor_home else []
+    if step.empty_gitconfig:
+        options.append('--empty-gitconfig')
     return ['bash', str(runner / 'vfug-env.sh'), *options, '--', *step.args]
 
 
@@ -60,11 +63,13 @@ def suites(group, pair):
     if group in ('all', 'bd'):
         for mode in ('count-init', 'guarded', 'lifecycle', 'row-lock', 'races', 'readonly', 'readonly-cli', 'vet'):
             steps.append(Step('bd-' + mode, source,
-                ['env', 'BEADS_TEST_BD_BINARY=' + str(bd), 'bash', 'scripts/test-vfug.sh', mode]))
+                ['env', 'BEADS_TEST_BD_BINARY=' + str(bd), 'bash', 'scripts/test-vfug.sh', mode],
+                empty_gitconfig=True))
         steps.append(Step('bd-readonly-boundaries', source, [
             'env', 'BEADS_SCHEMA_INIT_HELPER=1', 'CGO_ENABLED=1', 'go', 'test',
             '-tags=gms_pure_go', './internal/storage/dolt',
-            '-run', 'Test(ReadOnly|ReviewB2ReadOnly|ReviewB3)', '-count=1', '-timeout=2m', '-v'], False))
+            '-run', 'Test(ReadOnly|ReviewB2ReadOnly|ReviewB3)', '-count=1', '-timeout=2m', '-v'], False,
+            empty_gitconfig=True))
     if group in ('all', 'gc'):
         for label, target in [('gc-fast', 'test-fast-parallel'),
                               ('gc-process', 'test-cmd-gc-process-parallel'),
