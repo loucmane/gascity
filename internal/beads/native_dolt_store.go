@@ -3212,7 +3212,7 @@ func nativeIssueFilterFromListQuery(query ListQuery) beadslib.IssueFilter {
 		SortDesc:            sortDesc,
 		MetadataFields:      query.Metadata,
 		CreatedBefore:       zeroTimePtr(query.CreatedBefore),
-		IncludeDependencies: true,
+		IncludeDependencies: !query.SkipDependencies,
 	}
 	switch query.TierMode {
 	case TierWisps:

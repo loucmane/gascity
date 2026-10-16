@@ -99,6 +99,37 @@ func TestNativeIssueFilterStillStripsLimitForWispTier(t *testing.T) {
 	}
 }
 
+func TestNativeIssueFilterSkipDependencies(t *testing.T) {
+	for _, skip := range []bool{false, true} {
+		filter := nativeIssueFilterFromListQuery(ListQuery{Label: "order-tracking", SkipDependencies: skip})
+		if filter.IncludeDependencies == skip {
+			t.Errorf("SkipDependencies=%v: IncludeDependencies=%v", skip, filter.IncludeDependencies)
+		}
+	}
+}
+
+func TestNativeDoltStoreRetentionReadBoundsReachBacking(t *testing.T) {
+	cutoff := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	for _, query := range []ListQuery{
+		{Status: "closed", Label: "order-tracking", CreatedBefore: cutoff, Sort: SortCreatedDesc, TierMode: TierBoth, SkipDependencies: true},
+		{Status: "closed", Label: "order-run:a", Limit: 10, AllowBackingCreatedLimit: true, Sort: SortCreatedDesc, TierMode: TierBoth, SkipDependencies: true},
+		{Status: "closed", Label: "order-tracking", CreatedBefore: cutoff, Limit: 256, AllowBackingCreatedLimit: true, Sort: SortCreatedDesc, TierMode: TierBoth, SkipDependencies: true},
+	} {
+		storage := &nativeDoltStorageSpy{searchIssues: func(_ context.Context, _ string, f beadslib.IssueFilter) ([]*beadslib.Issue, error) {
+			if f.IncludeDependencies || f.Limit != query.Limit || f.Status == nil || *f.Status != beadslib.StatusClosed || f.Ephemeral != nil {
+				t.Errorf("retention filter lost hydration/limit/status/tier contract: %+v", f)
+			}
+			if !query.CreatedBefore.IsZero() && (f.CreatedBefore == nil || !f.CreatedBefore.Equal(query.CreatedBefore)) {
+				t.Errorf("CreatedBefore = %v, want %v", f.CreatedBefore, query.CreatedBefore)
+			}
+			return nil, nil
+		}}
+		if _, err := newNativeDoltStoreForTest(storage).List(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // Backing search results for a pushed-down sort arrive presorted; the
 // client-side ApplyListQuery re-sort must keep them stable and the limit cut
 // must match the server page. Models the dispatcher's RecentRunsAll aggregate

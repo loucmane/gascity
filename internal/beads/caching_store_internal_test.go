@@ -14,6 +14,47 @@ import (
 	"time"
 )
 
+type dependencySkippingStore struct{ Store }
+
+func (s dependencySkippingStore) List(q ListQuery) ([]Bead, error) {
+	rows, err := s.Store.List(q)
+	if q.SkipDependencies {
+		for i := range rows {
+			rows[i].Dependencies = nil
+			rows[i].ParentID = ""
+		}
+	}
+	return rows, err
+}
+
+func TestCachingStoreSkipDependenciesDoesNotPoisonCache(t *testing.T) {
+	dep := Dep{IssueID: "child", DependsOnID: "parent", Type: "parent-child"}
+	backing := dependencySkippingStore{NewMemStoreFrom(1, []Bead{
+		{ID: "child", Title: "child", Status: "open", ParentID: "parent", Dependencies: []Dep{dep}},
+		{ID: "parent", Title: "parent", Status: "open"},
+	}, nil)}
+	cache := NewCachingStoreForTest(backing, nil)
+	if err := cache.Prime(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.List(ListQuery{Status: "open", Live: true, SkipDependencies: true}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := cache.List(ListQuery{Status: "open"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.ID == "child" {
+			if row.ParentID != "parent" || !reflect.DeepEqual(row.Dependencies, []Dep{dep}) {
+				t.Fatalf("dependency-less read poisoned cached row: %+v", row)
+			}
+			return
+		}
+	}
+	t.Fatal("cached child missing")
+}
+
 func TestCachingStoreReadyContextRejectsIncompleteDependencyProjection(t *testing.T) {
 	cache := NewCachingStoreForTest(NewMemStore(), nil)
 	cache.mu.Lock()

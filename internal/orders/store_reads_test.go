@@ -425,11 +425,46 @@ func TestClosedRunsForRetentionBestEffortName(t *testing.T) {
 	if err := mem.Close(foreign.ID); err != nil {
 		t.Fatal(err)
 	}
-	runs, err := NewStore(beads.OrdersStore{Store: mem}).ClosedRunsForRetention()
+	runs, err := NewStore(beads.OrdersStore{Store: mem}).ClosedRunsForRetention(time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("ClosedRunsForRetention(): %v", err)
 	}
 	if len(runs) != 2 {
 		t.Fatalf("ClosedRunsForRetention() returned %d runs, want 2 (including the unresolvable-name bead)", len(runs))
+	}
+}
+
+func TestClosedRetentionReadQueries(t *testing.T) {
+	cutoff := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	spy := &listSpyStore{Store: beads.NewMemStoreFrom(1, []beads.Bead{
+		{ID: "old", Title: "order:a", Status: "closed", CreatedAt: cutoff.Add(-time.Hour), Labels: []string{"order-tracking", "order-run:a"}},
+		{ID: "cutoff", Title: "order:a", Status: "closed", CreatedAt: cutoff, Labels: []string{"order-tracking", "order-run:a"}, Ephemeral: true},
+		{ID: "root", Title: "root", Status: "closed", CreatedAt: cutoff, Labels: []string{"order-run:a"}},
+	}, nil)}
+	store := NewStore(beads.OrdersStore{Store: spy})
+	runs, err := store.ClosedRunsForRetention(cutoff)
+	if err != nil || len(runs) != 1 || runs[0].ID != "old" {
+		t.Fatalf("candidates = %+v, %v; want old only", runs, err)
+	}
+	runs, err = store.RecentClosedRunsForRetention("a", time.Time{}, 10)
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("recent = %+v, %v; want both tracking runs without graph root", runs, err)
+	}
+	for _, q := range spy.queries {
+		if !q.Live || !q.SkipDependencies || q.SkipLabels || q.Status != "closed" || q.TierMode != beads.TierBoth {
+			t.Errorf("retention read lost required query fields: %+v", q)
+		}
+	}
+	if q := spy.queries[0]; q.CreatedBefore != cutoff || q.Limit != 0 {
+		t.Errorf("candidate query = %+v", q)
+	}
+	if q := spy.queries[1]; q.Label != "order-run:a" || q.Limit != 10 || !q.AllowBackingCreatedLimit {
+		t.Errorf("witness query = %+v", q)
+	}
+	if _, err := store.ClosedRunsForRetention(time.Time{}); err == nil {
+		t.Error("zero cutoff allowed an unbounded candidate read")
+	}
+	if _, err := store.RecentClosedRunsForRetention("a", time.Time{}, 0); err == nil {
+		t.Error("zero limit allowed an unbounded witness read")
 	}
 }

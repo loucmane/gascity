@@ -17,6 +17,11 @@ func (c *CachingStore) List(query ListQuery) ([]Bead, error) {
 	if !query.HasFilter() && !query.AllowScan {
 		return nil, fmt.Errorf("listing beads: %w", ErrQueryRequiresScan)
 	}
+	if query.SkipDependencies {
+		// These rows may omit both embedded dependencies and their derived
+		// ParentID. Keep them out of the shared complete-bead projection.
+		return c.backing.List(liveListQuery(query))
+	}
 	if query.Live || query.ParentID != "" {
 		c.mu.RLock()
 		startSeq := c.mutationSeq

@@ -320,7 +320,7 @@ type OrdersStore interface {
 	OpenRuns() ([]orders.OrderRun, error)
 	StaleOpenRuns(time.Time) ([]orders.OrderRun, error)
 	OrphanedOpenRuns() ([]orders.OrderRun, error)
-	ClosedRunsForRetention() ([]orders.OrderRun, error)
+	ClosedRunsForRetention(time.Time) ([]orders.OrderRun, error)
 	CloseRuns(context.Context, []string, string) (int, error)
 	CloseRunsSwept(context.Context, []string, string, string) (int, error)
 	MarkFailed(string, string, orders.RunOutcome, *orders.EventCursor) error

@@ -176,27 +176,57 @@ func (s *Store) OrphanedOpenRuns() ([]OrderRun, error) {
 	return out, nil
 }
 
-// ClosedRunsForRetention lists the CLOSED tracking beads across every order
-// (newest-first, both tiers), decoded into OrderRun on the LIVE tier — the read
-// half of the closed-tracking retention prune. The caller buckets by order name
-// (using the legacy bucket for an unresolvable name), keeps the recent-history
-// floor, and deletes the aged remainder. Names are resolved best-effort so an
-// unresolvable-name bead can be routed to the legacy retention bucket.
-func (s *Store) ClosedRunsForRetention() ([]OrderRun, error) {
+// ClosedRunsForRetention lists closed tracking beads created before cutoff,
+// across both tiers on the LIVE read lane, without dependency hydration. Since
+// CreatedAt <= the closed reference time (UpdatedAt, falling back to CreatedAt),
+// this includes every expired closed-reference candidate.
+// Callers must also account for newer runs when enforcing a per-order floor.
+// Names are best-effort, retaining unresolvable runs for the legacy bucket.
+func (s *Store) ClosedRunsForRetention(cutoff time.Time) ([]OrderRun, error) {
+	if cutoff.IsZero() {
+		return nil, fmt.Errorf("closed retention runs: cutoff is required")
+	}
+	return s.closedRetentionRuns(beads.ListQuery{Label: labelOrderTracking, CreatedBefore: cutoff})
+}
+
+// RecentClosedRunsForRetention returns a bounded created-desc sample of closed
+// tracking runs, optionally selected by order-run label and created before a
+// page boundary. Scoped names are decoded rather than assumed from that label.
+// Timestamp-boundary ties may be incomplete: callers must only use complete
+// timestamps for pagination, or use rows as witnesses that a floor is satisfied.
+func (s *Store) RecentClosedRunsForRetention(scoped string, before time.Time, limit int) ([]OrderRun, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("recent closed retention runs: positive limit is required")
+	}
+	label := labelOrderTracking
+	if scoped != "" {
+		label = RunLabel(scoped)
+	}
+	return s.closedRetentionRuns(beads.ListQuery{
+		Label:                    label,
+		CreatedBefore:            before,
+		Limit:                    limit,
+		AllowBackingCreatedLimit: true,
+	})
+}
+
+func (s *Store) closedRetentionRuns(query beads.ListQuery) ([]OrderRun, error) {
 	if s.store.Store == nil {
 		return nil, nil
 	}
-	list, err := beads.HandlesFor(s.store.Store).Live.List(beads.ListQuery{
-		Status:   "closed",
-		Label:    labelOrderTracking,
-		Sort:     beads.SortCreatedDesc,
-		TierMode: beads.TierBoth,
-	})
+	query.Status = "closed"
+	query.Sort = beads.SortCreatedDesc
+	query.TierMode = beads.TierBoth
+	query.SkipDependencies = true
+	list, err := beads.HandlesFor(s.store.Store).Live.List(query)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]OrderRun, 0, len(list))
 	for _, b := range list {
+		if !beadLabelsContain(b.Labels, labelOrderTracking) {
+			continue
+		}
 		name, _ := NameFromTrackingBead(b)
 		out = append(out, decodeRun(name, b))
 	}

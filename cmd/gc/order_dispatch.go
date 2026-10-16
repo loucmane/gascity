@@ -3293,33 +3293,16 @@ func sweepClosedOrderTrackingRetention(store beads.Store, now time.Time, policy 
 	if policy.retainLast < minClosedOrderTrackingRetained {
 		policy.retainLast = minClosedOrderTrackingRetained
 	}
-	runs, err := orders.NewStore(beads.OrdersStore{Store: store}).ClosedRunsForRetention()
+	byOrder, err := closedOrderTrackingRetentionCandidates(store, now.Add(-policy.deleteAfterClose), policy.retainLast, onlyOrders)
 	if err != nil {
 		return 0, fmt.Errorf("listing closed order-tracking beads: %w", err)
 	}
 
-	byOrder := bucketClosedRetentionRuns(runs, onlyOrders)
-
-	cutoff := now.Add(-policy.deleteAfterClose)
 	deleted := 0
 	var retained []string
 	var deleteErr error
 	for _, runs := range byOrder {
-		sort.Slice(runs, func(i, j int) bool {
-			left := orderTrackingClosedReferenceTime(runs[i])
-			right := orderTrackingClosedReferenceTime(runs[j])
-			if left.Equal(right) {
-				return runs[i].ID > runs[j].ID
-			}
-			return left.After(right)
-		})
-		if len(runs) <= policy.retainLast {
-			continue
-		}
-		for _, run := range runs[policy.retainLast:] {
-			if !orderTrackingClosedReferenceTime(run).Before(cutoff) {
-				continue
-			}
+		for _, run := range runs {
 			// deleteWorkflowBead is the graph-aware delete (dep unwind) the
 			// retention prune uses; it stays raw graph residual. A closed
 			// tracking root can still own OPEN steps — the delete refuses
@@ -3365,14 +3348,11 @@ func sweepClosedOrderTrackingRetentionBounded(store beads.Store, now time.Time, 
 	if policy.retainLast < minClosedOrderTrackingRetained {
 		policy.retainLast = minClosedOrderTrackingRetained
 	}
-	runs, err := orders.NewStore(beads.OrdersStore{Store: store}).ClosedRunsForRetention()
+	byOrder, err := closedOrderTrackingRetentionCandidates(store, now.Add(-policy.deleteAfterClose), policy.retainLast, onlyOrders)
 	if err != nil {
 		return 0, fmt.Errorf("listing closed order-tracking beads: %w", err)
 	}
 
-	byOrder := bucketClosedRetentionRuns(runs, onlyOrders)
-
-	cutoff := now.Add(-policy.deleteAfterClose)
 	deleted := 0
 	var retained []string
 	var deleteErr error
@@ -3380,23 +3360,9 @@ func sweepClosedOrderTrackingRetentionBounded(store beads.Store, now time.Time, 
 		if deleted >= limit {
 			break
 		}
-		sort.Slice(runs, func(i, j int) bool {
-			left := orderTrackingClosedReferenceTime(runs[i])
-			right := orderTrackingClosedReferenceTime(runs[j])
-			if left.Equal(right) {
-				return runs[i].ID > runs[j].ID
-			}
-			return left.After(right)
-		})
-		if len(runs) <= policy.retainLast {
-			continue
-		}
-		for _, run := range runs[policy.retainLast:] {
+		for _, run := range runs {
 			if deleted >= limit {
 				break
-			}
-			if !orderTrackingClosedReferenceTime(run).Before(cutoff) {
-				continue
 			}
 			if err := deleteWorkflowBead(store, run.ID); err != nil {
 				if errors.Is(err, errWorkflowDeleteLiveDescendants) {
@@ -3417,11 +3383,9 @@ func sweepClosedOrderTrackingRetentionBounded(store beads.Store, now time.Time, 
 // order-tracking beads across stores that would be deleted by
 // sweepClosedOrderTrackingRetentionAcrossStores. It performs no deletions.
 //
-// It reads via orders.Store.ClosedRunsForRetention and buckets via
-// bucketClosedRetentionRuns — the exact read and bucketing the sweep itself
-// uses — so this preview count cannot drift from what the sweep would delete.
-// The remaining logic (recent-history floor, then the deleteAfterClose cutoff on
-// the closed reference time) mirrors the sweep's, counting instead of deleting.
+// It uses the same candidate selection as both sweeps, including the per-order
+// floor and reference-time cutoff. A read error prevents the confirm gate from
+// authorizing deletion.
 func countClosedOrderTrackingRetentionEligible(stores []beads.Store, now time.Time, policy orderTrackingRetentionPolicy, onlyOrders map[string]struct{}) (int, error) {
 	if policy.deleteAfterClose <= 0 {
 		return 0, nil
@@ -3430,34 +3394,18 @@ func countClosedOrderTrackingRetentionEligible(stores []beads.Store, now time.Ti
 		policy.retainLast = minClosedOrderTrackingRetained
 	}
 	total := 0
-	cutoff := now.Add(-policy.deleteAfterClose)
 	var errs []error
 	for i, store := range stores {
 		if store == nil {
 			continue
 		}
-		runs, err := orders.NewStore(beads.OrdersStore{Store: store}).ClosedRunsForRetention()
+		byOrder, err := closedOrderTrackingRetentionCandidates(store, now.Add(-policy.deleteAfterClose), policy.retainLast, onlyOrders)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("listing closed order-tracking %s: %w", orderTrackingSweepStoreLabel(store, i), err))
 			continue
 		}
-		for _, group := range bucketClosedRetentionRuns(runs, onlyOrders) {
-			sort.Slice(group, func(a, b int) bool {
-				l := orderTrackingClosedReferenceTime(group[a])
-				r := orderTrackingClosedReferenceTime(group[b])
-				if l.Equal(r) {
-					return group[a].ID > group[b].ID
-				}
-				return l.After(r)
-			})
-			if len(group) <= policy.retainLast {
-				continue
-			}
-			for _, run := range group[policy.retainLast:] {
-				if orderTrackingClosedReferenceTime(run).Before(cutoff) {
-					total++
-				}
-			}
+		for _, group := range byOrder {
+			total += len(group)
 		}
 	}
 	return total, errors.Join(errs...)

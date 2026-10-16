@@ -131,6 +131,11 @@ type ListQuery struct {
 	// caller does not need labels for change detection. Stores that cannot
 	// omit labels may ignore it.
 	SkipLabels bool
+	// SkipDependencies tells backing stores that the caller does not need
+	// dependencies (including a ParentID derived from them). Stores that cannot
+	// omit dependencies may ignore it. Caches must not absorb these partial rows
+	// into a projection that serves callers requiring dependencies.
+	SkipDependencies bool
 	// Live bypasses CachingStore and reads from the backing store. Other Store
 	// implementations ignore it. Use it only for lifecycle gates that must
 	// observe external mutations immediately.
@@ -156,6 +161,10 @@ type ListQuery struct {
 	// has no effect on SortCreatedAsc (whose backing id ASC tie-break already
 	// matches the canonical order, so bounded asc reads are exact) or on stores that
 	// always resolve the limit Go-side.
+	// Retention may also use a sample as witnesses for a per-bucket floor: every
+	// counted row must independently prove it is newer than the expiry cutoff.
+	// To paginate such samples, defer the entire incomplete boundary timestamp;
+	// individual IDs at that timestamp are not a valid continuation boundary.
 	AllowBackingCreatedLimit bool
 	// TierMode selects the storage tier(s) to read from. Zero value
 	// (TierIssues) preserves the legacy single-tier behavior.
