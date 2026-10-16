@@ -14,6 +14,7 @@ import tempfile
 
 import gomod_replace_policy as policy
 from vfug_discovery import refuse_ancestor_discovery
+from vfug_layout import RUN_PARENT, refuse_home_workspace, validate_roots
 
 
 def git(repo, *args):
@@ -78,7 +79,7 @@ def tree_digest(root, allow_symlinks=False):
 def write_manifest(stage, inputs):
     manifest = {'version': 1, 'inputs': {}}
     for name, metadata in sorted(inputs.items()):
-        manifest['inputs'][name] = {**metadata, 'sha256': tree_digest(stage / name, name == 'gc')}
+        manifest['inputs'][name] = {**metadata, 'sha256': tree_digest(stage / name, name in ('gc', 'gc-base'))}
     (stage / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 
@@ -94,7 +95,7 @@ def verify_manifest(stage):
     if set(p.name for p in stage.iterdir()) != set(manifest['inputs']) | {'manifest.json'}:
         raise ValueError('staging inventory differs from manifest')
     for name, metadata in manifest['inputs'].items():
-        if tree_digest(stage / name, name == 'gc') != metadata.get('sha256'):
+        if tree_digest(stage / name, name in ('gc', 'gc-base')) != metadata.get('sha256'):
             raise ValueError('staging digest mismatch: ' + name)
     return manifest
 
@@ -141,7 +142,7 @@ def readable_tree(root, writable=False):
                    (0o200 if writable else 0))
 
 
-def stage_inputs(destination):
+def stage_inputs(destination, base_commit=None):
     require_operator()
     destination = work_path(destination)
     sources = {name: Path(os.environ[var]).resolve(strict=True) for name, var in {
@@ -149,6 +150,9 @@ def stage_inputs(destination):
         'modcache': 'VFUG_MODCACHE_SOURCE', 'tools': 'VFUG_TOOLS_SOURCE',
         'lint-bin': 'VFUG_LINT_SOURCE'}.items()}
     commits = {name: clean_commit(sources[name]) for name in ('gc', 'bd-src')}
+    if base_commit is not None:
+        sources['gc-base'] = Path(os.environ['VFUG_BASE_SOURCE']).resolve(strict=True)
+        commits['gc-base'] = git(sources['gc-base'], 'rev-parse', '--verify', '--end-of-options', base_commit + '^{commit}').strip()
     pin = check_pin(sources['gc'])
     if commits['bd-src'] != pin['commit']:
         raise ValueError('bd-src HEAD must equal the reviewed fork commit')
@@ -176,25 +180,28 @@ def stage_inputs(destination):
     print('Manifest SHA256: ' + hashlib.sha256((destination / 'manifest.json').read_bytes()).hexdigest(), flush=True)
 
 
-def run_stage(stage, mode):
+def run_stage(stage, mode, base_commit=None):
     home = require_test_account()
-    refuse_ancestor_discovery(home / 'ga-vfug')
-    refuse_ancestor_discovery(home)
+    refuse_home_workspace(home)
+    refuse_ancestor_discovery(RUN_PARENT)
     os.umask(0o022)  # Logs and copied inputs remain readable by the coordinator.
     stage = work_path(stage)
     manifest = verify_manifest(stage)
     required = {'gc', 'bd-src', 'go', 'modcache', 'tools', 'lint-bin'}
     pinned = {name for name in manifest['inputs'] if re.fullmatch('beads-vfug-[0-9a-f]{40}', name)}
+    if 'gc-base' in manifest['inputs']:
+        required.add('gc-base')
+    if mode == 'compare' and 'gc-base' not in required:
+        raise ValueError('compare requires a staged gc-base input')
     if len(pinned) != 1 or set(manifest['inputs']) != required | pinned:
         raise ValueError('qualification input inventory incomplete')
     # Hashes catch drift in the copy as well as the source. Never execute from
     # the operator-owned stage after verification.
-    base = home / 'ga-vfug'
-    base.mkdir(mode=0o755, exist_ok=True)
-    home.chmod(stat.S_IMODE(home.stat().st_mode) | 0o005)
-    base.chmod(0o755)
-    root = Path(tempfile.mkdtemp(prefix='run.', dir=base))
+    root = Path(tempfile.mkdtemp(prefix='r.', dir=RUN_PARENT))
     root.chmod(0o755)
+    fixture_root = root / 'f'
+    fixture_root.mkdir(mode=0o755)
+    validate_roots(root, fixture_root, home)
     inputs = root / 'inputs'
     print('Copying and verifying inputs: ' + str(root), flush=True)
     shutil.copytree(stage, inputs, symlinks=True)
@@ -204,12 +211,9 @@ def run_stage(stage, mode):
     # The copied clone is the runner's own checkout: activate its .githooks
     # exactly as `make setup` does, so check-hooks tests the repository, not
     # the staging step (2026-10-16: the fresh clone had no core.hooksPath).
-    subprocess.run(['git', '-C', str(inputs / 'gc'), 'config', 'core.hooksPath', '.githooks'], check=True)
-    # Fixtures sit on a short path beside the run tree. Long fixture paths
-    # pushed Unix sockets past 108 bytes, and gc then fell back to shared
-    # /tmp paths owned by other accounts (2026-10-16).
-    fixture_root = home / ('f.' + root.name.split('.', 1)[1])
-    fixture_root.mkdir(mode=0o755)
+    for name in ('gc', 'gc-base'):
+        if name in required:
+            subprocess.run(['git', '-C', str(inputs / name), 'config', 'core.hooksPath', '.githooks'], check=True)
     environment = {
         'PATH': '/usr/bin:/bin', 'HOME': str(home),
         'VFUG_ROOT': str(root), 'VFUG_WORK_ROOT': str(fixture_root),
@@ -217,7 +221,11 @@ def run_stage(stage, mode):
         'VFUG_GO_ROOT': str(inputs / 'go'), 'VFUG_MODCACHE': str(inputs / 'modcache'),
         'VFUG_TOOLS': str(inputs / 'tools'), 'VFUG_LINT_BIN': str(inputs / 'lint-bin'),
     }
+    if 'gc-base' in required:
+        environment['VFUG_BASE_REPO'] = str(inputs / 'gc-base')
     command = ['python3', '-B', str(inputs / 'gc/scripts/vfug-host.py'), mode]
+    if mode == 'compare':
+        command.append(base_commit or '3bb7b3c76')
     print('Qualification logs: ' + str(root / 'logs'), flush=True)
     return subprocess.call(command, cwd=inputs / 'gc', env=environment)
 
@@ -227,13 +235,15 @@ def main():
     parser.add_argument('action', choices=['stage', 'run'])
     parser.add_argument('directory', type=Path)
     parser.add_argument('mode', nargs='?', default='all',
-                        choices=['all', 'build', 'bd', 'gc', 'gates', 'acceptance', 'cas', 'safety', 'plan'])
+                        choices=['all', 'build', 'bd', 'gc', 'gates', 'acceptance', 'cas', 'safety', 'plan', 'compare'])
+    parser.add_argument('base_commit', nargs='?')
+    parser.add_argument('--base-gc-commit', help='stage a base checkout from VFUG_BASE_SOURCE')
     args = parser.parse_args()
     try:
         if args.action == 'stage':
-            stage_inputs(args.directory)
+            stage_inputs(args.directory, args.base_gc_commit)
             return 0
-        return run_stage(args.directory, args.mode)
+        return run_stage(args.directory, args.mode, args.base_commit)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as exc:
         parser.exit(2, 'vfug: ' + str(exc) + '\n')
 

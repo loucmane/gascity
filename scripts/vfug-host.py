@@ -5,12 +5,18 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
+import pwd
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+
+import vfug_compare
+from vfug_layout import refuse_home_workspace, validate_roots
+from vfug_discovery import refuse_ancestor_discovery
 
 ROOT = None
 GC = Path(__file__).resolve().parents[1]
@@ -24,7 +30,18 @@ def configure():
     for key in CONFIG_KEYS:
         if key not in os.environ or not Path(os.environ[key]).resolve().is_relative_to('/work'):
             raise ValueError(key + ' must explicitly name a staged /work path')
+    account = pwd.getpwuid(os.getuid())
+    if account.pw_name != 'vfugtest' or os.geteuid() == 0:
+        raise ValueError('qualification requires vfugtest')
+    home = Path(account.pw_dir).resolve(strict=True)
+    if not home.is_relative_to('/work') or home == Path('/work'):
+        raise ValueError('passwd home must be under /work/')
     ROOT = Path(os.environ['VFUG_ROOT'])
+    fixtures = Path(os.environ['VFUG_WORK_ROOT'])
+    validate_roots(ROOT, fixtures, home)
+    refuse_home_workspace(home)
+    for root in (ROOT, fixtures):
+        refuse_ancestor_discovery(root)
     GC = Path(os.environ['VFUG_GC_REPO'])
     BD = Path(os.environ['VFUG_BD_REPO'])
 
@@ -42,6 +59,7 @@ class Step:
     pair: bool = True
     supervisor_home: bool = False
     empty_gitconfig: bool = False
+    bin_dir: Path | None = None
 
 
 def step_command(step, runner):
@@ -110,15 +128,31 @@ def suites(group, pair):
     return steps
 
 
+def git_output(repo, *args):
+    return subprocess.check_output(['git', '--no-optional-locks', '-C', str(repo), *args], text=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', nargs='?', default='all',
-                        choices=['all', 'build', 'bd', 'gc', 'gates', 'acceptance', 'cas', 'safety', 'plan'])
+                        choices=['all', 'build', 'bd', 'gc', 'gates', 'acceptance', 'cas', 'safety', 'plan', 'compare'])
+    parser.add_argument('base_gc_commit', nargs='?', default='3bb7b3c76')
     opts = parser.parse_args()
     try:
         configure()
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         parser.error(str(exc))
+    base_gc = None
+    if opts.mode == 'compare':
+        try:
+            base_gc = Path(os.environ['VFUG_BASE_REPO']).resolve(strict=True)
+            if not base_gc.is_relative_to(ROOT.resolve()):
+                raise ValueError('base source must be a staged input in VFUG_ROOT')
+            base_sha = git_output(base_gc, 'rev-parse', '--verify', '--end-of-options', opts.base_gc_commit + '^{commit}').strip()
+            if git_output(base_gc, 'rev-parse', 'HEAD').strip() != base_sha or git_output(base_gc, 'status', '--porcelain', '--untracked-files=all'):
+                raise ValueError('base source must be clean and at the requested commit')
+        except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as exc:
+            parser.error(str(exc))
     if opts.mode == 'plan':
         print('build-1\nbuild-2\ncompare-builds')
         for step in suites('all', ROOT / 'logs/OUTPUT/build-1/bin'):
@@ -132,7 +166,7 @@ def main():
     # Copy executable runner sources before starting any long command.
     snapshot = run / 'runner'
     snapshot.mkdir()
-    for filename in ('vfug-host.py', 'vfug-env.sh', 'build-vfug.sh', 'vfug_discovery.py'):
+    for filename in ('vfug-host.py', 'vfug-env.sh', 'build-vfug.sh', 'vfug_discovery.py', 'vfug_layout.py', 'vfug_compare.py'):
         shutil.copy2(GC / 'scripts' / filename, snapshot / filename)
     results = []
     source_commit = subprocess.check_output(['git', '--no-optional-locks', '-C', str(GC), 'rev-parse', 'HEAD'], text=True).strip()
@@ -151,7 +185,7 @@ def main():
         with log.open('w') as stream:
             try:
                 proc = subprocess.Popen(command, cwd=step.cwd, stdout=stream, stderr=subprocess.STDOUT,
-                                        env=step_environment(pair))
+                                        env=step_environment(step.bin_dir or pair))
             except OSError as exc:
                 stream.write('Cannot start check: ' + str(exc) + '\n')
                 code = 127
@@ -173,6 +207,11 @@ def main():
                     code = 130
         content = log.read_text(errors='replace')
         skips = sum('--- SKIP:' in line for line in content.splitlines())
+        if step.name == 'bd-readonly-cli' and code == 0 and (skips or not re.search(
+                r'^--- PASS: TestReadOnlyServerCLIMaintenanceAndPreviews \(', content, re.M)):
+            code = 1
+            with log.open('a') as stream:
+                stream.write('FAIL: real-server readonly CLI test did not execute and pass without skips\n')
         row = {'name': step.name, 'exit': code, 'seconds': round(time.monotonic()-begin, 1),
                'skips': skips, 'log': str(log)}
         results.append(row)
@@ -197,7 +236,38 @@ def main():
         (comparison / 'output.log').write_text('PASS: identical bd and gc hashes\n' if same else 'FAIL: builds failed or hashes differ\n')
         results.append({'name': 'compare-builds', 'exit': 0 if same else 1,
                         'seconds': 0, 'skips': 0, 'log': str(comparison / 'output.log')})
-        for step in suites(opts.mode, pair):
+        if opts.mode == 'compare':
+            comparison_dir = run / 'comparison'
+            comparison_dir.mkdir()
+            base_pair = run / 'base-bin'
+            # Build both binaries from the BASE module graph, with no fork pin
+            # injection and no use of the branch pair on the base PATH.
+            base_pair.mkdir()
+            base_build = step_run(Step('base-build', base_gc, [
+                'bash', '-c', 'set -e; CGO_ENABLED=0 go build -trimpath -o "$1/gc" ./cmd/gc; '
+                '''bd_source=$(go list -m -f '{{.Dir}}' github.com/steveyegge/beads); '''
+                'cd "$bd_source"; CGO_ENABLED=1 go build -tags=gms_pure_go -trimpath -o "$1/bd" ./cmd/bd',
+                'vfug-base-build', str(base_pair)], False, bin_dir=base_pair))
+            if same and base_build:
+                def execute(name, repo, args, binaries):
+                    step_run(Step(name, repo, args, bin_dir=binaries))
+                    return results[-1]
+                vfug_compare.run_comparison(comparison_dir,
+                    {'branch': GC, 'base': base_gc}, {'branch': pair, 'base': base_pair},
+                    {'branch': source_commit, 'base': base_sha}, execute)
+            else:
+                vfug_compare.write_report(comparison_dir, {
+                    'commits': {'branch': source_commit, 'base': base_sha},
+                    'branch_only': [], 'base_only': [], 'both': [], 'exclusions': [],
+                    'blocked': 'comparison suites require successful branch and base builds',
+                    'builds': list(results)})
+            integrity = comparison_dir / 'base-integrity.log'
+            current = git_output(base_gc, 'rev-parse', 'HEAD').strip()
+            dirty = git_output(base_gc, 'status', '--porcelain', '--untracked-files=all')
+            integrity.write_text(f'initial={base_sha}\nfinal={current}\n{dirty}')
+            results.append({'name': 'final-base-integrity', 'exit': 0 if current == base_sha and not dirty else 1,
+                            'seconds': 0, 'skips': 0, 'log': str(integrity)})
+        for step in ([] if opts.mode == 'compare' else suites(opts.mode, pair)):
             if step.pair and not same:
                 results.append({'name': step.name, 'exit': 'BLOCKED', 'seconds': 0, 'skips': 0,
                                 'log': 'reproducible build pair did not pass'})

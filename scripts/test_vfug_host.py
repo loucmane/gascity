@@ -44,20 +44,21 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual('--supervisor-home' in command, step.name == 'proxied-acceptance')
         self.assertEqual(host.GC, Path(__file__).resolve().parents[1])
 
-    def run_fixture(self, *, launch_error=False, drift=False):
+    def run_fixture(self, *, launch_error=False, drift=False, readonly_output=None):
         base = Path(os.environ.get('TMPDIR', '/work/ga-vfug'))
         base.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='runner.', dir=base) as temporary:
             root = Path(temporary)
             gc = root / 'port'
             (gc / 'scripts').mkdir(parents=True)
-            for filename in ('vfug-host.py', 'vfug-env.sh', 'build-vfug.sh', 'vfug_discovery.py'):
+            for filename in ('vfug-host.py', 'vfug-env.sh', 'build-vfug.sh', 'vfug_discovery.py', 'vfug_layout.py', 'vfug_compare.py'):
                 (gc / 'scripts' / filename).write_text('fixture runner\n')
             executed = []
 
             def popen(command, *, cwd, stdout, stderr, env):
-                helper = Path(command[1]).with_name('vfug_discovery.py')
-                self.assertEqual(helper.read_text(), 'fixture runner\n')
+                for filename in ('vfug_discovery.py', 'vfug_layout.py', 'vfug_compare.py'):
+                    helper = Path(command[1]).with_name(filename)
+                    self.assertEqual(helper.read_text(), 'fixture runner\n')
                 executed.append(command[-1])
                 if launch_error and command[-1] == 'fail-launch':
                     raise OSError('fixture executable unavailable')
@@ -68,7 +69,7 @@ class RunnerTests(unittest.TestCase):
                     for name in ('bd', 'gc'):
                         content = name + ('drift' if drift and 'build-2' in str(output) else '')
                         (output / name).write_text(content)
-                stdout.write('fixture check completed\n')
+                stdout.write(readonly_output if command[-1] == 'readonly-cli' else 'fixture check completed\n')
                 class Process:
                     def wait(self, timeout):
                         return 0
@@ -80,6 +81,8 @@ class RunnerTests(unittest.TestCase):
             steps = [host.Step('first-check', gc, ['fail-launch']),
                      host.Step('later-check', gc, ['later']),
                      host.Step('independent', gc, ['independent'], False)]
+            if readonly_output is not None:
+                steps.append(host.Step('bd-readonly-cli', gc, ['readonly-cli']))
             with patch.object(host, 'configure'), patch.object(host, 'step_environment', return_value={}), \
                     patch.object(host, 'ROOT', root), patch.object(host, 'GC', gc), \
                     patch.object(host, 'BD', root / 'bd-src'), \
@@ -111,6 +114,16 @@ class RunnerTests(unittest.TestCase):
         code, rows, _ = self.run_fixture()
         self.assertEqual(code, 0)
         self.assertTrue(all(row['exit'] == 0 for row in rows.values()))
+
+    def test_readonly_cli_must_execute_real_server_test(self):
+        for output in ('--- SKIP: TestReadOnlyServerCLIMaintenanceAndPreviews (0.00s)\n',
+                       'testing: warning: no tests to run\nPASS\n'):
+            with self.subTest(output=output):
+                code, rows, _ = self.run_fixture(readonly_output=output)
+                self.assertEqual(code, 1)
+                self.assertEqual(rows['bd-readonly-cli']['exit'], 1)
+        code, _, _ = self.run_fixture(readonly_output='--- PASS: TestReadOnlyServerCLIMaintenanceAndPreviews (3.00s)\n')
+        self.assertEqual(code, 0)
 
 
 if __name__ == '__main__':

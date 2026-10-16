@@ -45,6 +45,8 @@ it with a branch-head checkout or update the digest during CI.
 
 The operator provisions the unprivileged Linux account `vfugtest` with passwd
 home `/work/vfugtest` and the Docker group, and allows `sudo -u vfugtest`.
+The shared parent `/work/vft` must exist with mode 1777; each invocation creates
+a new vfugtest-owned directory below it with mode 0755.
 The operator home remains mode 0750. No root runner or user/mount namespace is
 used. The former `vfug-host-root.sh` and its tests are removed.
 
@@ -90,13 +92,15 @@ and non-backup `*.db` entries other than `vc.db` trigger refusal, as does any
 `redirect` entry, because bd follows `.beads/redirect` before it checks project
 files. Symlinked or uninspectable markers also trigger refusal. The entry
 verifies the manifest, copies inputs into
-`/work/vfugtest/ga-vfug/run.*/inputs`, verifies the copy, and makes its own
+`/work/vft/r.*/inputs`, verifies the copy, and makes its own
 repositories and module cache writable. Qualification executes the copied host runner.
 Logs and built binaries live in that account's run tree; log directories and
 files are readable by loucmane. Ordinary fixture HOME, TMPDIR, GC_HOME, GOPATH,
 GOBIN, tmux paths and a writable global Git config are under a short
-`/work/vfugtest/f.*` fixture root beside the run tree. `proxied-acceptance` alone sets HOME to the account's
-passwd home so the supervisor ownership check agrees. Existing tests that
+`/work/vft/r.*/f` fixture root inside the run tree. `proxied-acceptance` alone sets HOME to the account's
+passwd home so the supervisor ownership check agrees. At run start, and before
+a supervisor-home step, any beads project in that home causes a refusal naming
+the project marker. Nothing is deleted automatically. Existing tests that
 restore passwd HOME still land in the dedicated account's /work home.
 
 On a server-mode workspace, human-output classified reads (`bd list`, `show`,
@@ -105,7 +109,9 @@ a tip may be shown again on a later run; v1.3.1 recorded it. The command still
 exits 0, and HEAD is unchanged.
 
 `vfug-env.sh` refuses a user other than vfugtest, a passwd home outside
-/work, and a fixture root outside that account home. The old `--private-home`
+/work, and run or fixture roots outside the same vfugtest-owned directory under
+/work/vft. Both roots resolve outside passwd home, so a workspace created there
+by acceptance cannot become an ancestor of later checks. The old `--private-home`
 and `--inside` entry paths no longer exist. The child receives an explicit
 environment, offline Go module settings, staged tools and fixture-only GOBIN.
 No operator session, endpoint, credential or runtime environment is inherited.
@@ -121,9 +127,48 @@ fixture discipline enforce that rule, rather than network isolation.
 The runner builds bd/gc twice with Go 1.26.7 and compares binary hashes before
 running dependent suites. Each check has its own log below the printed
 `logs/run.*` directory, with a 30-second heartbeat. `summary.json` records
-failures and skip counts; a failed pair blocks dependent checks and yields a
+failures and skip counts. The readonly CLI check requires the named real-server
+test to pass without skips; a skipped or unselected test fails qualification.
+A failed pair blocks dependent checks and yields a
 nonzero exit. Independent policy checks still run. The final fork and gc
 integrity checks detect changes to the reviewed sources.
+
+## Compare against a base commit
+
+Add the base as a staged input when preparing a fresh stage. Set
+`VFUG_BASE_SOURCE` to a local repository containing the base commit and add
+`--base-gc-commit 3bb7b3c76` to the staging command above. The source repository
+can contain other commits; staging clones the requested commit detached as
+`gc-base`, hashes it in the manifest, and leaves its go.mod unchanged.
+
+```bash
+sudo -u vfugtest /usr/bin/env -i PATH=/usr/bin:/bin \
+  bash "$vfug_stage/gc/scripts/vfug-test-run.sh" \
+  "$vfug_stage" compare 3bb7b3c76
+```
+
+The copied host runner also accepts `vfug-host.py compare <base-gc-commit>`
+with the staged `VFUG_*` environment, including `VFUG_BASE_REPO`. Omitting the
+commit selects `3bb7b3c76`. Base binaries are built from that checkout's module
+graph; its bd version is resolved from its own go.mod. The reviewed fork pin
+remains confined to the branch build.
+
+Comparison runs gc-fast, gc-process and gc-integration on both commits through
+the shared sharded runner with two concurrent jobs. It retains complete shard
+logs, including failures omitted from the abbreviated console output. Each
+branch-only failing top-level test then runs three separate times on each
+commit, with matching integration tags and fast/process mode. A regression
+requires three named failures on the branch and three named, unskipped passes
+on the base. Missing tests, skipped tests and failed rerun setup are inconclusive.
+Package and harness failures remain visible even when no test can be named.
+
+`comparison/compare.json` and `comparison/compare.md` list branch-only, base-only
+and shared failures, source commits, suite exits and rerun logs. Environment
+classifications cite exact log lines; unrecognized failures stay unclassified.
+Expired waivers are dated policy failures, including the ga-tmgr expiry on
+2026-10-15 when reported by the suites. Comparison does not renew waivers or
+exclude failures. Any failed suite still gives the host runner a nonzero exit,
+even when its failures also occur on the base.
 
 ## Metadata custody on the fork build
 

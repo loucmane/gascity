@@ -30,15 +30,11 @@ if [[ ${1:-} != -- || $# -lt 2 ]]; then
 fi
 shift
 : "${VFUG_ROOT:?set VFUG_ROOT to the copied run tree}"
-: "${VFUG_WORK_ROOT:?set VFUG_WORK_ROOT below the vfugtest passwd home}"
+: "${VFUG_WORK_ROOT:?set VFUG_WORK_ROOT inside the owned /work/vft run directory}"
 : "${VFUG_GO_ROOT:?set VFUG_GO_ROOT to the staged Go toolchain}"
 : "${VFUG_MODCACHE:?set VFUG_MODCACHE to the staged module cache}"
 : "${VFUG_TOOLS:?set VFUG_TOOLS to the staged tools}"
 : "${VFUG_LINT_BIN:?set VFUG_LINT_BIN to the staged lint/codegen tools}"
-case "$(realpath -m "$VFUG_WORK_ROOT")" in
-  "$vfug_passwd_home"/*) ;;
-  *) echo 'fixture work tree must be under the vfugtest passwd home' >&2; exit 2;;
-esac
 for vfug_name in VFUG_ROOT VFUG_WORK_ROOT VFUG_GO_ROOT VFUG_MODCACHE VFUG_TOOLS VFUG_LINT_BIN; do
   case "$(realpath -m "${!vfug_name}")" in
     /work/*) ;;
@@ -53,8 +49,11 @@ fi
 # Check both roots on every entry, including direct per-check invocations.
 # Share bd project-file classification with staging; per-user .beads is safe.
 # -I (isolated): no PYTHONPATH or user site can shadow the helper (Review A8).
-python3 -I -B "$(dirname "${BASH_SOURCE[0]}")/vfug_discovery.py" "$VFUG_ROOT" "$VFUG_WORK_ROOT"
-mkdir -p "$VFUG_WORK_ROOT"
+vfug_layout_options=()
+if "$vfug_supervisor_home"; then
+  vfug_layout_options+=(--check-home)
+fi
+python3 -I -B "$(dirname "${BASH_SOURCE[0]}")/vfug_layout.py" "${vfug_layout_options[@]}" "$vfug_passwd_home" "$VFUG_ROOT" "$VFUG_WORK_ROOT"
 vfug_fixture=$(mktemp -d -p "$VFUG_WORK_ROOT" e.XXXXXX)
 mkdir -p "$vfug_fixture"/{h,t,g,x,c,d,run,gobin,gopath}
 chmod 700 "$vfug_fixture/h" "$vfug_fixture/run"
