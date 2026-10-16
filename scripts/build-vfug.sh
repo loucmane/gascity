@@ -15,6 +15,11 @@ if [[ -n "$(git --no-optional-locks -C "$vfug_repo" status --porcelain --untrack
   echo "Refusing to build an uncommitted gc checkout" >&2
   exit 1
 fi
+vfug_gc_revision=$(git --no-optional-locks -C "$vfug_repo" rev-parse HEAD)
+if [[ ! "$vfug_gc_revision" =~ ^[0-9a-f]{40}$ ]]; then
+  echo 'gc HEAD must be a full commit SHA' >&2
+  exit 1
+fi
 vfug_output=${1:?usage: build-vfug.sh OUTPUT_DIR [LOCAL_BEADS_REPOSITORY] [GC_REPOSITORY]}
 vfug_source=${2:-"$vfug_repo/../bd-src"}
 vfug_replace=$(awk '$1 == "replace" && $2 == "github.com/steveyegge/beads" && $3 == "=>" {print $4}' "$vfug_repo/go.mod")
@@ -60,12 +65,26 @@ fi
 )
 (
   cd "$vfug_repo"
-  build env CGO_ENABLED=0 go build -trimpath -o "$vfug_output/gc" ./cmd/gc
+  build env CGO_ENABLED=0 go build -trimpath -ldflags "-X main.commit=$vfug_gc_revision" -o "$vfug_output/gc" ./cmd/gc
 )
+(
+  # Probe outside the source tree with the guarded throwaway HOME/GC_HOME.
+  cd "$HOME"
+  build "$vfug_output/gc" version --json > "$vfug_output/gc-version.json"
+)
+python3 -I - "$vfug_output/gc-version.json" "$vfug_gc_revision" <<'PY'
+import json
+import sys
+with open(sys.argv[1]) as source:
+    version = json.load(source)
+if (version.get('commit') != sys.argv[2] or version.get('version') != 'dev'
+        or version.get('date') != 'unknown'):
+    sys.exit('gc runtime identity mismatch: expected HEAD commit, dev version and unknown date')
+PY
 bash "$vfug_repo/scripts/check-gomod-replace.sh" "$vfug_repo/go.mod"
 {
   cat "$vfug_repo/scripts/beads-fork-pin.json"
-  printf 'beads_commit=%s\ngc_commit=%s\n' "$vfug_revision" "$(git -C "$vfug_repo" rev-parse HEAD)"
+  printf 'beads_commit=%s\ngc_commit=%s\n' "$vfug_revision" "$vfug_gc_revision"
   build go version
   sha256sum "$vfug_output/bd" "$vfug_output/gc"
 } > "$vfug_output/inputs.txt"
