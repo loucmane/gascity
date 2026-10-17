@@ -795,6 +795,16 @@ func (s *emittingClassStore) SupportsEphemeralGraphApply() bool {
 	return ok && supporter.SupportsEphemeralGraphApply()
 }
 
+// ParentProjection forwards the engine's List(ParentID) projection (ga-2mrl).
+// Dropping it would make the order-tracking retention guard model stored
+// ParentID semantics over a dependency-projected native store.
+func (s *emittingClassStore) ParentProjection() beads.ParentProjection {
+	if projector, ok := s.Store.(interface{ ParentProjection() beads.ParentProjection }); ok {
+		return projector.ParentProjection()
+	}
+	return beads.ParentField
+}
+
 // SawRows forwards beads.RowWitness. Collapsing "the wrapped store is not a
 // witness" into false is exact rather than lossy: the capability certifies
 // presence only, so every consumer already treats a missing witness and a
