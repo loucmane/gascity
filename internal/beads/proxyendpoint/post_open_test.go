@@ -132,7 +132,7 @@ func TestReadPostOpenObservesTheStateAfterTheOpen(t *testing.T) {
 			// statement per question.
 			for _, statement := range pool.Statements() {
 				if !strings.Contains(statement, "DOLT_HASHOF('HEAD')") ||
-					strings.Count(statement, "information_schema.tables") != len(ignoredSentinelTables)+len(ignoredSentinelFlooredTables)+1 ||
+					strings.Count(statement, "information_schema.tables") != 1 ||
 					strings.Count(statement, "information_schema.columns") != 1 {
 					t.Fatalf("statement %q does not carry HEAD, the cursor table, every sentinel and floored sentinel table and the column", statement)
 				}

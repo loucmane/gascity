@@ -1139,6 +1139,7 @@ go_test(
         "lifecycle_live_query_test.go",
         "load_city_config_snapshot_test.go",
         "main_scope_symlink_test.go",
+        "mail_alias_lookup_test.go",
         "main_test.go",
         "maintenance_startup_test.go",
         "management_json_test.go",

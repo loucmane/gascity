@@ -383,6 +383,7 @@ func TestProxiedStoreRelocatedClassReadsRefuseLikeBdStore(t *testing.T) {
 		call func() error
 	}{
 		{"Get", func() error { _, err := store.Get("gcg-1234"); return err }},
+		{"LookupByID", func() error { _, err := LookupByID(store, "gcg-1234"); return err }},
 		{"DepList", func() error { _, err := store.DepList("gcg-1234", "down"); return err }},
 		{"DepMetadata", func() error { _, _, err := store.DepMetadata("gcg-1234", "prx-1"); return err }},
 	} {

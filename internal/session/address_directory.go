@@ -98,10 +98,10 @@ func (s *Store) mailboxMatches(selector string, closed bool) ([]beads.Bead, erro
 	}
 	var matches []beads.Bead
 	// Slash addresses (e.g. "rig/agent.name") are never bare bead IDs. Skipping
-	// the direct Get keeps the slash form out of the backing store's id lookup,
+	// the direct ID probe keeps the slash form out of the backing store's id lookup,
 	// which a legacy backend renders into a query clause.
 	if !strings.Contains(selector, "/") {
-		b, err := store.Get(selector)
+		b, err := beads.LookupByID(store, selector)
 		switch {
 		case err == nil && IsSessionBeadOrRepairable(b) && mailboxStatusMatches(b, closed):
 			RepairEmptyType(store, &b)

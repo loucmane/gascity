@@ -32,7 +32,9 @@ go_test(
         "birth_test.go",
         "idle_test.go",
         "liveness_test.go",
+        "open_statement_count_test.go",
         "poolkey_test.go",
+        "post_open_catalog_test.go",
         "post_open_test.go",
         "probe_cursor_reality_test.go",
         "probe_session_test.go",
@@ -53,6 +55,7 @@ go_test(
         "//internal/fsys",
         "//internal/testenv",
         "@com_github_go_sql_driver_mysql//:mysql",
+        "@org_modernc_sqlite//:sqlite",
     ],
 )
 

@@ -59,9 +59,9 @@ func postOpenTables() []string {
 }
 
 // postOpenQuery is the observation's ONE statement: HEAD, then one
-// information_schema COUNT(*) per table in postOpenTables, then one for the
-// sentinel column. Scalar sub-selects against information_schema cannot fail
-// on an absent object — they count zero — so the statement always answers, and
+// conditional count per table in postOpenTables over ONE catalog scan, then one
+// scalar sub-select for the sentinel column. These information_schema reads
+// cannot fail on an absent object — they count zero — so the statement answers, and
 // HEAD and the ignored plane are read at the same instant on the same
 // connection.
 func postOpenQuery() (string, []any) {
@@ -69,11 +69,12 @@ func postOpenQuery() (string, []any) {
 	var args []any
 	b.WriteString(postOpenHeadQuery)
 	for _, table := range postOpenTables() {
-		b.WriteString(", (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?)")
+		b.WriteString(", COUNT(CASE WHEN table_name = ? THEN 1 END)")
 		args = append(args, table)
 	}
 	b.WriteString(", (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?)")
 	args = append(args, IgnoredSentinelColumnTable, IgnoredSentinelColumnName)
+	b.WriteString(" FROM information_schema.tables WHERE table_schema = DATABASE()")
 	return b.String(), args
 }
 

@@ -105,6 +105,7 @@ go_test(
         "live_ready_test.go",
         "local_sidecar_test.go",
         "lookup_limit_error_test.go",
+        "lookup_test.go",
         "mailbox_query_test.go",
         "membership_test.go",
         "membership_vocabulary_test.go",

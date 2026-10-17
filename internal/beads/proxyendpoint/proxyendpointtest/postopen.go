@@ -137,7 +137,10 @@ func (c *conn) QueryContext(_ context.Context, query string, args []driver.Named
 		return nil, fmt.Errorf("proxyendpointtest: no answer for %q", query)
 	}
 	values := []driver.Value{state.Head}
-	tables := strings.Count(query, "information_schema.tables")
+	tables := strings.Count(query, "COUNT(CASE WHEN table_name = ? THEN 1 END)")
+	if tables == 0 {
+		tables = strings.Count(query, "information_schema.tables")
+	}
 	columns := strings.Count(query, "information_schema.columns")
 	if len(args) != tables+2*columns {
 		return nil, fmt.Errorf("proxyendpointtest: %d argument(s) for %d table and %d column sub-select(s)",

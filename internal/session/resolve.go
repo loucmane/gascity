@@ -52,7 +52,7 @@ func ResolveSessionBeadByExactID(store beads.Store, identifier string) (beads.Be
 	if store == nil {
 		return beads.Bead{}, "", fmt.Errorf("session store unavailable")
 	}
-	b, err := store.Get(identifier)
+	b, err := beads.LookupByID(store, identifier)
 	if err == nil && IsSessionBeadOrRepairable(b) {
 		normalizeEmptyType(&b)
 		return b, b.ID, nil
@@ -64,19 +64,19 @@ func ResolveSessionBeadByExactID(store beads.Store, identifier string) (beads.Be
 }
 
 // ResolveSessionRecordByExactID is the domain-object twin of
-// ResolveSessionBeadByExactID: it performs the SAME single store.Get, the same
+// ResolveSessionBeadByExactID: it performs the same exact ID lookup, the same
 // IsSessionBeadOrRepairable acceptance, the same in-memory empty-type normalize,
 // and the same error contract (wrapped "looking up session %q" for a hard store
 // error, ErrSessionNotFound for an absent or non-session id) — but projects the
 // resolved bead onto the typed session record (Info + PersistedResponse) instead
 // of returning a raw beads.Bead. It keeps the worker-boundary resolve+construct
-// path (cmd/gc/worker_handle.go) at a single store Get while removing the raw
+// path (cmd/gc/worker_handle.go) at a single ID lookup while removing the raw
 // bead from the interior. Pair it with worker.Factory.SessionByRecord.
 func ResolveSessionRecordByExactID(store beads.Store, identifier string) (Info, PersistedResponse, error) {
 	if store == nil {
 		return Info{}, PersistedResponse{}, fmt.Errorf("session store unavailable")
 	}
-	b, err := store.Get(identifier)
+	b, err := beads.LookupByID(store, identifier)
 	if err == nil && IsSessionBeadOrRepairable(b) {
 		normalizeEmptyType(&b)
 		return infoFromPersistedBead(b), PersistedResponseFromBead(b), nil
