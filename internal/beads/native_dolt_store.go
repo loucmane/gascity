@@ -1768,7 +1768,7 @@ func (s *NativeDoltStore) List(query ListQuery) ([]Bead, error) {
 	var out []Bead
 	err := s.withReadRetry(func(ctx context.Context, storage beadslib.Storage) error {
 		filter := nativeIssueFilterFromListQuery(query)
-		issues, err := storage.SearchIssues(ctx, "", filter)
+		issues, err := nativeSearchIssuesByIDs(ctx, storage, filter)
 		if err != nil {
 			return err
 		}
@@ -3207,6 +3207,7 @@ func nativeIssueFilterFromListQuery(query ListQuery) beadslib.IssueFilter {
 		sortBy, sortDesc = "created", true // flip the DESC default
 	}
 	filter := beadslib.IssueFilter{
+		IDs:                 query.IDs,
 		Limit:               nativeCreatedLimitPushdown(query),
 		SortBy:              sortBy,
 		SortDesc:            sortDesc,

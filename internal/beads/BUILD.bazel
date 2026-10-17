@@ -122,6 +122,7 @@ go_test(
         "native_dolt_store_count_test.go",
         "native_dolt_store_graph_deadline_test.go",
         "native_dolt_store_graph_validate_test.go",
+        "native_dolt_store_list_ids_test.go",
         "native_dolt_store_list_sort_test.go",
         "native_dolt_store_metadata_cas_internal_test.go",
         "native_dolt_store_metadata_cas_test.go",
