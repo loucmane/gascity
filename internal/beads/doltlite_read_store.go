@@ -281,6 +281,9 @@ func (s *DoltliteReadStore) ListSessionBeads() ([]Bead, error) {
 	return rows, nil
 }
 
+// ParentProjection reports DoltLite's parent dependency join semantics.
+func (s *DoltliteReadStore) ParentProjection() ParentProjection { return ParentAllDependencies }
+
 func (s *DoltliteReadStore) List(query ListQuery) ([]Bead, error) {
 	if err := query.Validate(); err != nil {
 		return nil, err

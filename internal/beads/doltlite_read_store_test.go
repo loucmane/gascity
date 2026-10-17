@@ -76,6 +76,29 @@ func TestDoltliteReadStoreHydratesParent(t *testing.T) {
 	}
 }
 
+func TestDoltliteRetentionParentProjection(t *testing.T) {
+	store, closeStore := newTestDoltliteReadStore(t)
+	defer closeStore()
+	if HandlesFor(store).Parents != ParentAllDependencies {
+		t.Fatal("DoltLite parent query must expose its all-dependencies projection")
+	}
+	writer := openTestDoltliteWriter(t, store.db)
+	defer writer.Close() //nolint:errcheck // test cleanup
+	if _, err := writer.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, depends_on_issue_id, type) VALUES ('gc-child', 'gc-other', 'gc-other', 'parent-child')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, parent := range []string{"gc-parent", "gc-other"} {
+		children, err := store.List(ListQuery{ParentID: parent, IncludeClosed: true, TierMode: TierBoth})
+		if err != nil {
+			t.Fatal(err)
+		}
+		child := findTestBead(t, children, "gc-child")
+		if child.ParentID != parent {
+			t.Fatalf("parent=%s: child parent=%s", parent, child.ParentID)
+		}
+	}
+}
+
 func TestDoltliteReadStoreTypeFallbackCanSkipLabels(t *testing.T) {
 	store, closeStore := newTestDoltliteReadStore(t)
 	defer closeStore()

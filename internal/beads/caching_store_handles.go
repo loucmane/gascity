@@ -49,6 +49,13 @@ type StoreHandles struct {
 	Cached CachedReader
 	Live   LiveReader
 	Writer Writer
+	// Parents describes the live reader's structural parent projection. It
+	// lets bounded graph snapshots replay dependency removal without guessing
+	// whether ParentID is stored independently or derived from dependencies.
+	Parents ParentProjection
+	// ListDependenciesComplete reports whether full live List rows carry all
+	// down dependencies. It never applies to SkipDependencies reads or Get.
+	ListDependenciesComplete bool
 }
 
 // HandlesFor returns explicit cached/live reader and writer handles for a
@@ -62,9 +69,11 @@ func HandlesFor(store Store) StoreHandles {
 		return provider.Handles()
 	}
 	return StoreHandles{
-		Cached: logicalCachedStoreReader{store: store},
-		Live:   logicalLiveStoreReader{store: store},
-		Writer: store,
+		Cached:                   logicalCachedStoreReader{store: store},
+		Live:                     logicalLiveStoreReader{store: store},
+		Writer:                   store,
+		Parents:                  parentProjectionFor(store),
+		ListDependenciesComplete: completeListDependenciesFor(store),
 	}
 }
 
@@ -72,9 +81,11 @@ func HandlesFor(store Store) StoreHandles {
 // this store's cache coordinator.
 func (c *CachingStore) Handles() StoreHandles {
 	return StoreHandles{
-		Cached: cachedStoreReader{store: c},
-		Live:   liveStoreReader{store: c},
-		Writer: c,
+		Cached:                   cachedStoreReader{store: c},
+		Live:                     liveStoreReader{store: c},
+		Writer:                   c,
+		Parents:                  parentProjectionFor(c.backing),
+		ListDependenciesComplete: completeListDependenciesFor(c.backing),
 	}
 }
 

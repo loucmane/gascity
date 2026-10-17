@@ -3298,16 +3298,33 @@ func sweepClosedOrderTrackingRetention(store beads.Store, now time.Time, policy 
 		return 0, fmt.Errorf("listing closed order-tracking beads: %w", err)
 	}
 
+	return deleteClosedOrderTrackingCandidates(store, byOrder, 0)
+}
+
+// deleteClosedOrderTrackingCandidates prepares the shared stranding guard before
+// any mutation. A zero limit means no deletion budget.
+func deleteClosedOrderTrackingCandidates(store beads.Store, byOrder map[string][]orders.OrderRun, limit int) (int, error) {
+	count := 0
+	for _, runs := range byOrder {
+		count += len(runs)
+	}
+	if count == 0 {
+		return 0, nil
+	}
+	guard, err := newOrderRetentionGuard(store)
+	if err != nil {
+		return 0, err
+	}
+
 	deleted := 0
 	var retained []string
 	var deleteErr error
 	for _, runs := range byOrder {
 		for _, run := range runs {
-			// deleteWorkflowBead is the graph-aware delete (dep unwind) the
-			// retention prune uses; it stays raw graph residual. A closed
-			// tracking root can still own OPEN steps — the delete refuses
-			// those rather than stranding them (ga-ejwo1q).
-			if err := deleteWorkflowBead(store, run.ID); err != nil {
+			if limit > 0 && deleted >= limit {
+				break
+			}
+			if err := guard.delete(store, run.ID); err != nil {
 				if errors.Is(err, errWorkflowDeleteLiveDescendants) {
 					retained = append(retained, run.ID)
 					continue
@@ -3353,30 +3370,7 @@ func sweepClosedOrderTrackingRetentionBounded(store beads.Store, now time.Time, 
 		return 0, fmt.Errorf("listing closed order-tracking beads: %w", err)
 	}
 
-	deleted := 0
-	var retained []string
-	var deleteErr error
-	for _, runs := range byOrder {
-		if deleted >= limit {
-			break
-		}
-		for _, run := range runs {
-			if deleted >= limit {
-				break
-			}
-			if err := deleteWorkflowBead(store, run.ID); err != nil {
-				if errors.Is(err, errWorkflowDeleteLiveDescendants) {
-					retained = append(retained, run.ID)
-					continue
-				}
-				deleteErr = errors.Join(deleteErr, fmt.Errorf("deleting closed order-tracking bead %q: %w", run.ID, err))
-				continue
-			}
-			deleted++
-		}
-	}
-	logRetainedForLiveDescendants(retained)
-	return deleted, deleteErr
+	return deleteClosedOrderTrackingCandidates(store, byOrder, limit)
 }
 
 // countClosedOrderTrackingRetentionEligible returns the number of closed
