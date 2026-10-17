@@ -85,6 +85,7 @@ var nativeStoreMethodKinds = map[string]nativeStoreMethodKind{
 	"IDPrefix":                    nativeStoreLifecycle,
 	"AtomicTx":                    nativeStoreLifecycle,
 	"SupportsEphemeralGraphApply": nativeStoreLifecycle,
+	"ParentProjection":            nativeStoreLifecycle, // capability report (ga-2mrl); touches no storage
 	"CloseStore":                  nativeStoreLifecycle,
 	"ReadOnly":                    nativeStoreLifecycle,
 }
