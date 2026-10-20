@@ -716,7 +716,7 @@ func (cr *CityRuntime) run(ctx context.Context) {
 			}
 		}()
 
-		cleanupDeadRuntimeSessionCorpses(cr.sessionsBeadStore().Store, cr.rigBeadStores(), cr.cfg, sessionBeads, cr.sessionDrains, cr.sp, clock.Real{}, cr.stderr)
+		sessionBeads = cr.cleanupDeadRuntimeSessionCorpsesAndRefresh(sessionBeads, startupTrace)
 		// Reap live runtimes still bound to a closed bead (e.g. a named-session
 		// identity re-minted as a pool slot) so the name's current owner can
 		// rebind it and attach lands on the right runtime.
@@ -1290,9 +1290,7 @@ func (cr *CityRuntime) tick(
 	// the reconciler to read/write hashes during reconciliation.
 	// Reap open session beads whose tmux session is dead before loading demand
 	// so stale names cannot block desired-state computation (#742).
-	phaseStart = time.Now()
-	cleanupDeadRuntimeSessionCorpses(cr.sessionsBeadStore().Store, cr.rigBeadStores(), cr.cfg, sessionBeads, cr.sessionDrains, cr.sp, clock.Real{}, cr.stderr)
-	recordPhase(TraceSiteControllerTickPhase, "cleanup_dead_runtime_session_corpses", phaseStart, nil)
+	sessionBeads = cr.cleanupDeadRuntimeSessionCorpsesAndRefresh(sessionBeads, trace)
 	// Reap live runtimes still bound to a closed bead (e.g. a named-session
 	// identity re-minted as a pool slot) so the name's current owner can rebind
 	// it and attach lands on the right runtime.
@@ -3602,6 +3600,13 @@ func (cr *CityRuntime) syncBeadsAndUpdateIndex(desiredState map[string]TemplateP
 	_, updated := syncSessionBeadsWithSnapshotAndRigStores(
 		cr.cityPath, store, cr.rigBeadStores(), desiredState, cr.sp, cfgNames, cr.cfg, clock.Real{}, cr.stderr, cr.sessionDrains != nil, sessionBeads, recordPhase,
 	)
+	// ga-rugs: sync can materialize or retire sessions after the demand build.
+	// Discard that plan if its post-build session set changed; rebasing its
+	// fingerprint here could bless desired entries that sync just retired.
+	if cr.demandSnapshot != nil && !cr.demandSnapshot.result.SessionQueryPartial &&
+		cr.demandSnapshot.sessionFingerprint != sessionBeadSnapshotFingerprint(updated) {
+		cr.demandSnapshot = nil
+	}
 	return updated
 }
 
@@ -3660,6 +3665,30 @@ func (cr *CityRuntime) loadSessionBeadSnapshotWithPartial() (*sessionBeadSnapsho
 		return nil, true
 	}
 	return sessionBeads, false
+}
+
+// cleanupDeadRuntimeSessionCorpsesAndRefresh keeps startup and patrol planning
+// on the same post-cleanup session evidence.
+func (cr *CityRuntime) cleanupDeadRuntimeSessionCorpsesAndRefresh(sessionBeads *sessionBeadSnapshot, trace *sessionReconcilerTraceCycle) *sessionBeadSnapshot {
+	start := time.Now()
+	cleaned := cleanupDeadRuntimeSessionCorpses(cr.sessionsBeadStore().Store, cr.rigBeadStores(), cr.cfg, sessionBeads, cr.sessionDrains, cr.sp, clock.Real{}, cr.stderr)
+	if trace != nil {
+		trace.RecordControllerOperation(TraceSiteControllerTickPhase, TraceReasonRetained, TraceOutcomeComplete, "cleanup_dead_runtime_session_corpses", time.Since(start), nil)
+	}
+	if cleaned == 0 {
+		return sessionBeads
+	}
+	// ga-rugs: a closed corpse must not survive as protected pool demand.
+	// Rebuild from current evidence so replacement creation goes through
+	// verifiedPoolTriggerWorkDir before launch. Clear the cache explicitly
+	// so startup and patrol both discard all pre-cleanup planning.
+	cr.demandSnapshot = nil
+	start = time.Now()
+	sessionBeads = cr.loadSessionBeadSnapshot()
+	if trace != nil {
+		trace.RecordControllerOperation(TraceSiteSessionSnapshot, TraceReasonRetained, TraceOutcomeComplete, "load_session_snapshot.after_corpse_cleanup", time.Since(start), traceSessionSnapshotFields(sessionBeads))
+	}
+	return sessionBeads
 }
 
 // filterSessionInfosByName selects the open sessions matched on the RAW
@@ -3783,6 +3812,15 @@ func (cr *CityRuntime) loadDemandSnapshot(
 		}
 		mergeNamedSessionDemand(result.PoolDesiredCounts, result.NamedSessionDemand, reconcileCfg)
 		result.WorkSet = make(map[string]bool)
+		// ga-rugs: the build may have created sessions. Cache the resulting set,
+		// not its input: otherwise create -> close can restore the input key
+		// while the cached desired state still names the closed session.
+		// Reload at the store edge to retain the full raw-metadata fingerprint.
+		if cr.sessionsBeadStore().Store != nil {
+			postBuild, partial := cr.loadSessionBeadSnapshotWithPartial()
+			sessionFingerprint = sessionBeadSnapshotFingerprint(postBuild)
+			result.SessionQueryPartial = result.SessionQueryPartial || partial
+		}
 		cr.demandSnapshot = &runtimeDemandSnapshot{
 			createdAt:              time.Now(),
 			sessionFingerprint:     sessionFingerprint,
@@ -3810,6 +3848,9 @@ func (cr *CityRuntime) shouldRefreshDemandSnapshot(
 		return true
 	}
 	if cr.demandSnapshot == nil {
+		return true
+	}
+	if cr.demandSnapshot.result.SessionQueryPartial {
 		return true
 	}
 	if cr.demandSnapshot.sessionFingerprint != sessionFingerprint {
