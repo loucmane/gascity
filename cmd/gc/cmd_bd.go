@@ -1028,9 +1028,15 @@ func resolveBdScopeTarget(cfg *config.City, cityPath, rigName string, args []str
 		return cityTarget, nil
 	}
 
+	// ga-z9hz: a mutation flag value may name an existing bead (for example
+	// --if-assignee ci-wisp-...), but only positional subjects select its store.
+	// Ambiguous scans retain the base's raw-argv probing for compatibility;
+	// the exact-ID guard below doBd's scope resolution remains authoritative.
+	probeArgs := bdScopeProbeArgs(args)
+
 	cityPrefix := config.EffectiveHQPrefix(cfg)
 	if cityPrefix != "" {
-		for _, arg := range args {
+		for _, arg := range probeArgs {
 			if strings.HasPrefix(arg, "-") || beadPrefix(cfg, arg) != cityPrefix {
 				continue
 			}
@@ -1048,7 +1054,7 @@ func resolveBdScopeTarget(cfg *config.City, cityPath, rigName string, args []str
 	// actually exist in the resolved rig store. This keeps hyphenated flag
 	// values and other non-ID args from silently retargeting the command.
 	// Unbound rigs are skipped so we don't alias them to the city store.
-	for _, arg := range args {
+	for _, arg := range probeArgs {
 		if strings.HasPrefix(arg, "-") {
 			continue
 		}
