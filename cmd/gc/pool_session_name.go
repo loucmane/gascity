@@ -551,6 +551,10 @@ func releaseOrphanedPoolAssignments(
 
 	var released []releasedPoolAssignment
 	for i, wb := range assignedWorkBeads {
+		// ga-bxnj: parked work remains parked even when its session is dead.
+		if wb.IndefinitelyDeferred {
+			continue
+		}
 		if wb.Status != "open" && wb.Status != "in_progress" {
 			continue
 		}
@@ -724,6 +728,10 @@ func releaseConfirmedOrphanSessionWork(
 
 	var released []releasedPoolAssignment
 	for i, wb := range assignedWorkBeads {
+		// ga-bxnj: unreachable ownership does not cancel an indefinite park.
+		if wb.IndefinitelyDeferred {
+			continue
+		}
 		if wb.Status != "open" && wb.Status != "in_progress" {
 			continue
 		}
@@ -1067,8 +1075,12 @@ func releasePoolAssignmentWithRecheck(store beads.Store, wb beads.Bead, clearDet
 	}
 	opts := beads.UpdateOpts{
 		Assignee: stringPtr(""),
-		Status:   stringPtr("open"),
 		Metadata: clearedSessionAffinityMetadata(),
+	}
+	// ga-bxnj: rewriting normalized open can cancel a provider-side park.
+	// Only an in-progress orphan needs a status transition to release it.
+	if wb.Status == "in_progress" {
+		opts.Status = stringPtr("open")
 	}
 	if clearDetached {
 		opts.Metadata[detachedProbeMetadataKey] = ""

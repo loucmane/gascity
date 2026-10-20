@@ -290,6 +290,85 @@ func TestReleaseOrphanedPoolAssignments_ReopensMissingPoolAssignee(t *testing.T)
 	}
 }
 
+func TestReleaseOrphanedPoolAssignments_PreservesParkedWork(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   string
+		assignee string
+		deferred bool
+		stale    bool
+	}{
+		{"deferred unassigned", "open", "", true, false},
+		{"deferred dead assignee", "open", "worker-dead", true, false},
+		{"parked after open snapshot", "open", "worker-dead", true, true},
+		{"closed dead assignee", "closed", "worker-dead", false, false},
+		{"closed after open snapshot", "closed", "worker-dead", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := beads.NewMemStore()
+			work, err := mem.Create(beads.Bead{
+				Title:                tc.name,
+				Status:               tc.status,
+				Assignee:             tc.assignee,
+				IndefinitelyDeferred: tc.deferred,
+				Metadata:             map[string]string{"gc.routed_to": "worker"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.status == "closed" {
+				if err := mem.Close(work.ID); err != nil {
+					t.Fatal(err)
+				}
+				work, err = mem.Get(work.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			store := &conditionalReleaseProbeStore{Store: mem, mem: mem, t: t}
+			snapshot := work
+			if tc.stale {
+				snapshot.Status = "open"
+				snapshot.IndefinitelyDeferred = false
+			}
+			if released := releaseProbeAssignments(store, snapshot); len(released) != 0 {
+				t.Errorf("released = %v, want none", released)
+			}
+			if len(store.assignmentUpdates) != 0 || len(store.releaseCalls) != 0 {
+				t.Errorf("parked work was written: updates=%v releases=%v", store.assignmentUpdates, store.releaseCalls)
+			}
+			got, err := store.Get(work.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != work.Status || got.Assignee != work.Assignee || got.IndefinitelyDeferred != work.IndefinitelyDeferred {
+				t.Errorf("parked work changed: status=%q assignee=%q deferred=%v", got.Status, got.Assignee, got.IndefinitelyDeferred)
+			}
+			ready, err := store.Ready()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ready) != 0 {
+				t.Errorf("ready = %v, want parked work excluded", ready)
+			}
+		})
+	}
+}
+
+func TestReleaseOrphanedPoolAssignments_OpenOwnershipReleaseDoesNotWriteStatus(t *testing.T) {
+	store, work := newConditionalReleaseProbeStore(t)
+	if err := store.mem.Update(work.ID, beads.UpdateOpts{Status: stringPtr("open")}); err != nil {
+		t.Fatal(err)
+	}
+	work.Status = "open"
+	if released := releaseProbeAssignments(store, work); len(released) != 1 {
+		t.Fatalf("released = %v, want ordinary open orphan recovered", released)
+	}
+	if len(store.assignmentUpdates) != 1 || store.assignmentUpdates[0].Status != nil {
+		t.Fatalf("updates = %+v, want ownership-only release without a status write", store.assignmentUpdates)
+	}
+}
+
 func TestReleaseOrphanedPoolAssignments_SkipsUnassignedWorkflowRoot(t *testing.T) {
 	store := beads.NewMemStore()
 	root, err := store.Create(beads.Bead{

@@ -350,6 +350,11 @@ func liveWorkAssignmentAssigneeMatches(store beads.Store, id, expectedStatus, ex
 		if wb.ID != id {
 			continue
 		}
+		// ga-bxnj: bd's indefinite deferred status also normalizes to open;
+		// a park since the snapshot must veto release just like a new claim.
+		if wb.IndefinitelyDeferred {
+			return false, nil
+		}
 		return strings.TrimSpace(wb.Assignee) == strings.TrimSpace(expectedAssignee), nil
 	}
 	return false, nil
