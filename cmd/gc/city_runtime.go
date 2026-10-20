@@ -3671,7 +3671,7 @@ func (cr *CityRuntime) loadSessionBeadSnapshotWithPartial() (*sessionBeadSnapsho
 // on the same post-cleanup session evidence.
 func (cr *CityRuntime) cleanupDeadRuntimeSessionCorpsesAndRefresh(sessionBeads *sessionBeadSnapshot, trace *sessionReconcilerTraceCycle) *sessionBeadSnapshot {
 	start := time.Now()
-	cleaned := cleanupDeadRuntimeSessionCorpses(cr.sessionsBeadStore().Store, cr.rigBeadStores(), cr.cfg, sessionBeads, cr.sessionDrains, cr.sp, clock.Real{}, cr.stderr)
+	cleaned := cleanupDeadRuntimeSessionCorpses(cr.sessionsBeadStore().Store, cr.rigBeadStores(), cr.cfg, sessionBeads, cr.sessionDrains, cr.sp, clock.Real{}, cr.stderr) // residency:allow — moved verbatim from run() and tick() (ga-rugs); same corpse-cleanup input, no new reader
 	if trace != nil {
 		trace.RecordControllerOperation(TraceSiteControllerTickPhase, TraceReasonRetained, TraceOutcomeComplete, "cleanup_dead_runtime_session_corpses", time.Since(start), nil)
 	}

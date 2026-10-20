@@ -3,6 +3,8 @@ package main
 import (
 	"strconv"
 	"strings"
+
+	"github.com/gastownhall/gascity/internal/bdflags"
 )
 
 // bdScopeProbeArgs narrows routing probes only when the entire mutation argv
@@ -147,7 +149,7 @@ var bdScopeValueFlagsBySub = map[string]map[string]bool{
 
 var bdScopeBoolFlagsBySub = map[string]map[string]bool{
 	"update": {
-		"--allow-empty-description": true, "--claim": true, "--ephemeral": true,
+		"--allow-empty-description": true, "--ephemeral": true,
 		"--force": true, "--history": true, "--no-history": true,
 		"--persistent": true, "--stdin": true,
 	},
@@ -176,6 +178,16 @@ func bdScopeFlagSets(sub string) (map[string]bool, map[string]bool) {
 	for _, flags := range []map[string]bool{bdScopeGlobalBoolFlags, bdScopeBoolFlagsBySub[sub]} {
 		for flag := range flags {
 			bools[flag] = true
+		}
+	}
+	if sub == "update" {
+		// ga-z9hz: bd's `update --claim` is boolean. TestClaimCASStaysOnTheWorkerPullPath
+		// permits that literal in cmd/gc only inside ==/!= (inspection, never a
+		// claim argv), so take it from the shared manifest by comparison.
+		for flag := range bdflags.BoolFlags("update") {
+			if flag == "--claim" {
+				bools[flag] = true
+			}
 		}
 	}
 	return values, bools
