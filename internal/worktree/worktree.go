@@ -383,12 +383,12 @@ func Ensure(spec Spec) (Report, error) {
 	}
 	created, err := verifyCreatedWorktree(spec, branchExists, resolvedBase)
 	if err != nil {
-		return rep, rollbackResult(err, rollbackCreated(repoGit, spec.Path, spec.Branch, !branchExists))
+		return rep, rollbackResult(err, rollbackCreated(repoGit, spec.Path, spec.Branch, !branchExists, resolvedBase))
 	}
 	if spec.managed() {
 		created, err = publishAndVerifyProvenance(spec, resolvedBase)
 		if err != nil {
-			return rep, rollbackResult(err, rollbackCreated(repoGit, spec.Path, spec.Branch, !branchExists))
+			return rep, rollbackResult(err, rollbackCreated(repoGit, spec.Path, spec.Branch, !branchExists, resolvedBase))
 		}
 	}
 	created.Created = true
@@ -583,7 +583,7 @@ func planDryRun(spec Spec, rep Report, branchExists bool, resolvedBase string) (
 	if branchExists {
 		rep.Planned = []string{fmt.Sprintf("git worktree add %s %s", spec.Path, spec.Branch)}
 	} else {
-		rep.Planned = []string{fmt.Sprintf("git worktree add -b %s %s %s", spec.Branch, spec.Path, spec.Base)}
+		rep.Planned = []string{fmt.Sprintf("git worktree add --no-track -b %s %s %s", spec.Branch, spec.Path, spec.Base)}
 	}
 	if spec.managed() {
 		provenance, err := plannedProvenance(spec, resolvedBase)
@@ -600,8 +600,7 @@ func createWorktree(repoGit *git.Git, spec Spec, branchExists bool) error {
 	if branchExists {
 		err = repoGit.WorktreeAddExistingBranch(spec.Path, spec.Branch)
 	} else {
-		// Preserve the explicit base verbatim so git's own branch-setup
-		// semantics follow the operator's stated intent.
+		// Preserve the explicit base verbatim, including local-ref intent.
 		err = repoGit.WorktreeAddNewBranch(spec.Path, spec.Branch, spec.Base)
 	}
 	if err != nil {
@@ -696,7 +695,7 @@ func RollbackAttempt(spec Spec, report Report) error {
 		return fmt.Errorf("pruning rolled-back worktree: %w", err)
 	}
 	if report.BranchCreated {
-		if err := repoGit.BranchDeleteIfMerged(spec.Branch); err != nil {
+		if err := repoGit.BranchDeleteIfAt(spec.Branch, verified.Provenance.BaseSHA); err != nil {
 			return fmt.Errorf("deleting attempt-created branch %q: %w", spec.Branch, err)
 		}
 	}
@@ -722,8 +721,7 @@ func RollbackAttempt(spec Spec, report Report) error {
 // lock across the whole observe-then-create window, so a rival Ensure cannot
 // interleave; a git process outside gc still can, and this refuses to delete
 // anything it cannot show is its own. The branch is removed only when it is
-// still at the base this attempt would have created it from, and only when
-// git agrees it is merged.
+// still at the base this attempt would have created it from.
 func rollbackAfterFailedCreate(repoGit *git.Git, path, branch string, branchCreated bool, wantBaseSHA string) error {
 	var errs []error
 	matches, err := matchingRegisteredWorktrees(repoGit, path)
@@ -752,7 +750,7 @@ func rollbackAfterFailedCreate(repoGit *git.Git, path, branch string, branchCrea
 			errs = append(errs, err)
 		}
 	}
-	if branchCreated {
+	if branchCreated && len(errs) == 0 {
 		exists, err := repoGit.BranchExists(branch)
 		switch {
 		case err != nil:
@@ -767,7 +765,7 @@ func rollbackAfterFailedCreate(repoGit *git.Git, path, branch string, branchCrea
 			case wantBaseSHA != "" && head != wantBaseSHA:
 				errs = append(errs, fmt.Errorf("refusing to delete branch %q: head %s is not the base %s this attempt would have created it from", branch, head, wantBaseSHA))
 			default:
-				if err := repoGit.BranchDeleteIfMerged(branch); err != nil {
+				if err := repoGit.BranchDeleteIfAt(branch, wantBaseSHA); err != nil {
 					errs = append(errs, err)
 				}
 			}
@@ -779,7 +777,7 @@ func rollbackAfterFailedCreate(repoGit *git.Git, path, branch string, branchCrea
 // rollbackCreated undoes only artifacts created by the current Ensure call.
 // Removal is never forced: if the new worktree acquired WIP, rollback retains
 // it and reports the cleanup failure.
-func rollbackCreated(repoGit *git.Git, path, branch string, branchCreated bool) error {
+func rollbackCreated(repoGit *git.Git, path, branch string, branchCreated bool, baseSHA string) error {
 	var errs []error
 	if err := repoGit.WorktreeRemove(path, false); err != nil {
 		errs = append(errs, err)
@@ -787,8 +785,8 @@ func rollbackCreated(repoGit *git.Git, path, branch string, branchCreated bool) 
 	if err := repoGit.WorktreePrune(); err != nil {
 		errs = append(errs, err)
 	}
-	if branchCreated {
-		if err := repoGit.BranchDeleteIfMerged(branch); err != nil {
+	if branchCreated && len(errs) == 0 {
+		if err := repoGit.BranchDeleteIfAt(branch, baseSHA); err != nil {
 			errs = append(errs, err)
 		}
 	}

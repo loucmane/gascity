@@ -98,7 +98,9 @@ func (g *Git) WorktreeAddNewBranch(path, branch, base string) error {
 	if err := validateRefArg("path", path); err != nil {
 		return err
 	}
-	if _, err := g.run("worktree", "add", "-b", branch, path, base); err != nil {
+	// ga-0gfr: workspace branches need no upstream; tracking would write the
+	// shared config and collide with a sibling worker's config.lock.
+	if _, err := g.run("worktree", "add", "--no-track", "-b", branch, path, base); err != nil {
 		return fmt.Errorf("adding worktree %q on new branch %q from %q: %w", path, branch, base, err)
 	}
 	return nil
@@ -120,21 +122,30 @@ func (g *Git) WorktreeAddExistingBranch(path, branch string) error {
 	return nil
 }
 
-// BranchDeleteIfMerged deletes a local branch only when git can prove the
-// deletion loses nothing, and returns an error when it cannot.
-//
-// It uses `git branch -d` rather than `-D` deliberately. Rollback paths reach
-// here holding a branch an agent may have committed to, and a worktree with
-// commits still has a clean status, so a working-tree check cannot see them.
-// `-D` would delete the only ref reaching those commits and orphan them; `-d`
-// refuses instead, which is the correct outcome for a rollback that would
-// otherwise destroy work it did not create.
-func (g *Git) BranchDeleteIfMerged(branch string) error {
+// BranchDeleteIfAt deletes an unchecked-out local branch only if its tip still
+// equals the exact expected SHA. The comparison and deletion are atomic.
+func (g *Git) BranchDeleteIfAt(branch, sha string) error {
 	if err := validateRefArg("branch", branch); err != nil {
 		return err
 	}
-	if _, err := g.run("branch", "-d", branch); err != nil {
-		return fmt.Errorf("deleting branch %q: %w", branch, err)
+	if !isHexObjectID(sha) || strings.Trim(sha, "0") == "" {
+		return fmt.Errorf("deleting branch %q: expected SHA must be a nonzero full object ID", branch)
+	}
+	// update-ref does not enforce branch -d's checked-out guard. Retain it so
+	// an unsuccessful worktree removal cannot leave its HEAD without a branch.
+	worktrees, err := g.WorktreeList()
+	if err != nil {
+		return fmt.Errorf("checking worktrees before deleting branch %q: %w", branch, err)
+	}
+	for _, wt := range worktrees {
+		if wt.Branch == branch {
+			return fmt.Errorf("refusing to delete branch %q: checked out at %q", branch, wt.Path)
+		}
+	}
+	// ga-0gfr: a stale main checkout must not block rollback at the base SHA,
+	// and a concurrent commit must survive the delete's compare-and-swap.
+	if _, err := g.run("update-ref", "--no-deref", "-d", "refs/heads/"+branch, sha); err != nil {
+		return fmt.Errorf("deleting branch %q at %s: %w", branch, sha, err)
 	}
 	return nil
 }

@@ -219,6 +219,109 @@ func TestEnsureCreatesNewBranchWorktree(t *testing.T) {
 	}
 }
 
+// remoteBaseAheadOfHEAD models a fetched base while the main checkout is stale.
+func remoteBaseAheadOfHEAD(t *testing.T) (repo, base, sha string) {
+	t.Helper()
+	repo, _ = initTestRepo(t)
+	oldHead := runGit(t, repo, "rev-parse", "HEAD")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "new base")
+	sha = runGit(t, repo, "rev-parse", "HEAD")
+	publishRemoteRef(t, repo, "main", sha)
+	runGit(t, repo, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	runGit(t, repo, "config", "branch.autoSetupMerge", "true")
+	runGit(t, repo, "checkout", "--detach", oldHead)
+	return repo, "origin/main", sha
+}
+
+func TestEnsureRemoteBaseDoesNotWriteTrackingConfig(t *testing.T) {
+	for _, locked := range []bool{false, true} {
+		name := "unlocked"
+		if locked {
+			name = "config.lock exists"
+		}
+		t.Run(name, func(t *testing.T) {
+			repo, base, baseSHA := remoteBaseAheadOfHEAD(t)
+			configPath := filepath.Join(repo, ".git", "config")
+			before, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if locked {
+				if err := os.WriteFile(configPath+".lock", nil, 0o444); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root := t.TempDir()
+			spec := managedSpec(repo, root, filepath.Join(root, "wt"), "work/no-track", base)
+			spec.BaseSHA = baseSHA
+			rep, err := Ensure(spec)
+			if err != nil {
+				t.Fatalf("Ensure with remote base: %v", err)
+			}
+			if !rep.Created || !rep.BranchCreated || rep.Head != baseSHA {
+				t.Fatalf("Ensure report = %+v, want new worktree at %s", rep, baseSHA)
+			}
+			if config := runGit(t, repo, "config", "--local", "--list"); strings.Contains(config, "branch."+spec.Branch+".merge=") {
+				t.Errorf("Ensure wrote upstream tracking: %s", config)
+			}
+			after, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Error("Ensure changed the shared git config")
+			}
+			if locked {
+				if _, err := os.Stat(configPath + ".lock"); err != nil {
+					t.Errorf("Ensure changed the existing config lock: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestEnsureFailureRollsBackBranchAheadOfHEAD(t *testing.T) {
+	for _, phase := range []string{"create", "verify"} {
+		t.Run(phase, func(t *testing.T) {
+			repo, base, baseSHA := remoteBaseAheadOfHEAD(t)
+			// A branch without tracking must roll back even if HEAD is stale.
+			// Tracking would let branch -d compare against origin/main instead.
+			runGit(t, repo, "config", "branch.autoSetupMerge", "false")
+			hooks := t.TempDir()
+			runGit(t, repo, "config", "core.hooksPath", hooks)
+			hook := "#!/bin/sh\necho ga-0gfr-post-checkout-failure >&2\nexit 1\n"
+			wantError := "ga-0gfr-post-checkout-failure"
+			if phase == "verify" {
+				// Detach after creation so Ensure's postcondition check fails.
+				hook = "#!/bin/sh\ngit update-ref --no-deref HEAD " + baseSHA + "\n"
+				wantError = "failed post-create verification"
+			}
+			if err := os.WriteFile(filepath.Join(hooks, "post-checkout"), []byte(hook), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			root := t.TempDir()
+			spec := managedSpec(repo, root, filepath.Join(root, "wt"), "work/failed", base)
+			spec.BaseSHA = baseSHA
+			_, err := Ensure(spec)
+			if err == nil || !strings.Contains(err.Error(), wantError) {
+				t.Fatalf("Ensure error = %v, want %s", err, wantError)
+			}
+			if !strings.Contains(err.Error(), "(rolled back)") {
+				t.Errorf("Ensure did not complete rollback: %v", err)
+			}
+			if exists, err := git.New(repo).BranchExists(spec.Branch); err != nil || exists {
+				t.Errorf("attempt-created branch remains: exists=%v err=%v", exists, err)
+			}
+			if _, err := os.Stat(spec.Path); !os.IsNotExist(err) {
+				t.Errorf("attempt-created path remains: %v", err)
+			}
+			if matches, err := matchingRegisteredWorktrees(git.New(repo), spec.Path); err != nil || len(matches) != 0 {
+				t.Errorf("attempt-created registration remains: %v, %v", matches, err)
+			}
+		})
+	}
+}
+
 func TestEnsureIdempotent(t *testing.T) {
 	repo, base := initTestRepo(t)
 	wt := filepath.Join(t.TempDir(), "wt")
@@ -379,7 +482,7 @@ func TestRollbackRemovesCreatedState(t *testing.T) {
 	if err := g.WorktreeAddNewBranch(wt, "doomed", base); err != nil {
 		t.Fatalf("WorktreeAddNewBranch: %v", err)
 	}
-	if err := rollbackCreated(g, wt, "doomed", true); err != nil {
+	if err := rollbackCreated(g, wt, "doomed", true, runGit(t, repo, "rev-parse", base)); err != nil {
 		t.Fatalf("rollbackCreated: %v", err)
 	}
 	if _, statErr := os.Stat(wt); statErr == nil {
@@ -398,7 +501,7 @@ func TestRollbackKeepsPreexistingBranch(t *testing.T) {
 	if err := g.WorktreeAddExistingBranch(wt, "keep"); err != nil {
 		t.Fatalf("WorktreeAddExistingBranch: %v", err)
 	}
-	if err := rollbackCreated(g, wt, "keep", false); err != nil {
+	if err := rollbackCreated(g, wt, "keep", false, ""); err != nil {
 		t.Fatalf("rollbackCreated: %v", err)
 	}
 	if _, statErr := os.Stat(wt); statErr == nil {
@@ -421,7 +524,7 @@ func TestRollbackPreservesDirtyAttemptState(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if err := rollbackCreated(g, wt, "dirty", true); err == nil {
+	if err := rollbackCreated(g, wt, "dirty", true, runGit(t, repo, "rev-parse", base)); err == nil {
 		t.Fatal("rollbackCreated removed a dirty worktree")
 	}
 	if got, err := os.ReadFile(marker); err != nil || string(got) != "keep" {
@@ -568,7 +671,8 @@ func TestEnsureManagedWorktreeRefusesNonCanonicalOrNestedPath(t *testing.T) {
 }
 
 func TestRollbackAttemptRemovesOnlyAttemptCreatedState(t *testing.T) {
-	repo, base := initTestRepo(t)
+	repo, base, _ := remoteBaseAheadOfHEAD(t)
+	runGit(t, repo, "config", "branch.autoSetupMerge", "false")
 	root := t.TempDir()
 	wt := filepath.Join(root, "gc-test")
 	spec := managedSpec(repo, root, wt, "work/gc-test", base)
@@ -587,7 +691,7 @@ func TestRollbackAttemptRemovesOnlyAttemptCreatedState(t *testing.T) {
 	}
 
 	preexisting := filepath.Join(root, "preexisting")
-	runGit(t, repo, "branch", "keep", base)
+	runGit(t, repo, "branch", "--no-track", "keep", base)
 	preSpec := managedSpec(repo, root, preexisting, "keep", base)
 	preRep, err := Ensure(preSpec)
 	if err != nil {

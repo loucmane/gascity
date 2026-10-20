@@ -119,22 +119,41 @@ func TestWorktreeAddExistingBranch(t *testing.T) {
 	}
 }
 
-func TestBranchDelete(t *testing.T) {
+func TestBranchDeleteIfAt(t *testing.T) {
 	dir := initTestRepo(t)
 	g := New(dir)
-	base, err := g.CurrentBranch()
-	if err != nil {
-		t.Fatalf("CurrentBranch: %v", err)
+	base := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD"))
+	checkedOut := strings.TrimSpace(runGit(t, dir, "branch", "--show-current"))
+	runGit(t, dir, "commit", "--allow-empty", "-m", "new tip")
+	tip := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD"))
+	runGit(t, dir, "branch", "attempt", tip)
+
+	// Even a tip merged into HEAD must survive a stale expected SHA.
+	if err := g.BranchDeleteIfAt("attempt", base); err == nil {
+		t.Fatal("BranchDeleteIfAt deleted a branch that moved from the expected SHA")
 	}
-	runGit(t, dir, "branch", "doomed", base)
-	if exists, err := g.BranchExists("doomed"); err != nil || !exists {
-		t.Fatalf("setup: branch doomed missing (%v, %v)", exists, err)
+	for _, invalid := range []string{"", "HEAD", tip[:12], strings.Repeat("0", 40)} {
+		if err := g.BranchDeleteIfAt("attempt", invalid); err == nil {
+			t.Fatalf("BranchDeleteIfAt accepted invalid expected SHA %q", invalid)
+		}
 	}
-	if err := g.BranchDeleteIfMerged("doomed"); err != nil {
-		t.Fatalf("BranchDeleteIfMerged: %v", err)
+	if got := strings.TrimSpace(runGit(t, dir, "rev-parse", "attempt")); got != tip {
+		t.Fatalf("branch after refused deletes = %q, want %q", got, tip)
 	}
-	if exists, err := g.BranchExists("doomed"); err != nil || exists {
-		t.Errorf("branch doomed after BranchDeleteIfMerged = %v, %v; want false, nil", exists, err)
+	if err := g.BranchDeleteIfAt(checkedOut, tip); err == nil {
+		t.Fatal("BranchDeleteIfAt deleted a checked-out branch")
+	}
+	if got := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD")); got != tip {
+		t.Fatalf("checked-out branch changed: got %q, want %q", got, tip)
+	}
+
+	// Successful deletion depends only on the exact SHA, even with HEAD behind.
+	runGit(t, dir, "checkout", "--detach", base)
+	if err := g.BranchDeleteIfAt("attempt", tip); err != nil {
+		t.Fatalf("BranchDeleteIfAt at expected SHA: %v", err)
+	}
+	if exists, err := g.BranchExists("attempt"); err != nil || exists {
+		t.Fatalf("branch after deletion: exists=%v err=%v", exists, err)
 	}
 }
 
@@ -262,6 +281,9 @@ func TestWorktreeOpsRefuseOptionInjection(t *testing.T) {
 	}
 	if _, err := g.RevParseVerifyCommit("--help"); err == nil {
 		t.Error("RevParseVerifyCommit(--help) succeeded, want error")
+	}
+	if err := g.BranchDeleteIfAt("--help", strings.Repeat("a", 40)); err == nil {
+		t.Error("BranchDeleteIfAt(--help) succeeded, want error")
 	}
 	wtPath := filepath.Join(t.TempDir(), "wt")
 	if err := g.WorktreeAddNewBranch(wtPath, "--force", "HEAD"); err == nil {
