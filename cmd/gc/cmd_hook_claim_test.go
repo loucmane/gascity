@@ -6,12 +6,264 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/session"
 )
+
+// ga-g189: pool workers sharing a route must only claim their own managed tree,
+// regardless of which bead sorts first or which worker polls first.
+func TestHookClaimManagedWorktreeSessionOrder(t *testing.T) {
+	for _, candidateOrder := range [][]string{{"A", "B"}, {"B", "A"}} {
+		for _, sessionOrder := range [][]string{{"A", "B"}, {"B", "A"}} {
+			t.Run(strings.Join(candidateOrder, "")+"/"+strings.Join(sessionOrder, ""), func(t *testing.T) {
+				root := t.TempDir()
+				work := beads.NewMemStoreFrom(1, []beads.Bead{
+					hookClaimManagedWorkspaceBead("A", filepath.Join(root, "A")),
+					hookClaimManagedWorkspaceBead("B", filepath.Join(root, "B")),
+				}, nil)
+				for _, id := range sessionOrder {
+					v := hookClaimWorkspaceSession(t, id, filepath.Join(root, id))
+					var candidates []beads.Bead
+					for _, candidateID := range candidateOrder {
+						b, err := work.Get(candidateID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						candidates = append(candidates, b)
+					}
+					result, attempts, reclaimed := runHookClaimWorkspaceCandidates(t, v, work, candidates, false)
+					if result.BeadID != id || strings.Join(attempts, ",") != id || len(reclaimed) != 0 {
+						t.Fatalf("session %s claimed %q; attempts=%v reclaimed=%v, want only %s", id, result.BeadID, attempts, reclaimed, id)
+					}
+				}
+				for _, id := range sessionOrder {
+					b, err := work.Get(id)
+					if err != nil || b.Assignee != "session-"+id || b.Status != "in_progress" {
+						t.Fatalf("bead %s = %+v, %v; want its own session", id, b, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestHookClaimManagedWorktreeReclaim(t *testing.T) {
+	for _, name := range []string{"foreign_only", "own_after_foreign"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			v := hookClaimWorkspaceSession(t, "A", filepath.Join(root, "A"))
+			other := hookClaimManagedWorkspaceBead("B", filepath.Join(root, "B"))
+			other.Assignee, other.Status = "dead-B", "in_progress"
+			candidates := []beads.Bead{other}
+			want := ""
+			if name == "own_after_foreign" {
+				own := hookClaimManagedWorkspaceBead("A", filepath.Join(root, "A"))
+				own.Assignee, own.Status = "dead-A", "in_progress"
+				candidates = append(candidates, own)
+				want = "A"
+			}
+			work := beads.NewMemStoreFrom(1, candidates, nil)
+			result, attempts, reclaimed := runHookClaimWorkspaceCandidates(t, v, work, candidates, true)
+			if result.BeadID != want || strings.Join(attempts, ",") != want || strings.Join(reclaimed, ",") != want {
+				t.Fatalf("result=%+v claims=%v reclaims=%v; want only %q", result, attempts, reclaimed, want)
+			}
+			got, err := work.Get("B")
+			if err != nil || got.Assignee != other.Assignee || got.Revision != other.Revision {
+				t.Fatalf("foreign candidate changed: %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestHookClaimManagedWorktreeCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*beads.Bead)
+		want   string
+	}{
+		{name: "different managed tree"},
+		{name: "no work dir", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkDirMetadataKey) }, want: "B"},
+		{name: "work dir only", change: func(b *beads.Bead) {
+			b.Metadata = map[string]string{beadmeta.RoutedToMetadataKey: "rig/worker", beadmeta.WorkDirMetadataKey: b.Metadata[beadmeta.WorkDirMetadataKey]}
+		}, want: "B"},
+		{name: "branch without ownership", change: func(b *beads.Bead) {
+			for _, key := range worktreeOwnershipEvidenceKeys {
+				delete(b.Metadata, key)
+			}
+		}, want: "B"},
+		{name: "partial ownership", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorktreeOwnerMetadataKey) }, want: "B"},
+		{name: "missing branch", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkBranchMetadataKey) }, want: "B"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			v := hookClaimWorkspaceSession(t, "A", filepath.Join(root, "A"))
+			b := hookClaimManagedWorkspaceBead("B", filepath.Join(root, "B"))
+			if tc.change != nil {
+				tc.change(&b)
+			}
+			candidates := []beads.Bead{b}
+			if tc.want != "" {
+				candidates = append(candidates, hookClaimManagedWorkspaceBead("A", filepath.Join(root, "A")))
+			}
+			work := beads.NewMemStoreFrom(1, candidates, nil)
+			result, attempts, _ := runHookClaimWorkspaceCandidates(t, v, work, candidates, false)
+			if result.BeadID != tc.want || strings.Join(attempts, ",") != tc.want {
+				t.Fatalf("result=%+v claims=%v; want %q", result, attempts, tc.want)
+			}
+		})
+	}
+}
+
+func TestHookClaimManagedWorktreeUnknownSessionDirectory(t *testing.T) {
+	for _, dir := range []string{"", "relative/tree"} {
+		t.Run(dir, func(t *testing.T) {
+			v := hookClaimWorkspaceSession(t, "A", dir)
+			b := hookClaimManagedWorkspaceBead("A", filepath.Join(t.TempDir(), "A"))
+			work := beads.NewMemStoreFrom(1, []beads.Bead{b}, nil)
+			result, attempts, _ := runHookClaimWorkspaceCandidates(t, v, work, []beads.Bead{b}, false)
+			if result.BeadID != "" || len(attempts) != 0 {
+				t.Fatalf("unknown session directory claimed work: result=%+v claims=%v", result, attempts)
+			}
+		})
+	}
+}
+
+func TestHookClaimManagedWorktreeKeepsNonPoolBehavior(t *testing.T) {
+	v, _ := newVerifiedHookFixture(t)
+	b := hookClaimManagedWorkspaceBead("B", filepath.Join(t.TempDir(), "B"))
+	work := beads.NewMemStoreFrom(1, []beads.Bead{b}, nil)
+	result, attempts, _ := runHookClaimWorkspaceCandidates(t, v, work, []beads.Bead{b}, false)
+	if result.BeadID != "B" || strings.Join(attempts, ",") != "B" {
+		t.Fatalf("non-pool session changed behavior: result=%+v claims=%v", result, attempts)
+	}
+}
+
+func TestHookClaimManagedWorktreeSessionReadFailure(t *testing.T) {
+	v, own := newVerifiedHookFixture(t)
+	own.readError = errors.New("session store unavailable")
+	b := hookClaimManagedWorkspaceBead("B", filepath.Join(t.TempDir(), "B"))
+	ops := hookClaimOps{
+		Claim: func(context.Context, string, []string, string, string) (beads.Bead, bool, error) {
+			t.Fatal("claimed without verifying the session directory")
+			return beads.Bead{}, false, nil
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	outcome := claimFirstEligibleHookCandidate([]beads.Bead{b}, hookClaimOptions{
+		Verified: v, RouteTargets: []string{"rig/worker"}, JSON: true,
+	}, ops, "", &stdout, &stderr)
+	var result hookClaimJSONResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.terminal || outcome.code != 1 || result.Reason != hookClaimReasonClaimsErrored ||
+		!strings.Contains(stderr.String(), own.readError.Error()) {
+		t.Fatalf("session read failure: outcome=%+v result=%+v stderr=%q", outcome, result, stderr.String())
+	}
+}
+
+func TestHookClaimManagedWorktreeSymlink(t *testing.T) {
+	root := t.TempDir()
+	tree := filepath.Join(root, "tree")
+	alias := filepath.Join(root, "alias")
+	if err := os.Mkdir(tree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(tree, alias); err != nil {
+		t.Fatal(err)
+	}
+	v := hookClaimWorkspaceSession(t, "A", alias)
+	b := hookClaimManagedWorkspaceBead("A", tree)
+	work := beads.NewMemStoreFrom(1, []beads.Bead{b}, nil)
+	result, attempts, _ := runHookClaimWorkspaceCandidates(t, v, work, []beads.Bead{b}, false)
+	if result.BeadID != "A" || strings.Join(attempts, ",") != "A" {
+		t.Fatalf("same tree through alias: result=%+v claims=%v", result, attempts)
+	}
+}
+
+func hookClaimManagedWorkspaceBead(id, dir string) beads.Bead {
+	return beads.Bead{
+		ID: id, Type: "task", Status: "open", Revision: 1,
+		Metadata: map[string]string{
+			beadmeta.RoutedToMetadataKey:           "rig/worker",
+			beadmeta.WorkDirMetadataKey:            dir,
+			beadmeta.WorkBranchMetadataKey:         "work/" + id,
+			beadmeta.WorktreeRepoMetadataKey:       filepath.Join(filepath.Dir(dir), "repo"),
+			beadmeta.WorktreeRootMetadataKey:       filepath.Dir(dir),
+			beadmeta.WorktreeBaseRefMetadataKey:    "main",
+			beadmeta.WorktreeBaseSHAMetadataKey:    strings.Repeat("a", 40),
+			beadmeta.WorktreeCreatorMetadataKey:    "gc-sling",
+			beadmeta.WorktreeOwnerMetadataKey:      "gc-sling",
+			beadmeta.WorktreeGenerationMetadataKey: "1",
+			beadmeta.WorktreeLifecycleMetadataKey:  "active",
+		},
+	}
+}
+
+func hookClaimWorkspaceSession(t *testing.T, id, dir string) *VerifiedSession {
+	t.Helper()
+	id = "session-" + id
+	mem := beads.NewMemStoreFrom(1, []beads.Bead{{
+		ID: id, Type: session.BeadType, Status: "open", Revision: 1,
+		Metadata: map[string]string{
+			"instance_token": "fixture", "generation": "1", "state": "active",
+			"template": "rig/worker", "session_name": id, "pool_managed": "true",
+			"work_dir": dir,
+		},
+	}}, nil)
+	front := session.NewStore(beads.SessionStore{Store: mem})
+	verified, err := front.VerifySession(id, "fixture", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &VerifiedSession{VerifiedSession: verified, front: front}
+}
+
+func runHookClaimWorkspaceCandidates(t *testing.T, v *VerifiedSession, work *beads.MemStore, candidates []beads.Bead, reclaim bool) (hookClaimJSONResult, []string, []string) {
+	t.Helper()
+	installVerifiedWorkStore(t, v, work)
+	var attempts, reclaimed []string
+	ops := hookClaimOps{
+		Claim: func(_ context.Context, _ string, _ []string, id, assignee string) (beads.Bead, bool, error) {
+			attempts = append(attempts, id)
+			status := "in_progress"
+			if err := work.Update(id, beads.UpdateOpts{Assignee: &assignee, Status: &status}); err != nil {
+				return beads.Bead{}, false, err
+			}
+			b, err := work.Get(id)
+			return b, true, err
+		},
+		ReclaimStale: func(_ context.Context, _ string, _ []string, id string) (bool, string, error) {
+			reclaimed = append(reclaimed, id)
+			b, err := work.Get(id)
+			return err == nil, b.Assignee, err
+		},
+		EmitHookClaimReclaimedStale: func(string, string, string) {},
+	}
+	opts := hookClaimOptions{
+		Verified: v, SessionID: v.ID, Assignee: v.assignee(), IdentityCandidates: v.identifiers(),
+		RouteTargets: []string{"rig/worker"}, JSON: true, AutoReclaimStaleClaims: reclaim,
+	}
+	var stdout, stderr bytes.Buffer
+	outcome := claimFirstEligibleHookCandidate(candidates, opts, ops, "", &stdout, &stderr)
+	if outcome.code != 0 || outcome.claimsErrored {
+		t.Fatalf("claim failed: outcome=%+v stdout=%q stderr=%q", outcome, stdout.String(), stderr.String())
+	}
+	var result hookClaimJSONResult
+	if outcome.terminal {
+		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+			t.Fatalf("result %q, stderr %q: %v", stdout.String(), stderr.String(), err)
+		}
+	}
+	return result, attempts, reclaimed
+}
 
 func TestHookClaimWithBdStoreReloadsCanonicalBeadAfterPartialMutation(t *testing.T) {
 	originalRunner := hookClaimCommandRunnerWithEnvContext

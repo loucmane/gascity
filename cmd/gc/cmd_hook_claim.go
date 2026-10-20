@@ -827,16 +827,26 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 	now := ops.nowOrWallClock()
 	for _, candidate := range candidates {
 		reclaimedFrom := ""
-		if !hookCandidateClaimable(candidate, opts.RouteTargets, now) {
+		claimable := hookCandidateClaimable(candidate, opts.RouteTargets, now)
+		if !claimable && (!opts.AutoReclaimStaleClaims || !hookCandidateReclaimEligible(candidate, opts.RouteTargets, now)) {
+			continue
+		}
+		// ga-g189: pool seats share a route, but a managed per-bead workspace
+		// belongs to the seat in that tree. Check before either mutation so
+		// reclaim cannot release another tree's work before we skip it.
+		matchesWorkspace, err := hookCandidateMatchesSessionWorktree(candidate, opts.Verified)
+		if err != nil {
+			return hookClaimResult{terminal: true, code: verifiedHookFailure(err, opts, stdout, stderr)}
+		}
+		if !matchesWorkspace {
+			continue
+		}
+		if !claimable {
 			// ga-7rj87d FR1/FR2: a route-matched candidate whose ONLY claim
 			// blocker is an existing (possibly stale) assignee gets a scoped,
 			// opt-in reclaim attempt before being skipped. Off by default
-			// (NFR4/NFR5): the flag check short-circuits before
-			// hookCandidateReclaimEligible or ops.ReclaimStale ever run, so the
-			// flag-off path is byte-for-byte unchanged.
-			if !opts.AutoReclaimStaleClaims || !hookCandidateReclaimEligible(candidate, opts.RouteTargets, now) {
-				continue
-			}
+			// (NFR4/NFR5): the flag check above short-circuits before
+			// hookCandidateReclaimEligible or ops.ReclaimStale ever run.
 			if ops.claimWindowSpent() {
 				return refuseExpiredHookClaimWindow(candidate.ID, ops, stderr)
 			}
@@ -940,6 +950,31 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 	}
 
 	return hookClaimResult{claimsErrored: claimsErrored}
+}
+
+// hookCandidateMatchesSessionWorktree restricts managed per-bead workspaces to
+// pool sessions in the same tree. Legacy candidates keep their existing order.
+func hookCandidateMatchesSessionWorktree(candidate beads.Bead, v *VerifiedSession) (bool, error) {
+	workDir := strings.TrimSpace(candidate.Metadata[beadmeta.WorkDirMetadataKey])
+	if v == nil || workDir == "" || strings.TrimSpace(candidate.Metadata[beadmeta.WorkBranchMetadataKey]) == "" {
+		return true, nil
+	}
+	for _, key := range worktreeOwnershipEvidenceKeys {
+		if strings.TrimSpace(candidate.Metadata[key]) == "" {
+			return true, nil
+		}
+	}
+	info, err := v.front.ReadVerified(v.VerifiedSession)
+	if err != nil {
+		return false, err
+	}
+	if !isPoolManagedSessionInfo(info) {
+		return true, nil
+	}
+	// ResolveSessionWorkDir is a stamping seam that deliberately hides pool
+	// directories (gc-j0cfh). Compare the verified row's actual directory here.
+	sessionDir := strings.TrimSpace(info.WorkDir)
+	return filepath.IsAbs(workDir) && filepath.IsAbs(sessionDir) && samePath(workDir, sessionDir), nil
 }
 
 // mergeHookClaimCandidateMetadata retains work-query metadata when bd update
