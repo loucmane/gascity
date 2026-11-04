@@ -47,6 +47,9 @@ var (
 // turn-able once created, so the Transport.Launch over the returned Place is a
 // no-op.
 func (r *t3Runtime) Provision(ctx context.Context, name string, req runtime.ProvisionRequest) (runtime.Place, error) {
+	if err := r.p.refuseDelegatedLaunch(); err != nil {
+		return nil, err
+	}
 	// Provision creates a new running session. Raw Start also supports thread
 	// reuse, but reusing an already-live session is not Provider.Start's contract.
 	if r.p.isRunning(name, true) {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/execgrace"
+	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/gastownhall/gascity/internal/runtime"
 )
 
@@ -189,6 +190,9 @@ func (p *Provider) runWithTTY(args ...string) error {
 // trust, bypass permissions) in Go using Peek + SendKeys, sharing the
 // same logic as the tmux provider via [runtime.AcceptStartupDialogs].
 func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) error {
+	if err := platforminstall.RefuseUnboundProviderTransport("exec", cfg.Env["GC_CITY_PATH"], cfg.Env["GC_CITY"]); err != nil {
+		return err
+	}
 	// Was this name already occupied before we touched it? Asked structurally,
 	// before the attempt, because it is the only question whose answer cannot
 	// be garbled by how the adapter happens to word a refusal — and it is the
@@ -264,6 +268,9 @@ func (p *Provider) supportsSeparableLaunch() bool {
 // agent is launched separately by launchAgent. Otherwise it falls back to the
 // welded Start (which both provisions and launches). (Un-weld B3b.)
 func (p *Provider) provisionBox(ctx context.Context, name string, cfg runtime.Config) error {
+	if err := platforminstall.RefuseUnboundProviderTransport("exec", cfg.Env["GC_CITY_PATH"], cfg.Env["GC_CITY"]); err != nil {
+		return err
+	}
 	if !p.supportsSeparableLaunch() {
 		return p.Start(ctx, name, cfg)
 	}
@@ -284,6 +291,9 @@ func (p *Provider) provisionBox(ctx context.Context, name string, cfg runtime.Co
 // working directory and the box env is set at provision time, so neither an
 // explicit -c nor -e is needed (workdir + env are provision-half). (Un-weld B3b.)
 func (p *Provider) launchAgent(ctx context.Context, name string, cfg runtime.Config) error {
+	if err := platforminstall.RefuseUnboundProviderTransport("exec", cfg.Env["GC_CITY_PATH"], cfg.Env["GC_CITY"]); err != nil {
+		return err
+	}
 	if !p.supportsSeparableLaunch() {
 		return nil
 	}
@@ -311,6 +321,9 @@ func (p *Provider) launchAgent(ctx context.Context, name string, cfg runtime.Con
 // welded pack has no in-place relaunch (the agent is welded into `start`), so it
 // degrades to a full reprovision (Stop+Start), which is still correct.
 func (p *Provider) Relaunch(ctx context.Context, name string, cfg runtime.Config) error {
+	if err := platforminstall.RefuseUnboundProviderTransport("exec", cfg.Env["GC_CITY_PATH"], cfg.Env["GC_CITY"]); err != nil {
+		return err
+	}
 	if p.supportsSeparableLaunch() {
 		return p.launchAgent(ctx, name, cfg)
 	}

@@ -74,10 +74,10 @@ func newSeamBackedSnapshotTestProvider(t *testing.T, wsURL string) (*seamBackedP
 	t.Setenv("T3_WS_URL", wsURL)
 	t.Setenv("GC_T3BRIDGE_STATE_DIR", t.TempDir())
 
-	sp := NewSeamBacked()
+	sp := NewSeamBacked("")
 	backed, ok := sp.(*seamBackedProvider)
 	if !ok {
-		t.Fatalf("NewSeamBacked() type = %T, want *seamBackedProvider", sp)
+		t.Fatalf("NewSeamBacked type = %T, want *seamBackedProvider", sp)
 	}
 	return backed, sp
 }

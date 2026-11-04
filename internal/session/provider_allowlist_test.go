@@ -104,6 +104,12 @@ func TestNativeLaunchUsesApprovedExecutable(t *testing.T) {
 				}
 				for _, call := range provider.SnapshotCalls() {
 					if call.Method == "Start" {
+						if shape != "legacy stale manifest" && call.Config.Env["GC_CITY_PATH"] != city {
+							t.Errorf("delegated runtime lost authoritative city: %q", call.Config.Env["GC_CITY_PATH"])
+						}
+						if shape == "legacy stale manifest" && call.Config.Env["GC_CITY_PATH"] != "" {
+							t.Error("legacy runtime environment changed")
+						}
 						if shape == "legacy stale manifest" && call.Config.Command != command {
 							t.Fatalf("legacy command changed: %q", call.Config.Command)
 						}

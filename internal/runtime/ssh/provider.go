@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/gastownhall/gascity/internal/runtime"
 )
 
@@ -106,6 +107,9 @@ const defaultRemoteShell = "/bin/sh"
 // AcceptStartupDialogs), CopyTo, and live SessionLive re-apply on drift (RunLive
 // is a no-op, matching k8s; SessionLive is applied once at startup).
 func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) error {
+	if err := platforminstall.RefuseUnboundProviderTransport("ssh", cfg.Env["GC_CITY_PATH"], cfg.Env["GC_CITY"]); err != nil {
+		return err
+	}
 	if !validTmuxName.MatchString(name) {
 		return fmt.Errorf("%w %q: must match %s", ErrInvalidSessionName, name, validTmuxName.String())
 	}
@@ -264,6 +268,9 @@ func (p *Provider) runPostLaunchSetup(ctx context.Context, name string, cfg runt
 // by the original new-session; a launch-only env change is not re-applied
 // (matching tmux B1's "does not re-inject env hints").
 func (p *Provider) Relaunch(ctx context.Context, name string, cfg runtime.Config) error {
+	if err := platforminstall.RefuseUnboundProviderTransport("ssh", cfg.Env["GC_CITY_PATH"], cfg.Env["GC_CITY"]); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

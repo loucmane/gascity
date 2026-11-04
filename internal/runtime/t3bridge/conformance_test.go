@@ -18,7 +18,7 @@ import (
 func TestT3SeamConformance(t *testing.T) {
 	var counter int64
 	runtimetest.RunProviderTests(t, func(caseT *testing.T) (runtime.Provider, runtime.Config, string) {
-		return NewSeamBacked(), t3ConformanceConfig(caseT), fmt.Sprintf("t3-contract-%d", atomic.AddInt64(&counter, 1))
+		return NewSeamBacked(""), t3ConformanceConfig(caseT), fmt.Sprintf("t3-contract-%d", atomic.AddInt64(&counter, 1))
 	})
 }
 
@@ -31,7 +31,7 @@ func t3ConformanceConfig(t *testing.T) runtime.Config {
 }
 
 func TestT3PersistentStopRestartPreservesThread(t *testing.T) {
-	p := NewSeamBacked()
+	p := NewSeamBacked("")
 	name, cfg := "t3-persistent-contract", t3ConformanceConfig(t)
 	if err := p.Start(context.Background(), name, cfg); err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestT3PersistentStopRestartPreservesThread(t *testing.T) {
 }
 
 func TestT3PersistentTransitionRefusals(t *testing.T) {
-	p := NewSeamBacked()
+	p := NewSeamBacked("")
 	name, cfg := "t3-transition-refusal", t3ConformanceConfig(t)
 	if err := p.Start(context.Background(), name, cfg); err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestT3PersistentTransitionRefusals(t *testing.T) {
 }
 
 func TestT3PersistentReadyRestartDoesNotStopThread(t *testing.T) {
-	p := NewSeamBacked()
+	p := NewSeamBacked("")
 	name, cfg := "t3-ready-restart", t3ConformanceConfig(t)
 	if err := p.Start(context.Background(), name, cfg); err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestT3PersistentReadyRestartDoesNotStopThread(t *testing.T) {
 }
 
 func TestT3AssignedStopTerminatesSession(t *testing.T) {
-	p := NewSeamBacked()
+	p := NewSeamBacked("")
 	name, cfg := "t3-assigned-contract", t3ConformanceConfig(t)
 	envelope := StartupEnvelope{
 		GC:         GCSection{Agent: "contract-agent", Template: "contract-agent", SessionName: name},
@@ -211,7 +211,7 @@ func TestT3AssignedStopTerminatesSession(t *testing.T) {
 }
 
 func TestT3DrainMetadataCannotReattachStoppedSeam(t *testing.T) {
-	p := NewSeamBacked()
+	p := NewSeamBacked("")
 	name, cfg := "t3-drain-metadata", t3ConformanceConfig(t)
 	if err := p.Start(context.Background(), name, cfg); err != nil {
 		t.Fatal(err)
@@ -227,13 +227,13 @@ func TestT3DrainMetadataCannotReattachStoppedSeam(t *testing.T) {
 	if err := p.SetMeta(name, "GC_DRAIN", "1"); err != nil {
 		t.Fatal(err)
 	}
-	if NewSeamBacked().IsRunning(name) {
+	if NewSeamBacked("").IsRunning(name) {
 		t.Error("drain metadata reattached a stopped seam")
 	}
 	if err := p.RemoveMeta(name, "GC_DRAIN"); err != nil {
 		t.Fatal(err)
 	}
-	if NewSeamBacked().IsRunning(name) {
+	if NewSeamBacked("").IsRunning(name) {
 		t.Error("drain removal reattached a stopped seam")
 	}
 }

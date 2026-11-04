@@ -16,6 +16,7 @@ go_library(
     deps = [
         "//internal/citylayout",
         "//internal/pathutil",
+        "//internal/platforminstall",
         "//internal/runtime",
         "//internal/shellquote",
         "@io_k8s_api//core/v1:core",
@@ -39,6 +40,7 @@ go_test(
         "exec_provider_test.go",
         "name_test.go",
         "pod_test.go",
+        "provider_approval_test.go",
         "provider_stale_probe_test.go",
         "provider_test.go",
         "seams_test.go",
@@ -61,6 +63,7 @@ go_test(
         "//internal/runtime",
         "//internal/shellquote",
         "//internal/testenv",
+        "//internal/testutil/providerlaunch",
         "@io_k8s_api//core/v1:core",
         "@io_k8s_apimachinery//pkg/api/errors",
         "@io_k8s_apimachinery//pkg/apis/meta/v1:meta",

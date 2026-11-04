@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	execerr "k8s.io/client-go/util/exec"
 
+	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/gastownhall/gascity/internal/runtime"
 )
 
@@ -166,6 +167,9 @@ func newProviderWithOps(ops k8sOps) *Provider {
 
 // Start creates a new K8s pod running a tmux session with the agent command.
 func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) error {
+	if err := platforminstall.RefuseUnboundProviderTransport("k8s", cfg.Env["GC_CITY_PATH"], cfg.Env["GC_CITY"]); err != nil {
+		return err
+	}
 	if p.image == "" {
 		return fmt.Errorf("starting session %q: GC_K8S_IMAGE is required", name)
 	}
@@ -365,6 +369,9 @@ func (p *Provider) runPodPostLaunchSetup(ctx context.Context, podName string, cf
 // server itself died (not just the agent), respawn-pane fails and Relaunch
 // returns ErrSessionNotFound so the reconciler reprovisions.
 func (p *Provider) Relaunch(ctx context.Context, name string, cfg runtime.Config) error {
+	if err := platforminstall.RefuseUnboundProviderTransport("k8s", cfg.Env["GC_CITY_PATH"], cfg.Env["GC_CITY"]); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

@@ -21,11 +21,22 @@ var (
 	_ runtime.LivenessObserverWithError = (*seamBackedProvider)(nil)
 )
 
-// NewSeamBacked constructs a t3bridge provider served through the seams.
-func NewSeamBacked() runtime.Provider {
+// NewSeamBacked constructs a t3bridge provider served through the seams, bound
+// to the owning city for provider approval checks, including existing threads.
+// An empty city preserves standalone use.
+func NewSeamBacked(cityPath string) runtime.Provider {
 	raw := NewProvider()
+	raw.cityPath = cityPath
 	rt, tp := raw.Seams()
 	return &seamBackedProvider{Provider: runtime.NewProviderFromSeams(rt, tp), raw: raw}
+}
+
+// Nudge checks city approval before the seam adapter opens an existing thread.
+func (s *seamBackedProvider) Nudge(name string, content []runtime.ContentBlock) error {
+	if err := s.raw.refuseDelegatedLaunch(); err != nil {
+		return err
+	}
+	return s.Provider.Nudge(name, content)
 }
 
 // SleepCapability passes through to the underlying provider (non-seam).

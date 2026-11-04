@@ -13,6 +13,7 @@ go_library(
     visibility = ["//:__subpackages__"],
     deps = [
         "//internal/execgrace",
+        "//internal/platforminstall",
         "//internal/runtime",
     ],
 )
@@ -26,6 +27,7 @@ go_test(
         "exec_test.go",
         "handshake_test.go",
         "json_test.go",
+        "provider_approval_test.go",
         "seams_test.go",
         "testenv_import_test.go",
     ],
@@ -33,7 +35,9 @@ go_test(
     deps = [
         "//internal/runtime",
         "//internal/runtime/runtimetest",
+        "//internal/shellquote",
         "//internal/testenv",
+        "//internal/testutil/providerlaunch",
     ],
 )
 

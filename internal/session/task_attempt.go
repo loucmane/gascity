@@ -36,6 +36,15 @@ func (m *Manager) startRuntime(ctx context.Context, id, name string, cfg runtime
 		return err
 	}
 	cfg.Command = command
+	delegated, err := platforminstall.CityDelegatesProviderApproval(m.cityPath)
+	if err != nil {
+		return err
+	}
+	if delegated {
+		// Runtime transports need the same authoritative city even when a
+		// direct caller supplied no environment or a different city hint.
+		cfg.Env = mergeEnv(cfg.Env, map[string]string{"GC_CITY_PATH": m.cityPath})
+	}
 	if m.store == nil {
 		return fmt.Errorf("%w: authoritative session store unavailable", taskattempt.ErrRefused)
 	}

@@ -8,7 +8,7 @@ import runpy
 import sys
 from typing import Callable
 
-POLICY = runpy.run_path(str(Path(__file__).with_name('gct_provider_allowlist.py')))
+POLICY = runpy.run_path(str(Path(__file__).resolve().with_name('gct_provider_allowlist.py')))
 require = POLICY['require']
 
 

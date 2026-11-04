@@ -66,8 +66,8 @@ func buildRuntimeRegistry() *registry.Registry {
 		}
 		return sessionacp.NewSeamBacked(cfg), nil
 	}))
-	must(r.Register("t3bridge", func(_ string, _ config.SessionConfig, _, _ string) (runtime.Provider, error) {
-		return sessiont3bridge.NewSeamBacked(), nil
+	must(r.Register("t3bridge", func(_ string, _ config.SessionConfig, _, cityPath string) (runtime.Provider, error) {
+		return sessiont3bridge.NewSeamBacked(cityPath), nil
 	}))
 	// "cloudflare" is no longer a builtin: it ships as the runtime-cloudflare
 	// pack ([runtimes.cloudflare] → gc-runtime-cloudflare, RPP v0) and
@@ -91,10 +91,10 @@ func buildRuntimeRegistry() *registry.Registry {
 	must(r.Register("hybrid", func(_ string, sc config.SessionConfig, cityName, cityPath string) (runtime.Provider, error) {
 		return newHybridProvider(sc, cityName, cityPath)
 	}))
-	must(r.RegisterPrefix("exec:", func(name string, _ config.SessionConfig, _, _ string) (runtime.Provider, error) {
+	must(r.RegisterPrefix("exec:", func(name string, _ config.SessionConfig, _, cityPath string) (runtime.Provider, error) {
 		script := strings.TrimPrefix(name, "exec:")
 		if isLegacyT3BridgeExecScript(script) {
-			return sessiont3bridge.NewSeamBacked(), nil
+			return sessiont3bridge.NewSeamBacked(cityPath), nil
 		}
 		return sessionexec.NewSeamBacked(script), nil
 	}))

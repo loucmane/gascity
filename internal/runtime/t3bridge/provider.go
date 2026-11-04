@@ -63,6 +63,7 @@ const (
 // operations into native Go WebSocket calls while leaving a small helper
 // surface on the internal exec shim.
 type Provider struct {
+	cityPath     string
 	mu           sync.Mutex
 	reqSeq       int
 	watchers     map[string]context.CancelFunc
@@ -2382,6 +2383,9 @@ func (p *Provider) listRunning(prefix string, attachedOnly bool) ([]string, erro
 // Start creates or reuses a T3 thread for the named session and dispatches the
 // startup prompt and any nudge.
 func (p *Provider) Start(_ context.Context, name string, cfg runtime.Config) error {
+	if err := p.refuseDelegatedLaunch(); err != nil {
+		return err
+	}
 	fmt.Fprintf(os.Stderr, "t3bridge: Start(%s) called, wsURL=%s\n", name, resolveWsURL())
 
 	var envelope StartupEnvelope
@@ -2424,6 +2428,10 @@ func (p *Provider) Start(_ context.Context, name string, cfg runtime.Config) err
 		if cfg.Nudge != "" {
 			envelope.Startup.InitialNudge = cfg.Nudge
 		}
+	}
+	if err := p.refuseDelegatedLaunch(cfg.Env["GC_CITY_PATH"], cfg.Env["GC_CITY"], envelope.GC.CityPath,
+		envelope.Context.GCEnv["GC_CITY_PATH"], envelope.Context.GCEnv["GC_CITY"]); err != nil {
+		return err
 	}
 	if envelope.Runtime.Branch != "" {
 		hasWorktree = true
@@ -2778,6 +2786,9 @@ func (p *Provider) ProcessAlive(name string, _ []string) bool {
 
 // Nudge delivers content to the session as a new user turn.
 func (p *Provider) Nudge(name string, content []runtime.ContentBlock) error {
+	if err := p.refuseDelegatedLaunch(); err != nil {
+		return err
+	}
 	snapshot, err := p.rpcSnapshot()
 	if err != nil {
 		if isSoftBridgeUnavailable(err) {
@@ -2795,6 +2806,10 @@ func (p *Provider) Nudge(name string, content []runtime.ContentBlock) error {
 		return nil
 	}
 	meta := threadCustomMetadata(thread)
+	cityEnv := ParseSessionEnv(meta["gc.sessionEnv"])
+	if err := p.refuseDelegatedLaunch(cityEnv["GC_CITY_PATH"], cityEnv["GC_CITY"]); err != nil {
+		return err
+	}
 	provider := meta["gc.runtimeProvider"]
 	if provider == "" {
 		provider = binding.Provider

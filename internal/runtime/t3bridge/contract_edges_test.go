@@ -152,7 +152,7 @@ func isolatedT3ContractFixture(t *testing.T, state string) (runtime.Provider, *t
 	}
 	websocket.DefaultDialer = &dialer
 	t.Cleanup(func() { websocket.DefaultDialer = previous })
-	p := NewSeamBacked()
+	p := NewSeamBacked("")
 	t.Cleanup(func() { p.(*seamBackedProvider).raw.stopEventWatcher("contract-active") })
 	return p, server, runtime.Config{
 		WorkDir: root,
