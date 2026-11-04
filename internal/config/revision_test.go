@@ -537,14 +537,17 @@ func TestWatchDirs_ConfigOnly(t *testing.T) {
 	}
 
 	dirs := WatchDirs(prov, &City{}, dir)
-	if len(dirs) != 2 {
-		t.Fatalf("got %d paths, want 2", len(dirs))
+	if len(dirs) != 3 {
+		t.Fatalf("got %d paths, want 3", len(dirs))
 	}
 	if dirs[0] != dir {
 		t.Errorf("dir = %q, want %q", dirs[0], dir)
 	}
 	if dirs[1] != SiteBindingPath(dir) {
 		t.Errorf("site binding = %q, want %q", dirs[1], SiteBindingPath(dir))
+	}
+	if dirs[2] != filepath.Join(dir, "managed", "providers.json") {
+		t.Errorf("provider allowlist missing: %v", dirs)
 	}
 }
 
@@ -562,11 +565,11 @@ func TestWatchDirs_WithFragments(t *testing.T) {
 	dirs := WatchDirs(prov, &City{}, dir)
 	sort.Strings(dirs)
 
-	expected := []string{dir, SiteBindingPath(dir), filepath.Join(dir, "conf")}
+	expected := []string{dir, SiteBindingPath(dir), filepath.Join(dir, "conf"), filepath.Join(dir, "managed", "providers.json")}
 	sort.Strings(expected)
 
-	if len(dirs) != 3 {
-		t.Fatalf("got %d paths, want 3: %v", len(dirs), dirs)
+	if len(dirs) != 4 {
+		t.Fatalf("got %d paths, want 4: %v", len(dirs), dirs)
 	}
 	for i := range expected {
 		if dirs[i] != expected[i] {
@@ -584,9 +587,9 @@ func TestWatchDirs_WithPack(t *testing.T) {
 
 	dirs := WatchDirs(prov, cfg, dir)
 
-	// Should include city dir + site binding + pack dir.
-	if len(dirs) != 3 {
-		t.Fatalf("got %d paths, want 3: %v", len(dirs), dirs)
+	// Should include city dir, site binding, provider allowlist, and pack dir.
+	if len(dirs) != 4 {
+		t.Fatalf("got %d paths, want 4: %v", len(dirs), dirs)
 	}
 
 	found := false
@@ -711,8 +714,8 @@ func TestWatchDirs_Deduplicates(t *testing.T) {
 	}
 
 	dirs := WatchDirs(prov, &City{}, dir)
-	if len(dirs) != 2 {
-		t.Errorf("got %d paths, want 2 (deduplicated config dir plus site binding): %v", len(dirs), dirs)
+	if len(dirs) != 3 {
+		t.Errorf("got %d paths, want 3 (deduplicated config dir plus site binding and provider allowlist): %v", len(dirs), dirs)
 	}
 }
 

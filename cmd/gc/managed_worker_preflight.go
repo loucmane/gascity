@@ -52,6 +52,9 @@ func configureManagedWorkerPreflight(
 	}
 	receiptPath := managedworker.ProvisioningReceiptPath(cityPath)
 	item.preflight = func(ctx context.Context) error {
+		if err := platforminstall.VerifyCityProviderAllowlist(cityPath, permissionRevision); err != nil {
+			return &managedworker.Failure{Profile: profileName, Err: err}
+		}
 		receiptBytes, err := os.ReadFile(receiptPath)
 		if errors.Is(err, os.ErrNotExist) {
 			// Unprovisioned control-plane and legacy sessions remain outside this

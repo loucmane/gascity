@@ -82,6 +82,12 @@ func Preflight(ctx context.Context, request PreflightRequest, probes Probes) (Pr
 		return report, fmt.Errorf("permission_revision mismatch: got %q want %q", request.PermissionRevision, receipt.PermissionRevision)
 	}
 	report.Checks = append(report.Checks, "permission_revision")
+	if receipt.ProviderAllowlist != nil {
+		if err := inspectFilePin(probes.ReadFile, "provider_allowlist", *receipt.ProviderAllowlist); err != nil {
+			return report, err
+		}
+		report.Checks = append(report.Checks, "provider_allowlist")
+	}
 
 	checkPath := filepath.Clean(strings.TrimSpace(request.CheckPath))
 	if !filepath.IsAbs(request.CheckPath) || checkPath != request.CheckPath {

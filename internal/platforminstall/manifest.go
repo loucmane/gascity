@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gastownhall/gascity/internal/providerallowlist"
 )
 
 const (
@@ -191,6 +193,9 @@ func decodeManifest(data []byte) (Manifest, error) {
 	if err := requireJSONEOF(decoder); err != nil {
 		return Manifest{}, err
 	}
+	if err := providerallowlist.ValidateOptionalJSON(data, true); err != nil {
+		return Manifest{}, err
+	}
 	return manifest, nil
 }
 
@@ -334,6 +339,19 @@ func validateManifestContent(manifest Manifest) error {
 	}
 	if err := validateIntegritySpec(manifest.Integrity); err != nil {
 		return err
+	}
+	if manifest.Integrity != nil && manifest.Integrity.ProviderAllowlist != nil {
+		ref := manifest.Integrity.ProviderAllowlist
+		if err := ref.Validate(manifest.CityPath); err != nil {
+			return err
+		}
+		for _, binding := range ref.Bindings {
+			for _, pin := range manifest.Integrity.Providers {
+				if pin.Path == binding.Path {
+					return fmt.Errorf("provider allowlist binding %q overlaps legacy provider pin", binding.Path)
+				}
+			}
+		}
 	}
 	return nil
 }

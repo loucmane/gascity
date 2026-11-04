@@ -201,6 +201,10 @@ func (gate *managedProductDispatchGate) observeLiveEnvironment(ctx context.Conte
 			return managedworker.CanaryEnvironment{}, err
 		}
 		pin, err := pinnedProfileProvider(providerPins, profile.Provider)
+		if err != nil && manifest.Integrity != nil && manifest.Integrity.ProviderAllowlist != nil {
+			err = platforminstall.VerifyAllowlistedProvider(ctx, manifest, profile.Provider)
+			pin = profile.Provider
+		}
 		if err != nil {
 			return managedworker.CanaryEnvironment{}, err
 		}

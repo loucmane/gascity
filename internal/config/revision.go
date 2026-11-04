@@ -11,6 +11,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/pathutil"
+	"github.com/gastownhall/gascity/internal/providerallowlist"
 )
 
 type revisionSnapshot struct {
@@ -59,6 +60,16 @@ func Revision(fs fsys.FS, prov *Provenance, cfg *City, cityRoot string) string {
 		}
 	} else if data, err := fs.ReadFile(sitePath); err == nil {
 		writeRevisionBytes(h, sitePath, data)
+	}
+	// ga-r9lv: provider selection is routine city configuration; preserve the
+	// loaded snapshot so a later edit cannot be mistaken for approved config.
+	providerPath := providerallowlist.Path(cityRoot)
+	if data, known, exists := revisionSnapshotFile(prov, providerPath); known {
+		if exists {
+			writeRevisionBytes(h, providerPath, data)
+		}
+	} else if data, err := fs.ReadFile(providerPath); err == nil {
+		writeRevisionBytes(h, providerPath, data)
 	}
 
 	// Hash rig pack directory contents (all pack sources).
@@ -160,6 +171,11 @@ func (p *Provenance) captureRevisionSnapshot(fs fsys.FS, cfg *City, cityRoot str
 	snap.fileKnown[sitePath] = true
 	if data, err := fs.ReadFile(sitePath); err == nil {
 		snap.fileContents[sitePath] = cloneBytes(data)
+	}
+	providerPath := providerallowlist.Path(cityRoot)
+	snap.fileKnown[providerPath] = true
+	if data, err := fs.ReadFile(providerPath); err == nil {
+		snap.fileContents[providerPath] = cloneBytes(data)
 	}
 	for _, dir := range cfg.PackDirs {
 		if strings.TrimSpace(dir) == "" {
@@ -290,6 +306,7 @@ func WatchTargets(prov *Provenance, cfg *City, cityRoot string) []WatchTarget {
 	// effective configuration. Watch the exact file so an atomic rewrite or
 	// direct edit marks the controller dirty immediately.
 	addTarget(SiteBindingPath(cityRoot), false, false)
+	addTarget(providerallowlist.Path(cityRoot), false, false)
 
 	for _, r := range cfg.Rigs {
 		for _, ref := range r.Includes {

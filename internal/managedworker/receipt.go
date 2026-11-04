@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/platforminstall"
+	"github.com/gastownhall/gascity/internal/providerallowlist"
 )
 
 const (
@@ -84,6 +85,7 @@ type WorkerProfile struct {
 
 // ProvisioningReceipt binds reviewed provisioning inputs and worker profiles.
 type ProvisioningReceipt struct {
+	ProviderAllowlist  *FilePin        `json:"provider_allowlist,omitempty"`
 	CanaryRunner       FilePin         `json:"canary_runner"`
 	MemberHeads        []MemberHead    `json:"member_heads"`
 	Pack               PackPin         `json:"pack"`
@@ -153,6 +155,9 @@ func LoadProvisioningReceipt(data []byte) (ProvisioningReceipt, error) {
 	if err := requireJSONEOF(decoder); err != nil {
 		return ProvisioningReceipt{}, err
 	}
+	if err := providerallowlist.ValidateOptionalJSON(data, false); err != nil {
+		return ProvisioningReceipt{}, err
+	}
 	if err := validateReceiptContent(receipt); err != nil {
 		return ProvisioningReceipt{}, err
 	}
@@ -219,6 +224,11 @@ func canonicalizeReceiptSlices(receipt ProvisioningReceipt) ProvisioningReceipt 
 }
 
 func validateReceiptContent(receipt ProvisioningReceipt) error {
+	if receipt.ProviderAllowlist != nil {
+		if err := validateFilePin("provider_allowlist", *receipt.ProviderAllowlist); err != nil {
+			return err
+		}
+	}
 	if receipt.Schema != ProvisioningReceiptSchemaV1 && receipt.Schema != ProvisioningReceiptSchemaV2 {
 		return fmt.Errorf("provisioning receipt schema %q is unsupported", receipt.Schema)
 	}

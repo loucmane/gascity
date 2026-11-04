@@ -1,0 +1,342 @@
+[
+  {
+    "name": "valid",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": true
+  },
+  {
+    "name": "empty",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[]}",
+    "accepted": true
+  },
+  {
+    "name": "omitted_previous",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}]}",
+    "accepted": true
+  },
+  {
+    "name": "root_schema_None",
+    "json": "{\"schema\":null,\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "root_schema_True",
+    "json": "{\"schema\":true,\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "root_schema_1",
+    "json": "{\"schema\":1,\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "root_schema_'bad'",
+    "json": "{\"schema\":\"bad\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "root_schema_[]",
+    "json": "{\"schema\":[],\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "missing_schema",
+    "json": "{\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "case_schema",
+    "json": "{\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{},\"Schema\":\"gc.provider-allowlist.v1\"}",
+    "accepted": false
+  },
+  {
+    "name": "root_entries_None",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":null,\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "root_entries_True",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":true,\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "root_entries_1",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":1,\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "root_entries_'bad'",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":\"bad\",\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "root_entries_[]",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[],\"previous\":{}}",
+    "accepted": true
+  },
+  {
+    "name": "missing_entries",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "case_entries",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"previous\":{},\"Entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}]}",
+    "accepted": false
+  },
+  {
+    "name": "root_previous_None",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":null}",
+    "accepted": false
+  },
+  {
+    "name": "root_previous_True",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":true}",
+    "accepted": false
+  },
+  {
+    "name": "root_previous_1",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":1}",
+    "accepted": false
+  },
+  {
+    "name": "root_previous_'bad'",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":\"bad\"}",
+    "accepted": false
+  },
+  {
+    "name": "root_previous_[]",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":[]}",
+    "accepted": false
+  },
+  {
+    "name": "case_previous",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"Previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_provider_None",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":null,\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_provider_True",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":true,\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_provider_1",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":1,\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_provider_{}",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":{},\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_provider_[]",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":[],\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_missing_provider",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_case_provider",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true,\"Provider\":\"claude\"}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_version_None",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":null,\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_version_True",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":true,\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_version_1",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":1,\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_version_{}",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":{},\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_version_[]",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":[],\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_missing_version",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_case_version",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true,\"Version\":\"1.0\"}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_path_None",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":null,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_path_True",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":true,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_path_1",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":1,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_path_{}",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":{},\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_path_[]",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":[],\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_missing_path",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_case_path",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true,\"Path\":\"/opt/claude\"}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_sha256_None",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":null,\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_sha256_True",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":true,\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_sha256_1",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":1,\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_sha256_{}",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":{},\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_sha256_[]",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":[],\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_missing_sha256",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_case_sha256",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"active\":true,\"Sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_active_None",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":null}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_active_1",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":1}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_active_{}",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":{}}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_active_[]",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":[]}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_missing_active",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "entry_case_active",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "no_active",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":false}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "duplicate",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true},{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "two_active",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true},{\"provider\":\"claude\",\"version\":\"2.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "previous_null_value",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{\"claude\":null}}",
+    "accepted": false
+  },
+  {
+    "name": "previous_active",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{\"claude\":\"1.0\"}}",
+    "accepted": false
+  },
+  {
+    "name": "unknown",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{},\"extra\":1}",
+    "accepted": false
+  },
+  {
+    "name": "dirty_path",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/../claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "double_root",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"//opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "duplicate_key",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true,\"active\":false}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "trailing",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/claude\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}{}",
+    "accepted": false
+  },
+  {
+    "name": "root_null",
+    "json": "null",
+    "accepted": false
+  }
+]

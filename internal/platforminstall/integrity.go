@@ -14,6 +14,7 @@ import (
 	"time"
 
 	gitutil "github.com/gastownhall/gascity/internal/git"
+	"github.com/gastownhall/gascity/internal/providerallowlist"
 )
 
 // FilePin identifies a managed file whose exact bytes and mode are authority.
@@ -66,9 +67,10 @@ func ProviderPinLess(a, b ProviderPin) bool {
 // IntegritySpec is the complete managed-platform fingerprint inspected by the
 // installer doctor.
 type IntegritySpec struct {
-	Files        []FilePin     `json:"files,omitempty"`
-	Repositories []GitPin      `json:"repositories,omitempty"`
-	Providers    []ProviderPin `json:"providers,omitempty"`
+	Files             []FilePin                    `json:"files,omitempty"`
+	Repositories      []GitPin                     `json:"repositories,omitempty"`
+	Providers         []ProviderPin                `json:"providers,omitempty"`
+	ProviderAllowlist *providerallowlist.Reference `json:"provider_allowlist,omitempty"`
 }
 
 // Drift describes one exact field that differs from its manifest authority.
@@ -131,7 +133,15 @@ func inspectPinnedIntegrity(ctx context.Context, manifest Manifest) IntegrityRep
 		inspectRepository(ctx, &report, pin)
 	}
 	for _, pin := range manifest.Integrity.Providers {
-		inspectProvider(ctx, &report, pin)
+		effective, err := effectiveProviderPin(manifest, pin)
+		if err != nil {
+			report.add("providers["+pin.Name+"].version", pin.Version, err.Error())
+			continue
+		}
+		inspectProvider(ctx, &report, effective)
+	}
+	if err := verifyManifestProviderAllowlist(manifest, ""); err != nil {
+		report.add("provider_allowlist", "approved active binaries", err.Error())
 	}
 	sort.Slice(report.Drifts, func(i, j int) bool {
 		return report.Drifts[i].Field < report.Drifts[j].Field

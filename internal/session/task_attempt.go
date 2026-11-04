@@ -6,6 +6,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/taskattempt"
 )
@@ -26,6 +27,11 @@ func WithAttemptWorkStoreAccess(access AttemptWorkStoreAccess) ManagerOption {
 // deleting a token or changing a trigger does not bypass a cached decision.
 func (m *Manager) startRuntime(ctx context.Context, id, name string, cfg runtime.Config) error {
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// ga-r9lv: direct create, resume, and fresh fallback share this boundary.
+	// Verify approved bytes before consuming a task attempt or starting tools.
+	if err := platforminstall.VerifyCityProviderAllowlist(m.cityPath, ""); err != nil {
 		return err
 	}
 	if m.store == nil {
