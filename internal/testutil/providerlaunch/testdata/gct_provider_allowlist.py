@@ -95,8 +95,12 @@ def decode_json(data: bytes) -> Any:
         require(depth <= 64, 'JSON nesting exceeds 64')
         if isinstance(value, dict):
             pending.extend((child, depth + 1) for child in value.values())
+            pending.extend((key, depth) for key in value)
         elif isinstance(value, list):
             pending.extend((child, depth + 1) for child in value)
+        elif isinstance(value, str):
+            require(not any(0xD800 <= ord(character) <= 0xDFFF for character in value),
+                    'JSON contains an unpaired Unicode surrogate')
     return document
 
 
@@ -248,6 +252,41 @@ def closed_selection(city: Path, executable: Path) -> tuple[bytes, dict[str, Any
     verify(document, [{'provider': 'claude', 'path': str(executable)}])
     entry = next(e for e in document['entries'] if e['provider'] == 'claude' and e['active'])
     return data, entry
+
+
+def verify_closed_source(pin: dict[str, Any], city: Path | None = None) -> None:
+    """Verify the physical source domain before executing any closed helper."""
+    closed_version(pin, '0' * 64)
+    path = absolute(pin['path'], 'closed worker path')
+    require(path.resolve(strict=True) == path == Path(pin['resolved_path']),
+            'closed worker requires its physical source path; symlink refused')
+    require(path.parent.name == 'bin', 'closed worker requires a bin entrypoint')
+    require(digest(path) == pin['sha256'], 'closed worker sha256 drift')
+    match = CLOSED_VERSION.fullmatch(pin['version'])
+    require(match is not None, 'invalid closed worker version')
+    assert match is not None
+    family = match[1].removeprefix('gct-claude-').removesuffix('-worker')
+    root = path.parent.parent
+    city = city or root.parent / 'gascity/city'
+    label = 'core-signing' if family == 'signing' else family
+    paths = [root / f'templates/claude/{label}-control-policy.json', path,
+             root / f'lib/gct_claude_{family.replace("-", "_")}_worker.py']
+    if family != 'signing':
+        paths.append(root / 'lib/gct_claude_signing_worker.py')
+    paths.append(root / 'lib/gct_claude_subscription.py')
+    if family == 'project-candidate':
+        paths.append(root / 'lib/gct_claude_workspace_trust.py')
+    paths.extend([root / f'templates/claude/{family}-provider.toml',
+                  root / 'lib/gct_provider_allowlist.py'])
+    records = []
+    for source in paths:
+        require(source.resolve(strict=True) == source, 'closed worker source symlink refused')
+        records.append({'path': str(source), 'sha256': digest(source)})
+    domain = {'dependencies': records, 'provider': 'claude',
+              'entrypoint': str(city.parent / 'bin/claude'),
+              'allowlist': str(city / 'managed/providers.json')}
+    encoded = json.dumps(domain, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
+    require(hashlib.sha256(encoded).hexdigest() == match[2], 'closed worker source version drift')
 
 
 def launch_approval(city: Path, authority: bytes) -> bytes:

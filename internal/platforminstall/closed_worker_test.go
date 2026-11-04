@@ -33,8 +33,8 @@ func TestClosedWorkerAllowlistVersion(t *testing.T) {
 			name := "gct-claude-" + family + "-worker"
 			prefix := name + " 2 sources_sha256=" + strings.Repeat("c", 64) + " cli_sha256="
 			version := prefix + sha
-			wrapper := filepath.Join(root, name)
-			data := []byte("#!/bin/sh\nprintf '%s\\n' '" + version + "'\n")
+			wrapper := filepath.Join(root, "template", "bin", name)
+			data := []byte("#!/bin/sh\ncat " + shellquote.Quote(filepath.Join(root, "version")) + "\n")
 			writeProviderFixture(t, wrapper, data)
 			if err := os.Chmod(wrapper, 0o755); err != nil {
 				t.Fatal(err)
@@ -43,6 +43,11 @@ func TestClosedWorkerAllowlistVersion(t *testing.T) {
 				Name: "claude", Path: wrapper, ResolvedPath: wrapper,
 				SHA256: testSHA256(data), VersionArgs: []string{"--version"}, Version: prefix + strings.Repeat("a", 64),
 			}
+			version = closedSourceFixture(t, city, pin)
+			prefix = strings.Split(version, " cli_sha256=")[0] + " cli_sha256="
+			version = prefix + sha
+			writeProviderFixture(t, filepath.Join(root, "version"), []byte(version+"\n"))
+			pin.Version = prefix + strings.Repeat("a", 64)
 			list := providerallowlist.List{Schema: providerallowlist.Schema, Entries: []providerallowlist.Entry{
 				{Provider: "claude", Version: "2.1.318", Path: native, SHA256: sha, Active: true},
 			}}
@@ -115,6 +120,11 @@ func TestClosedWorkerAllowlistVersion(t *testing.T) {
 			aliasIntegrity := *installed.Integrity
 			aliasManifest.Integrity = &aliasIntegrity
 			aliasIntegrity.Providers = []ProviderPin{aliasPin}
+			probePin := aliasPin
+			probePin.Version = version
+			if err := VerifyAllowlistedProvider(context.Background(), aliasManifest, probePin); err == nil {
+				t.Error("closed version probe accepted an aliased helper chain")
+			}
 			aliasManifest = finalizeManifest(t, aliasManifest)
 			aliasData, err := MarshalManifest(aliasManifest)
 			if err != nil {
@@ -136,7 +146,7 @@ func TestClosedWorkerAllowlistVersion(t *testing.T) {
 					m.Integrity = &i
 					switch fault {
 					case "sources":
-						bad.Version = strings.Replace(version, strings.Repeat("c", 64), strings.Repeat("d", 64), 1)
+						bad.Version = strings.Replace(version, strings.Split(strings.Split(version, "sources_sha256=")[1], " ")[0], strings.Repeat("d", 64), 1)
 					case "sha":
 						bad.SHA256 = strings.Repeat("d", 64)
 					case "args":

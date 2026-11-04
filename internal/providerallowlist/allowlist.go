@@ -75,6 +75,9 @@ func (ref Reference) Validate(city string) error {
 
 // Parse strictly decodes a list and rejects ambiguous selections.
 func Parse(data []byte) (List, error) {
+	if len(data) > 1<<20 {
+		return List{}, fmt.Errorf("provider allowlist exceeds 1 MiB")
+	}
 	value, err := strictJSON(data)
 	if err != nil {
 		return List{}, fmt.Errorf("provider allowlist: %w", err)

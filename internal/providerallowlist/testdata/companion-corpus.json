@@ -624,5 +624,40 @@
     "target": "receipt",
     "json": "{\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
     "accepted": false
+  },
+  {
+    "name": "surrogate-low",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/\\udc80\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "surrogate-high",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/\\ud800\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "surrogate-high-text",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/\\ud800x\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "surrogate-high-high",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/\\ud800\\ud800\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "surrogate-low-low",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/\\udc80\\udc80\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": false
+  },
+  {
+    "name": "surrogate-pair",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/\\ud83d\\ude00\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": true
+  },
+  {
+    "name": "surrogate-literal",
+    "json": "{\"schema\":\"gc.provider-allowlist.v1\",\"entries\":[{\"provider\":\"claude\",\"version\":\"1.0\",\"path\":\"/opt/\\\\udc80\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"active\":true}],\"previous\":{}}",
+    "accepted": true
   }
 ]

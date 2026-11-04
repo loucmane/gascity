@@ -42,6 +42,22 @@ func TestOptionalJSONCannotHideOptInBehindLegacyDuplicates(t *testing.T) {
 	}
 }
 
+func TestPresenceRecoveryIgnoresNestedEnvironment(t *testing.T) {
+	for _, manifest := range []bool{false, true} {
+		for _, key := range []string{"provider_allowlist", "PROVIDER_ALLOWLIST"} {
+			input := `{"profiles":[{"environment":{"` + key + `":"application-setting"}}]}`
+			if manifest {
+				input = `{"integrity":` + input + `}`
+			}
+			for _, raw := range [][]byte{[]byte(input), []byte("\xef\xbb\xbf" + input), []byte(input + "\xff"), []byte(`{"unrelated":invalid,` + input[1:])} {
+				if found, err := HasProviderExtension(raw, manifest); found {
+					t.Fatalf("nested environment selected approval: %s, %v", raw, err)
+				}
+			}
+		}
+	}
+}
+
 func TestOptionalJSONStrictAfterOptIn(t *testing.T) {
 	for _, manifest := range []bool{false, true} {
 		pin := `"provider_allowlist":{"path":"/city/managed/providers.json","sha256":"` + strings.Repeat("a", 64) + `"}`

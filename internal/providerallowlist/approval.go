@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
+	"strconv"
 	"unicode/utf8"
 )
 
@@ -56,14 +56,7 @@ func ReadApproved(path string, receipt []byte, revision string) (List, error) {
 	if !ok || !validSHA(want) {
 		return List{}, fmt.Errorf("provider allowlist approval sha256 invalid")
 	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return List{}, fmt.Errorf("provider allowlist: %w", err)
-	}
-	if !info.Mode().IsRegular() || info.Size() > 1024*1024 {
-		return List{}, fmt.Errorf("provider allowlist must be a regular file at most 1 MiB")
-	}
-	data, err := os.ReadFile(path)
+	data, err := readPhysicalRegular(path, 1<<20)
 	if err != nil {
 		return List{}, fmt.Errorf("provider allowlist: %w", err)
 	}
@@ -83,6 +76,9 @@ func strictJSON(data []byte) (any, error) {
 	if len(data) > 16*1024*1024 {
 		return nil, fmt.Errorf("JSON exceeds 16 MiB")
 	}
+	if err := validSurrogates(data); err != nil {
+		return nil, err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	value, err := jsonValue(decoder, 0)
@@ -93,6 +89,40 @@ func strictJSON(data []byte) (any, error) {
 		return nil, fmt.Errorf("trailing JSON data")
 	}
 	return value, nil
+}
+
+// encoding/json replaces invalid surrogate escapes. Refuse them instead so
+// Python and Go cannot select different filesystem names from the same bytes.
+func validSurrogates(data []byte) error {
+	for i := 0; i+1 < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		i++ // An escaped backslash is literal, not a Unicode escape introducer.
+		if data[i] != 'u' || i+4 >= len(data) {
+			continue // The JSON decoder diagnoses malformed ordinary escapes.
+		}
+		value, err := strconv.ParseUint(string(data[i+1:i+5]), 16, 16)
+		if err != nil {
+			continue
+		}
+		i += 4
+		if value >= 0xdc00 && value <= 0xdfff {
+			return fmt.Errorf("JSON contains an unpaired Unicode surrogate")
+		}
+		if value < 0xd800 || value > 0xdbff {
+			continue
+		}
+		if i+6 >= len(data) || data[i+1] != '\\' || data[i+2] != 'u' {
+			return fmt.Errorf("JSON contains an unpaired Unicode surrogate")
+		}
+		low, err := strconv.ParseUint(string(data[i+3:i+7]), 16, 16)
+		if err != nil || low < 0xdc00 || low > 0xdfff {
+			return fmt.Errorf("JSON contains an unpaired Unicode surrogate")
+		}
+		i += 6
+	}
+	return nil
 }
 
 func jsonValue(decoder *json.Decoder, depth int) (any, error) {

@@ -214,7 +214,7 @@ func runInitProviderPreflightForConfig(cityPath string, cfg *config.City, stdout
 	}
 
 	probeNames := uniqueProbeNames(targets)
-	items, err := initProbeProvidersReadiness(context.Background(), probeNames, true)
+	items, err := probeInitCityProviders(context.Background(), cityPath, probeNames)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: city created, but startup is blocked by provider readiness\n", commandName) //nolint:errcheck // best-effort stderr
 		fmt.Fprintf(stderr, "%s: checking provider readiness: %v\n", commandName, err)                       //nolint:errcheck // best-effort stderr

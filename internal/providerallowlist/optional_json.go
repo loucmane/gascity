@@ -13,7 +13,7 @@ func ValidateOptionalJSON(data []byte, manifest bool) error {
 	// ga-r9lv: legacy documents keep encoding/json's original byte and duplicate
 	// handling. Inspect every member before choosing that branch, so a duplicate
 	// outer integrity object cannot hide an earlier provider authority declaration.
-	found, err := hasProviderExtension(data, manifest)
+	found, err := HasProviderExtension(data, manifest)
 	if err != nil || !found {
 		return err
 	}

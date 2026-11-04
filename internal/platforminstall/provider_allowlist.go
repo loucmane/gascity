@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/gastownhall/gascity/internal/providerallowlist"
 	"github.com/gastownhall/gascity/internal/verifiedexec"
@@ -36,23 +35,22 @@ func cityProviderManifest(city string) (Manifest, bool, error) {
 	if city == "" {
 		return Manifest{}, false, nil
 	}
-	data, err := os.ReadFile(DefaultManifestPath(city))
+	data, err := providerallowlist.ReadPresenceDocument(DefaultManifestPath(city))
+	// This gate must not introduce a platform-manifest dependency in legacy
+	// callers such as init. Without approval inputs or a manifest extension,
+	// unrelated unreadable/malformed manifests remain the old caller's concern.
+	hasInputs := cityHasProviderApprovalInputs(city)
+	if !hasInputs {
+		found, _ := providerallowlist.HasProviderExtension(data, true)
+		if !found {
+			return Manifest{}, false, nil
+		}
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		// Existing approval inputs are durable evidence that losing the signed
 		// authority is a refusal, rather than a return to legacy behavior.
-		if _, listErr := os.Lstat(providerallowlist.Path(city)); !errors.Is(listErr, os.ErrNotExist) {
+		if hasInputs {
 			return Manifest{}, false, fmt.Errorf("provider allowlist manifest missing: %w", err)
-		}
-		receipt, receiptErr := os.ReadFile(providerallowlist.ReceiptPath(city))
-		if receiptErr == nil {
-			var fields map[string]json.RawMessage
-			if json.Unmarshal(receipt, &fields) == nil {
-				for key := range fields {
-					if strings.EqualFold(key, "provider_allowlist") {
-						return Manifest{}, false, fmt.Errorf("provider allowlist manifest missing: %w", err)
-					}
-				}
-			}
 		}
 		return Manifest{}, false, nil
 	}
@@ -72,9 +70,6 @@ func cityProviderManifest(city string) (Manifest, bool, error) {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return Manifest{}, false, fmt.Errorf("provider allowlist manifest: %w", err)
 	}
-	if probe.Integrity == nil || len(probe.Integrity.ProviderAllowlist) == 0 {
-		return Manifest{}, false, nil
-	}
 	manifest, err := LoadManifest(data)
 	if err != nil {
 		return Manifest{}, false, fmt.Errorf("provider allowlist manifest: %w", err)
@@ -82,7 +77,19 @@ func cityProviderManifest(city string) (Manifest, bool, error) {
 	if manifest.CityPath != city {
 		return Manifest{}, false, fmt.Errorf("provider allowlist manifest city mismatch")
 	}
+	if probe.Integrity == nil || len(probe.Integrity.ProviderAllowlist) == 0 {
+		return manifest, false, nil
+	}
 	return manifest, true, nil
+}
+
+func cityHasProviderApprovalInputs(city string) bool {
+	if _, err := os.Lstat(providerallowlist.Path(city)); !errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	receipt, _ := providerallowlist.ReadPresenceDocument(providerallowlist.ReceiptPath(city))
+	found, _ := providerallowlist.HasProviderExtension(receipt, false)
+	return found
 }
 
 func approvedProviders(manifest Manifest, revision string) (providerallowlist.List, error) {
@@ -90,7 +97,7 @@ func approvedProviders(manifest Manifest, revision string) (providerallowlist.Li
 	if err := ref.Validate(manifest.CityPath); err != nil {
 		return providerallowlist.List{}, err
 	}
-	receipt, err := os.ReadFile(providerallowlist.ReceiptPath(manifest.CityPath))
+	receipt, err := providerallowlist.ReadApprovalReceipt(manifest.CityPath)
 	if err != nil {
 		return providerallowlist.List{}, fmt.Errorf("provider allowlist approval receipt: %w", err)
 	}
@@ -135,6 +142,9 @@ func VerifyAllowlistedProvider(ctx context.Context, manifest Manifest, pin Provi
 			}
 			if !closedWorkerVersion.MatchString(signed.Version) || !sameProviderPin(pin, effective) {
 				return fmt.Errorf("closed worker source/policy or CLI pin drift for %q", pin.Path)
+			}
+			if err := verifyClosedSource(manifest.CityPath, pin); err != nil {
+				return err
 			}
 			return VerifyProviderPin(ctx, pin)
 		}
