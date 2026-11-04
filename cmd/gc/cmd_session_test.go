@@ -2875,7 +2875,7 @@ func TestMaybeAutoTitle_NilProviderFallsBackToTruncation(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	maybeAutoTitle(sessionFrontDoor(store), b.ID, "", "fix the login redirect loop", nil, "", &stderr)
+	maybeAutoTitle(sessionFrontDoor(store), b.ID, "", "fix the login redirect loop", nil, "", &stderr, "")
 
 	// MaybeGenerateTitleAsync sets the truncated title synchronously before
 	// starting the goroutine, and generateTitle(provider=nil) falls back to
@@ -2900,7 +2900,7 @@ func TestMaybeAutoTitle_ExplicitTitleSkipsGeneration(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	maybeAutoTitle(sessionFrontDoor(store), b.ID, "explicit", "some message", nil, "", &stderr)
+	maybeAutoTitle(sessionFrontDoor(store), b.ID, "explicit", "some message", nil, "", &stderr, "")
 
 	got, err := store.Get(b.ID)
 	if err != nil {
@@ -2919,7 +2919,7 @@ func TestMaybeAutoTitle_EmptyMessageSkipsGeneration(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	maybeAutoTitle(sessionFrontDoor(store), b.ID, "", "", nil, "", &stderr)
+	maybeAutoTitle(sessionFrontDoor(store), b.ID, "", "", nil, "", &stderr, "")
 
 	got, err := store.Get(b.ID)
 	if err != nil {

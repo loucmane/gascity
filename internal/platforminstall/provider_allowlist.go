@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/providerallowlist"
+	"github.com/gastownhall/gascity/internal/verifiedexec"
 )
 
 // VerifyCityProviderAllowlist enforces an installed city's signed provider
@@ -147,7 +148,53 @@ func VerifyAllowlistedProvider(ctx context.Context, manifest Manifest, pin Provi
 		if !ok || entry.Path != pin.ResolvedPath || entry.SHA256 != pin.SHA256 {
 			return fmt.Errorf("provider allowlist pin drift for %q", pin.Path)
 		}
-		return VerifyProviderPin(ctx, pin)
+		return verifyProviderPinDescriptor(ctx, pin, 0o555)
 	}
 	return fmt.Errorf("provider %q has no allowlist binding", pin.Path)
+}
+
+// OpenCityProviderExecutable returns the approved native executable for readiness.
+// A delegated city never falls back to discovery. The caller must close the file.
+func OpenCityProviderExecutable(city, revision, provider string) (*os.File, bool, error) {
+	manifest, delegated, err := cityProviderManifest(city)
+	if err != nil || !delegated {
+		return nil, delegated, err
+	}
+	list, err := approvedProviders(manifest, revision)
+	if err != nil {
+		return nil, true, err
+	}
+	entry, ok := list.Active(provider)
+	if !ok {
+		return nil, true, fmt.Errorf("provider allowlist has no active %q", provider)
+	}
+	file, err := verifiedexec.Open(entry.Path, entry.Path, entry.SHA256, 0o555)
+	if err != nil {
+		return nil, true, err
+	}
+	current, err := approvedProviders(manifest, revision)
+	selected, found := current.Active(provider)
+	if err != nil || !found || selected != entry {
+		_ = file.Close()
+		if err != nil {
+			return nil, true, err
+		}
+		return nil, true, fmt.Errorf("provider allowlist selection changed")
+	}
+	return file, true, nil
+}
+
+// VerifyCityProviderPin uses delegated approval when present and legacy inspection otherwise.
+func VerifyCityProviderPin(ctx context.Context, city, revision string, pin ProviderPin) error {
+	manifest, delegated, err := cityProviderManifest(city)
+	if err != nil {
+		return err
+	}
+	if !delegated {
+		return VerifyProviderPin(ctx, pin)
+	}
+	if _, err := approvedProviders(manifest, revision); err != nil {
+		return err
+	}
+	return VerifyAllowlistedProvider(ctx, manifest, pin)
 }

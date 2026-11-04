@@ -10,6 +10,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/platforminstall"
 )
 
 const (
@@ -24,8 +25,8 @@ Message: `
 // short title from the user's message, then updates the bead. On failure
 // (unsupported provider, timeout, subprocess error) it falls back to a
 // truncated version of the message.
-func generateAndSetTitle(ctx context.Context, store beads.SessionStore, beadID string, provider *config.ResolvedProvider, message, workDir string) {
-	title := generateTitleWithContext(ctx, provider, message, workDir)
+func generateAndSetTitle(ctx context.Context, store beads.SessionStore, beadID string, provider *config.ResolvedProvider, message, workDir, city string) {
+	title := generateTitleWithContext(ctx, provider, message, workDir, city)
 	if ctx.Err() != nil {
 		return
 	}
@@ -40,10 +41,10 @@ func generateAndSetTitle(ctx context.Context, store beads.SessionStore, beadID s
 // Falls back to truncating the message if the provider doesn't support
 // PrintArgs or the subprocess fails.
 func generateTitle(provider *config.ResolvedProvider, message string) string {
-	return generateTitleWithContext(context.Background(), provider, message, "")
+	return generateTitleWithContext(context.Background(), provider, message, "", "")
 }
 
-func generateTitleWithContext(ctx context.Context, provider *config.ResolvedProvider, message, workDir string) string {
+func generateTitleWithContext(ctx context.Context, provider *config.ResolvedProvider, message, workDir, city string) string {
 	if provider == nil || len(provider.PrintArgs) == 0 {
 		return truncateTitle(message)
 	}
@@ -60,7 +61,11 @@ func generateTitleWithContext(ctx context.Context, provider *config.ResolvedProv
 	ctx, cancel := context.WithTimeout(ctx, titleGenerateTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, provider.Command, args...)
+	argv, err := platforminstall.ResolveCityProviderArgv(ctx, city, append([]string{provider.Command}, args...))
+	if err != nil {
+		return truncateTitle(message)
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
@@ -108,7 +113,7 @@ func truncateTitle(message string) string {
 // completes (or immediately if no generation is needed). Callers in
 // short-lived processes (e.g. CLI) should block on the channel before
 // exiting; long-lived servers can ignore it.
-func MaybeGenerateTitleAsync(store beads.SessionStore, beadID, userTitle, message string, provider *config.ResolvedProvider, workDir string, stderr func(string, ...any)) <-chan struct{} {
+func MaybeGenerateTitleAsync(store beads.SessionStore, beadID, userTitle, message string, provider *config.ResolvedProvider, workDir string, stderr func(string, ...any), city string) <-chan struct{} {
 	done := make(chan struct{})
 	if !titleGenerationNeeded(userTitle, message) {
 		close(done)
@@ -119,7 +124,7 @@ func MaybeGenerateTitleAsync(store beads.SessionStore, beadID, userTitle, messag
 	go func() {
 		defer close(done)
 		defer recoverTitleGeneration(stderr)
-		generateAndSetTitle(context.Background(), store, beadID, provider, message, workDir)
+		generateAndSetTitle(context.Background(), store, beadID, provider, message, workDir, city)
 	}()
 	return done
 }
@@ -129,14 +134,14 @@ func titleGenerationNeeded(userTitle, message string) bool {
 	return message != "" && userTitle == ""
 }
 
-func maybeGenerateTitle(ctx context.Context, store beads.SessionStore, beadID, userTitle, message string, provider *config.ResolvedProvider, workDir string, stderr func(string, ...any)) {
+func maybeGenerateTitle(ctx context.Context, store beads.SessionStore, beadID, userTitle, message string, provider *config.ResolvedProvider, workDir string, stderr func(string, ...any), city string) {
 	if !titleGenerationNeeded(userTitle, message) || ctx.Err() != nil {
 		return
 	}
 	message = strings.TrimSpace(message)
 	defer recoverTitleGeneration(stderr)
 	setImmediateGeneratedTitle(store, beadID, message)
-	generateAndSetTitle(ctx, store, beadID, provider, message, workDir)
+	generateAndSetTitle(ctx, store, beadID, provider, message, workDir, city)
 }
 
 func setImmediateGeneratedTitle(store beads.SessionStore, beadID, message string) {

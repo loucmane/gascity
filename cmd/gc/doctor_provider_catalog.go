@@ -13,6 +13,7 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/doctor"
 	"github.com/gastownhall/gascity/internal/fsys"
+	"github.com/gastownhall/gascity/internal/platforminstall"
 )
 
 type providerCatalogDoctorCheck struct {
@@ -89,7 +90,15 @@ func (c *providerCatalogReadinessAdvisoryCheck) Run(_ *doctor.CheckContext) *doc
 		return r
 	}
 	names := api.ProviderReadinessNames()
-	items, err := initProbeProvidersReadiness(context.Background(), names, true)
+	var items map[string]api.ReadinessItem
+	delegated, err := platforminstall.CityDelegatesProviderApproval(c.cityPath)
+	if err == nil {
+		if delegated {
+			items, err = api.ProbeCityProviders(context.Background(), c.cityPath, names, true)
+		} else {
+			items, err = initProbeProvidersReadiness(context.Background(), names, true)
+		}
+	}
 	if err != nil {
 		r.Status = doctor.StatusWarning
 		r.Message = fmt.Sprintf("could not probe local provider readiness: %v", err)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/managedworker"
+	"github.com/gastownhall/gascity/internal/testutil/providerlaunch"
 )
 
 // This boundary owns real argv/environment/CWD transport and response decoding,
@@ -20,6 +21,7 @@ import (
 // shell using builtins only; it never invokes gc, a provider, a signer or a
 // service. All captured bytes belong to this test's temporary directory.
 func TestPlatformCanaryRunnerRoundTripsSelectedProfile(t *testing.T) {
+	t.Setenv("GCT_CANARY_PROVIDER_APPROVAL", "legacy")
 	root := t.TempDir()
 	source := filepath.Join(root, "source with spaces")
 	scratch := filepath.Join(root, "capture with spaces")
@@ -33,6 +35,7 @@ set -eu
 printf '%s\000' "$@" > "${12}/argv"
 printf '%s' "$PWD" > "${12}/cwd"
 printf '%s' "$GCT_CANARY_WORKER_PROFILE_JSON" > "${12}/profile.json"
+printf '%s' "$GCT_CANARY_PROVIDER_APPROVAL" > "${12}/approval"
 printf '%s\n' '{"name":"candidate-launcher","resolution":"completed"}'
 `
 	runnerPath := filepath.Join(root, "capture-runner")
@@ -102,6 +105,16 @@ printf '%s\n' '{"name":"candidate-launcher","resolution":"completed"}'
 	}
 	if got, err := managedworker.WorkerProfileDigest(observed); err != nil || got != digest {
 		t.Fatalf("transport changed digest domain: got=%q want=%q err=%v", got, digest, err)
+	}
+	if got := string(read("approval")); got != "legacy" {
+		t.Fatalf("legacy environment changed: got=%q", got)
+	}
+	call.CityPath = providerlaunch.New(t, "claude").City
+	if _, err := runPlatformCanaryScenarioCommand(ctx, call); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(read("approval")); got != "1" {
+		t.Fatalf("delegated runner did not require verified execution: got=%q", got)
 	}
 	// Synthetic wire output also supports separately recorded consumer diagnosis;
 	// it contains no real project data, credentials, or live receipt authority.

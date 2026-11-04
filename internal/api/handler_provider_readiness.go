@@ -17,6 +17,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/searchpath"
+	"github.com/gastownhall/gascity/internal/verifiedexec"
 	zcodeadapter "github.com/gastownhall/gascity/internal/worker/adapters/zcode"
 	"gopkg.in/yaml.v3"
 )
@@ -385,7 +386,11 @@ func probeClaude(ctx context.Context, homeDir string) providerProbeResult {
 		return providerProbeResult{status: probeStatusNotInstalled, detail: "claude executable not found in probe PATH"}
 	}
 
-	stdout, _, err := runProbeCommandWithEnv(ctx, homeDir, 5*time.Second, claudeProbeCommandEnv(), path, "auth", "status", "--json")
+	return probeClaudeExecutable(ctx, homeDir, path, nil)
+}
+
+func probeClaudeExecutable(ctx context.Context, homeDir, path string, file *os.File) providerProbeResult {
+	stdout, _, err := runProbeExecutable(ctx, homeDir, 5*time.Second, claudeProbeCommandEnv(), file, path, "auth", "status", "--json")
 	if err != nil && strings.TrimSpace(stdout) == "" {
 		return providerProbeResult{status: probeStatusProbeError, detail: "claude auth status failed before returning JSON"}
 	}
@@ -422,6 +427,10 @@ func probeCodex(homeDir string) providerProbeResult {
 		return providerProbeResult{status: probeStatusNotInstalled, detail: "codex executable not found in probe PATH"}
 	}
 
+	return probeCodexAuth(homeDir)
+}
+
+func probeCodexAuth(homeDir string) providerProbeResult {
 	data, err := os.ReadFile(filepath.Join(homeDir, ".codex", "auth.json"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -763,10 +772,17 @@ func runProbeCommandWithEnv(
 	path string,
 	args ...string,
 ) (string, string, error) {
+	return runProbeExecutable(ctx, homeDir, timeout, extraEnv, nil, path, args...)
+}
+
+func runProbeExecutable(ctx context.Context, homeDir string, timeout time.Duration, extraEnv []string, file *os.File, path string, args ...string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := providerProbeCommandContext(ctx, path, args...)
+	if file != nil {
+		verifiedexec.Bind(cmd, file)
+	}
 	cmd.Dir = homeDir
 	cmd.Env = append(probeCommandEnv(homeDir), extraEnv...)
 	var stdout bytes.Buffer

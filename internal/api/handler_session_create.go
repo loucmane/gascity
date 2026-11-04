@@ -227,7 +227,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	titleProvider := s.resolveTitleProvider()
 	MaybeGenerateTitleAsync(store, info.ID, body.Title, body.Message, titleProvider, info.WorkDir, func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "session %s: "+format+"\n", append([]any{info.ID}, args...)...)
-	})
+	}, s.state.CityPath())
 
 	resp := sessionToResponse(info, s.state.Config())
 	resp.Kind = "agent"
@@ -399,7 +399,7 @@ func (s *Server) createProviderSession(w http.ResponseWriter, r *http.Request, s
 	titleProvider := s.resolveTitleProvider()
 	MaybeGenerateTitleAsync(store, info.ID, body.Title, body.Message, titleProvider, info.WorkDir, func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "session %s: "+format+"\n", append([]any{info.ID}, args...)...)
-	})
+	}, s.state.CityPath())
 
 	// Deliver initial message if provided.
 	if msg := strings.TrimSpace(body.Message); msg != "" {

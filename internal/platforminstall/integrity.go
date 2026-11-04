@@ -15,6 +15,7 @@ import (
 
 	gitutil "github.com/gastownhall/gascity/internal/git"
 	"github.com/gastownhall/gascity/internal/providerallowlist"
+	"github.com/gastownhall/gascity/internal/verifiedexec"
 )
 
 // FilePin identifies a managed file whose exact bytes and mode are authority.
@@ -138,7 +139,13 @@ func inspectPinnedIntegrity(ctx context.Context, manifest Manifest) IntegrityRep
 			report.add("providers["+pin.Name+"].version", pin.Version, err.Error())
 			continue
 		}
-		inspectProvider(ctx, &report, effective)
+		if manifest.Integrity.ProviderAllowlist != nil {
+			if err := VerifyAllowlistedProvider(ctx, manifest, effective); err != nil {
+				report.add("providers["+pin.Name+"].version", pin.Version, err.Error())
+			}
+		} else {
+			inspectProvider(ctx, &report, effective)
+		}
 	}
 	if err := verifyManifestProviderAllowlist(manifest, ""); err != nil {
 		report.add("provider_allowlist", "approved active binaries", err.Error())
@@ -351,6 +358,7 @@ func inspectProvider(ctx context.Context, report *IntegrityReport, pin ProviderP
 	wantResolved := filepath.Clean(pin.ResolvedPath)
 	if resolved != wantResolved {
 		report.add(field+".resolved_path", wantResolved, resolved)
+		return
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
@@ -363,12 +371,15 @@ func inspectProvider(ctx context.Context, report *IntegrityReport, pin ProviderP
 	}
 	if info.Mode().Perm()&0o111 == 0 {
 		report.add(field+".executable", "true", "false")
+		return
 	}
 	gotSHA, err := digestRegularFile(resolved)
 	if err != nil {
 		report.add(field+".sha256", pin.SHA256, "error: "+err.Error())
+		return
 	} else if gotSHA != pin.SHA256 {
 		report.add(field+".sha256", pin.SHA256, gotSHA)
+		return
 	}
 	version, err := runInspectionCommand(ctx, pin.Path, pin.VersionArgs...)
 	if err != nil {
@@ -399,13 +410,22 @@ func VerifyProviderPin(ctx context.Context, pin ProviderPin) error {
 	return fmt.Errorf("provider pin drift: %s", strings.Join(parts, "; "))
 }
 
+var providerInspectionCommandContext = exec.CommandContext
+
 func runInspectionCommand(ctx context.Context, name string, args ...string) (string, error) {
+	return runInspectionExecutable(ctx, nil, name, args...)
+}
+
+func runInspectionExecutable(ctx context.Context, file *os.File, name string, args ...string) (string, error) {
 	commandCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if name == "git" {
 		args = append([]string{"--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + os.DevNull, "-c", "core.untrackedCache=false"}, args...)
 	}
-	command := exec.CommandContext(commandCtx, name, args...)
+	command := providerInspectionCommandContext(commandCtx, name, args...)
+	if file != nil {
+		verifiedexec.Bind(command, file)
+	}
 	if name == "git" {
 		command.Env = gitutil.HermeticEnv()
 	}
@@ -471,4 +491,28 @@ func describePathError(err error) string {
 
 func (report *IntegrityReport) add(field, expected, actual string) {
 	report.Drifts = append(report.Drifts, Drift{Field: field, Expected: expected, Actual: actual})
+}
+
+// VerifyProviderPinDescriptor verifies a delegated native provider probe.
+func VerifyProviderPinDescriptor(ctx context.Context, pin ProviderPin) error {
+	return verifyProviderPinDescriptor(ctx, pin, 0)
+}
+
+func verifyProviderPinDescriptor(ctx context.Context, pin ProviderPin, mode os.FileMode) error {
+	if err := validateIntegritySpec(&IntegritySpec{Providers: []ProviderPin{pin}}); err != nil {
+		return err
+	}
+	file, err := verifiedexec.Open(pin.Path, pin.ResolvedPath, pin.SHA256, mode)
+	if err != nil {
+		return fmt.Errorf("provider pin drift: %w", err)
+	}
+	defer file.Close() //nolint:errcheck // read-only descriptor
+	version, err := runInspectionExecutable(ctx, file, pin.Path, pin.VersionArgs...)
+	if err != nil {
+		return err
+	}
+	if version != pin.Version {
+		return fmt.Errorf("provider pin drift: version got %q want %q", version, pin.Version)
+	}
+	return nil
 }

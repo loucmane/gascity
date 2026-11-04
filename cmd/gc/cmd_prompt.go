@@ -17,6 +17,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/spf13/cobra"
 )
 
@@ -294,7 +295,13 @@ func runDirectSynth(ctx context.Context, opts promptSynthOpts, cityPath, role, r
 	}
 	callCtx, cancel := context.WithTimeout(ctx, synthTimeout)
 	defer cancel()
-	out, err := runner(callCtx, resolved, rendered, workDir)
+	argv, err := platforminstall.ResolveCityProviderArgv(callCtx, cityPath, append([]string{resolved.Command}, resolved.Args...))
+	if err != nil {
+		return err
+	}
+	launchProvider := *resolved
+	launchProvider.Command, launchProvider.Args = argv[0], argv[1:]
+	out, err := runner(callCtx, &launchProvider, rendered, workDir)
 	if err != nil {
 		return fmt.Errorf("synth via %s: %w", resolved.Command, err)
 	}

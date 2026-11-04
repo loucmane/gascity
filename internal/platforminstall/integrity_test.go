@@ -153,7 +153,7 @@ func TestInspectIntegrityReportsMissingPinnedRulesFile(t *testing.T) {
 	}
 }
 
-func TestInspectIntegrityReportsProviderDigestAndVersionDrift(t *testing.T) {
+func TestInspectIntegrityReportsProviderDigestDriftWithoutExecuting(t *testing.T) {
 	dir := t.TempDir()
 	manifest := integrityManifest(t, dir)
 	if _, err := Install(manifest); err != nil {
@@ -169,7 +169,7 @@ func TestInspectIntegrityReportsProviderDigestAndVersionDrift(t *testing.T) {
 		t.Fatalf("InspectIntegrity() error = %v", err)
 	}
 	fields := driftFields(report)
-	for _, want := range []string{"providers[codex].sha256", "providers[codex].version"} {
+	for _, want := range []string{"providers[codex].sha256"} {
 		if !containsString(fields, want) {
 			t.Errorf("drift fields = %v, want %q", fields, want)
 		}

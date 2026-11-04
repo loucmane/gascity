@@ -22,6 +22,7 @@ import (
 	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/shellquote"
+	"github.com/gastownhall/gascity/internal/verifiedexec"
 )
 
 type taskCheckPathResolver func(startCandidate, *config.City) (string, error)
@@ -97,7 +98,7 @@ func configureManagedWorkerPreflight(
 		for key := range expected.Environment {
 			observed.Environment[key] = launch.Env[key]
 		}
-		probes := defaultManagedWorkerPreflightProbes()
+		probes := cityManagedWorkerPreflightProbes(cityPath, permissionRevision)
 		if probeOverride != nil {
 			probes = *probeOverride
 		}
@@ -158,34 +159,52 @@ func readManagedControlPolicy(path string) ([]byte, error) {
 	return managedworker.ReadControlPolicy(fsys.OSFS{}, path)
 }
 
-func probeManagedWorkerToolchain(ctx context.Context, pin managedworker.ToolchainPin, environment map[string]string) error {
-	resolved, err := filepath.EvalSymlinks(pin.Executable.Path)
-	if err != nil {
-		return fmt.Errorf("resolve executable %q: %w", pin.Executable.Path, err)
-	}
-	resolved = filepath.Clean(resolved)
-	if resolved != pin.Executable.ResolvedPath {
-		return fmt.Errorf("resolved path mismatch: got %q want %q", resolved, pin.Executable.ResolvedPath)
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return fmt.Errorf("inspect resolved executable %q: %w", resolved, err)
-	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-		return fmt.Errorf("resolved executable must be an executable regular file: %q", resolved)
-	}
-	data, err := os.ReadFile(resolved)
-	if err != nil {
-		return fmt.Errorf("read resolved executable %q: %w", resolved, err)
-	}
-	digest := sha256.Sum256(data)
-	if got := hex.EncodeToString(digest[:]); got != pin.Executable.SHA256 {
-		return fmt.Errorf("sha256 mismatch: got %q want %q", got, pin.Executable.SHA256)
-	}
+var managedToolchainCommandContext = exec.CommandContext
 
+func probeManagedWorkerToolchain(ctx context.Context, pin managedworker.ToolchainPin, environment map[string]string) error {
+	return probeManagedWorkerToolchainWithDescriptor(ctx, pin, environment, false)
+}
+
+func probeManagedWorkerToolchainWithDescriptor(ctx context.Context, pin managedworker.ToolchainPin, environment map[string]string, verified bool) error {
+	var file *os.File
+	if verified {
+		var err error
+		file, err = verifiedexec.Open(pin.Executable.Path, pin.Executable.ResolvedPath, pin.Executable.SHA256, 0)
+		if err != nil {
+			return err
+		}
+		defer file.Close() //nolint:errcheck // read-only descriptor
+	} else {
+		resolved, err := filepath.EvalSymlinks(pin.Executable.Path)
+		if err != nil {
+			return fmt.Errorf("resolve executable %q: %w", pin.Executable.Path, err)
+		}
+		resolved = filepath.Clean(resolved)
+		if resolved != pin.Executable.ResolvedPath {
+			return fmt.Errorf("resolved path mismatch: got %q want %q", resolved, pin.Executable.ResolvedPath)
+		}
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return fmt.Errorf("inspect resolved executable %q: %w", resolved, err)
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+			return fmt.Errorf("resolved executable must be an executable regular file: %q", resolved)
+		}
+		data, err := os.ReadFile(resolved)
+		if err != nil {
+			return fmt.Errorf("read resolved executable %q: %w", resolved, err)
+		}
+		digest := sha256.Sum256(data)
+		if got := hex.EncodeToString(digest[:]); got != pin.Executable.SHA256 {
+			return fmt.Errorf("sha256 mismatch: got %q want %q", got, pin.Executable.SHA256)
+		}
+	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	command := exec.CommandContext(probeCtx, pin.Executable.Path, pin.Executable.VersionArgs...)
+	command := managedToolchainCommandContext(probeCtx, pin.Executable.Path, pin.Executable.VersionArgs...)
+	if file != nil {
+		verifiedexec.Bind(command, file)
+	}
 	command.Env = overlayEnvironment(os.Environ(), environment)
 	output, err := command.Output()
 	if err != nil {
@@ -293,4 +312,36 @@ func newTaskCheckPathResolver(work []beads.Bead) taskCheckPathResolver {
 		}
 		return selected, nil
 	}
+}
+
+func probeManagedWorkerToolchainDescriptor(ctx context.Context, pin managedworker.ToolchainPin, environment map[string]string) error {
+	return probeManagedWorkerToolchainWithDescriptor(ctx, pin, environment, true)
+}
+
+func cityManagedWorkerPreflightProbes(city, revision string) managedworker.Probes {
+	probes := defaultManagedWorkerPreflightProbes()
+	probes.InspectProvider = func(ctx context.Context, pin platforminstall.ProviderPin) error {
+		return platforminstall.VerifyCityProviderPin(ctx, city, revision, pin)
+	}
+	probes.InspectToolchain = func(ctx context.Context, pin managedworker.ToolchainPin, environment map[string]string) error {
+		delegated, err := platforminstall.CityDelegatesProviderApproval(city)
+		if err != nil {
+			return err
+		}
+		if delegated {
+			return probeManagedWorkerToolchainDescriptor(ctx, pin, environment)
+		}
+		return probeManagedWorkerToolchain(ctx, pin, environment)
+	}
+	probes.ProbeReadiness = func(ctx context.Context, provider string) error {
+		result, err := api.ProbeCityProvider(ctx, city, revision, provider)
+		if err != nil {
+			return err
+		}
+		if result.Status != api.ProbeStatusConfigured {
+			return fmt.Errorf("status=%s detail=%s", result.Status, strings.TrimSpace(result.Detail))
+		}
+		return nil
+	}
+	return probes
 }

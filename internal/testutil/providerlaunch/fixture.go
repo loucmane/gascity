@@ -30,6 +30,12 @@ type Fixture struct {
 // New installs an approved native CLI and the actual companion helper sources.
 func New(t *testing.T, provider string) Fixture {
 	t.Helper()
+	return NewWithCLI(t, provider, []byte("#!/bin/sh\nprintf 'APPROVED\\n'\nprintf '%s\\n' \"$@\"\n"))
+}
+
+// NewWithCLI installs a supplied synthetic CLI under the same approval chain.
+func NewWithCLI(t *testing.T, provider string, cli []byte) Fixture {
+	t.Helper()
 	root := t.TempDir()
 	f := Fixture{
 		City: filepath.Join(root, "city"), Stable: filepath.Join(root, "bin", provider),
@@ -52,7 +58,6 @@ func New(t *testing.T, provider string) Fixture {
 		}
 		return data
 	}
-	cli := []byte("#!/bin/sh\nprintf 'APPROVED\\n'\nprintf '%s\\n' \"$@\"\n")
 	write(f.Target, cli, 0o555)
 	if err := os.MkdirAll(filepath.Dir(f.Stable), 0o755); err != nil {
 		t.Fatal(err)

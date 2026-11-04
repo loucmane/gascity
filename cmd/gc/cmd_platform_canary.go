@@ -17,6 +17,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/managedworker"
+	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/spf13/cobra"
 )
 
@@ -215,9 +216,15 @@ func runPlatformCanaryScenarioCommand(ctx context.Context, call platformCanarySc
 	if err != nil {
 		return managedworker.CanaryScenarioEvidence{}, fmt.Errorf("encode canary worker profile: %w", err)
 	}
-	command.Env = overlayEnvironment(os.Environ(), map[string]string{
-		"GCT_CANARY_WORKER_PROFILE_JSON": string(profileJSON),
-	})
+	delegated, err := platforminstall.CityDelegatesProviderApproval(call.CityPath)
+	if err != nil {
+		return managedworker.CanaryScenarioEvidence{}, err
+	}
+	overrides := map[string]string{"GCT_CANARY_WORKER_PROFILE_JSON": string(profileJSON)}
+	if delegated {
+		overrides["GCT_CANARY_PROVIDER_APPROVAL"] = "1"
+	}
+	command.Env = overlayEnvironment(os.Environ(), overrides)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr

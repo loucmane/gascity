@@ -65,7 +65,7 @@ func (s *Server) humaHandleProviderReadiness(ctx context.Context, input *Provide
 		return nil, apierr.InvalidRequest.Msg(err.Error())
 	}
 
-	resp, err := buildReadinessResponse(ctx, providers, input.Fresh)
+	resp, err := buildCityReadinessResponse(ctx, s.state.CityPath(), providers, input.Fresh)
 	if err != nil {
 		return nil, apierr.Internal.Msg(err.Error())
 	}
@@ -97,7 +97,7 @@ func (s *Server) humaHandleReadiness(ctx context.Context, input *ReadinessInput)
 		return nil, apierr.InvalidRequest.Msg(err.Error())
 	}
 
-	resp, err := buildReadinessResponse(ctx, items, input.Fresh)
+	resp, err := buildCityReadinessResponse(ctx, s.state.CityPath(), items, input.Fresh)
 	if err != nil {
 		return nil, apierr.Internal.Msg(err.Error())
 	}

@@ -105,3 +105,12 @@ func nativeProviderLaunch(manifest Manifest, provider string, arguments []string
 	}
 	return "", fmt.Errorf("provider allowlist native launcher for %q requires a signed attention source chain", provider)
 }
+
+// ResolveCityProviderArgv applies the city launch policy to a one-shot command.
+func ResolveCityProviderArgv(ctx context.Context, city string, argv []string) ([]string, error) {
+	command, err := ResolveCityProviderLaunch(ctx, city, "", shellquote.Join(argv))
+	if err != nil {
+		return nil, err
+	}
+	return shlex.Split(command)
+}
