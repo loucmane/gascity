@@ -20,6 +20,7 @@ import (
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/managedworker"
 	"github.com/gastownhall/gascity/internal/platforminstall"
+	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/shellquote"
 )
 
@@ -51,10 +52,12 @@ func configureManagedWorkerPreflight(
 		commandArgv = shellquote.Split(strings.TrimSpace(item.cfg.Command))
 	}
 	receiptPath := managedworker.ProvisioningReceiptPath(cityPath)
-	item.preflight = func(ctx context.Context) error {
-		if err := platforminstall.VerifyCityProviderAllowlist(cityPath, permissionRevision); err != nil {
+	item.preflight = func(ctx context.Context, launch *runtime.Config) error {
+		command, err := platforminstall.ResolveCityProviderLaunch(ctx, cityPath, permissionRevision, launch.Command)
+		if err != nil {
 			return &managedworker.Failure{Profile: profileName, Err: err}
 		}
+		launch.Command = command
 		receiptBytes, err := os.ReadFile(receiptPath)
 		if errors.Is(err, os.ErrNotExist) {
 			// Unprovisioned control-plane and legacy sessions remain outside this
@@ -92,7 +95,7 @@ func configureManagedWorkerPreflight(
 		observed.CheckPath.Path = filepath.Clean(checkPath)
 		observed.Environment = make(map[string]string, len(expected.Environment))
 		for key := range expected.Environment {
-			observed.Environment[key] = item.cfg.Env[key]
+			observed.Environment[key] = launch.Env[key]
 		}
 		probes := defaultManagedWorkerPreflightProbes()
 		if probeOverride != nil {

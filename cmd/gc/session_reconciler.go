@@ -29,6 +29,7 @@ import (
 	"github.com/gastownhall/gascity/internal/clock"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/events"
+	"github.com/gastownhall/gascity/internal/platforminstall"
 	"github.com/gastownhall/gascity/internal/runtime"
 	sessionpkg "github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/storeref"
@@ -3451,7 +3452,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 							if launchOnlyDrift {
 								relaunched, launchBatch := relaunchAgentForLaunchDrift(ctx, sp, sessFront, infoByID[id], name,
 									tp, cityPath, cfg, store, storedHash, currentHash, storedProvision, storedLaunch,
-									driftedFields, rec, trace, stdout, stderr)
+									driftedFields, rec, trace, stdout, stderr, effectiveStartOptions...)
 								// Fold the returned batch unconditionally (Step 6d write-returns-Info).
 								// On success it is the rebaseline patch; on the prepare/skew/relaunch
 								// failure paths it is the buildPreparedStart prepare residue — only
@@ -3532,7 +3533,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 							if launchOnlyDrift {
 								relaunched, launchBatch := relaunchAgentForLaunchDrift(ctx, sp, sessFront, infoByID[id], name,
 									tp, cityPath, cfg, store, storedHash, currentHash, storedProvision, storedLaunch,
-									driftedFields, rec, trace, stdout, stderr)
+									driftedFields, rec, trace, stdout, stderr, effectiveStartOptions...)
 								// Fold the returned batch unconditionally (Step 6d write-returns-Info).
 								// On success it is the rebaseline patch; on the prepare/skew/relaunch
 								// failure paths it is the buildPreparedStart prepare residue — only
@@ -7025,6 +7026,7 @@ func relaunchAgentForLaunchDrift(
 	rec events.Recorder,
 	trace *sessionReconcilerTraceCycle,
 	stdout, stderr io.Writer,
+	startOptions ...startExecutionOption,
 ) (bool, map[string]string) {
 	r, ok := sp.(runtime.RelaunchProvider)
 	if !ok {
@@ -7096,7 +7098,21 @@ func relaunchAgentForLaunchDrift(
 	// falls back to the full restart path, whose Provider.Start is independently
 	// gated by waitForStartIdentityReadable.
 	projectionPublished := false
+	startOpts := startExecutionOptions{}
+	for _, apply := range startOptions {
+		apply(&startOpts)
+	}
+	configureManagedWorkerPreflight(prepared, cityPath, cfg, startOpts.managedWorkerPermissionRevision, startOpts.checkPathResolver, startOpts.managedWorkerProbes)
 	relaunchErr := sessionpkg.WithSessionMutationLock(preparedInfo.ID, func() error {
+		delegated, err := platforminstall.CityDelegatesProviderApproval(cityPath)
+		if err != nil {
+			return err
+		}
+		if delegated && prepared.preflight != nil {
+			if err := prepared.preflight(ctx, &prepared.cfg); err != nil {
+				return fmt.Errorf("managed-worker preflight: %w", err)
+			}
+		}
 		if err := sessionpkg.PublishLiveSessionFenceProjection(cityPath, preparedInfo); err != nil {
 			return err
 		}
@@ -7105,7 +7121,7 @@ func relaunchAgentForLaunchDrift(
 	})
 	if relaunchErr != nil {
 		if !projectionPublished {
-			fmt.Fprintf(stderr, "session reconciler: publishing claim fence before relaunching %s: %v; falling back to full restart\n", name, relaunchErr) //nolint:errcheck
+			fmt.Fprintf(stderr, "session reconciler: preflight or claim fence before relaunching %s: %v; falling back to full restart\n", name, relaunchErr) //nolint:errcheck
 			return false, relaunchAbortResidueFold(preparedInfo, sessFront, hadResumeKeyBeforePrepare)
 		}
 		// ErrRelaunchUnsupported (a wrapper whose backend cannot relaunch) or a

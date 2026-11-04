@@ -10,26 +10,26 @@ import (
 // reference before encoding/json can accept case aliases or null pointers.
 // Legacy documents without this extension keep their existing decoder path.
 func ValidateOptionalJSON(data []byte, manifest bool) error {
+	// Validate the byte image before the absent-extension legacy shortcut.
+	value, err := strictJSON(data)
+	if err != nil {
+		return err
+	}
+	if _, ok := value.(map[string]any); !ok {
+		return fmt.Errorf("document must be an object")
+	}
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(data, &object); err != nil {
 		return err
 	}
 	if manifest {
+		for key := range object {
+			if strings.EqualFold(key, "integrity") && key != "integrity" {
+				return fmt.Errorf("integrity key must be exact")
+			}
+		}
 		raw, ok := object["integrity"]
 		if !ok {
-			for key, value := range object {
-				if strings.EqualFold(key, "integrity") {
-					var fields map[string]json.RawMessage
-					if err := json.Unmarshal(value, &fields); err != nil {
-						return err
-					}
-					for field := range fields {
-						if strings.EqualFold(field, "provider_allowlist") {
-							return fmt.Errorf("integrity key must be exact for provider_allowlist")
-						}
-					}
-				}
-			}
 			return nil
 		}
 		if err := json.Unmarshal(raw, &object); err != nil {
@@ -48,30 +48,26 @@ func ValidateOptionalJSON(data []byte, manifest bool) error {
 	if !found {
 		return nil
 	}
-	// Detect duplicates in the original bytes, including within the extension.
-	if _, err := strictJSON(data); err != nil {
-		return err
-	}
 	raw, err := strictJSON(object["provider_allowlist"])
 	if err != nil {
 		return err
 	}
-	value, ok := raw.(map[string]any)
-	if !ok || len(value) != 2 {
+	fields, ok := raw.(map[string]any)
+	if !ok || len(fields) != 2 {
 		return fmt.Errorf("provider_allowlist must be an exact object")
 	}
-	path, ok := value["path"].(string)
+	path, ok := fields["path"].(string)
 	if !ok || !absolute(path) {
 		return fmt.Errorf("provider_allowlist path invalid")
 	}
 	if !manifest {
-		digest, ok := value["sha256"].(string)
+		digest, ok := fields["sha256"].(string)
 		if !ok || !validSHA(digest) {
 			return fmt.Errorf("provider_allowlist sha256 invalid")
 		}
 		return nil
 	}
-	bindings, ok := value["bindings"].([]any)
+	bindings, ok := fields["bindings"].([]any)
 	if !ok || len(bindings) == 0 {
 		return fmt.Errorf("provider_allowlist bindings invalid")
 	}

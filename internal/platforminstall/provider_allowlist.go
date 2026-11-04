@@ -2,9 +2,11 @@ package platforminstall
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/gastownhall/gascity/internal/providerallowlist"
 )
@@ -14,24 +16,72 @@ import (
 // retain their existing behavior. A required approval never falls back to
 // legacy behavior when the list or receipt disappears (ga-r9lv).
 func VerifyCityProviderAllowlist(city, permissionRevision string) error {
+	manifest, delegated, err := cityProviderManifest(city)
+	if err != nil || !delegated {
+		return err
+	}
+	return verifyManifestProviderAllowlist(manifest, permissionRevision)
+}
+
+// CityDelegatesProviderApproval reports whether the installed manifest opts into
+// provider approval. Missing signed authority with surviving approval inputs is
+// an error, so callers cannot silently restore the legacy launch path.
+func CityDelegatesProviderApproval(city string) (bool, error) {
+	_, delegated, err := cityProviderManifest(city)
+	return delegated, err
+}
+
+func cityProviderManifest(city string) (Manifest, bool, error) {
 	if city == "" {
-		return nil
+		return Manifest{}, false, nil
 	}
 	data, err := os.ReadFile(DefaultManifestPath(city))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		// Existing approval inputs are durable evidence that losing the signed
+		// authority is a refusal, rather than a return to legacy behavior.
+		if _, listErr := os.Lstat(providerallowlist.Path(city)); !errors.Is(listErr, os.ErrNotExist) {
+			return Manifest{}, false, fmt.Errorf("provider allowlist manifest missing: %w", err)
+		}
+		receipt, receiptErr := os.ReadFile(providerallowlist.ReceiptPath(city))
+		if receiptErr == nil {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(receipt, &fields) == nil {
+				for key := range fields {
+					if strings.EqualFold(key, "provider_allowlist") {
+						return Manifest{}, false, fmt.Errorf("provider allowlist manifest missing: %w", err)
+					}
+				}
+			}
+		}
+		return Manifest{}, false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("provider allowlist manifest: %w", err)
+		return Manifest{}, false, fmt.Errorf("provider allowlist manifest: %w", err)
+	}
+	// Inspect the extension before validating unrelated legacy manifest pins.
+	// Strict extension parsing still rejects aliases/duplicates before absence.
+	if err := providerallowlist.ValidateOptionalJSON(data, true); err != nil {
+		return Manifest{}, false, fmt.Errorf("provider allowlist manifest: %w", err)
+	}
+	var probe struct {
+		Integrity *struct {
+			ProviderAllowlist json.RawMessage `json:"provider_allowlist"`
+		} `json:"integrity"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return Manifest{}, false, fmt.Errorf("provider allowlist manifest: %w", err)
+	}
+	if probe.Integrity == nil || len(probe.Integrity.ProviderAllowlist) == 0 {
+		return Manifest{}, false, nil
 	}
 	manifest, err := LoadManifest(data)
 	if err != nil {
-		return fmt.Errorf("provider allowlist manifest: %w", err)
+		return Manifest{}, false, fmt.Errorf("provider allowlist manifest: %w", err)
 	}
 	if manifest.CityPath != city {
-		return fmt.Errorf("provider allowlist manifest city mismatch")
+		return Manifest{}, false, fmt.Errorf("provider allowlist manifest city mismatch")
 	}
-	return verifyManifestProviderAllowlist(manifest, permissionRevision)
+	return manifest, true, nil
 }
 
 func approvedProviders(manifest Manifest, revision string) (providerallowlist.List, error) {

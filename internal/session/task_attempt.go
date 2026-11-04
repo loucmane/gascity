@@ -31,9 +31,11 @@ func (m *Manager) startRuntime(ctx context.Context, id, name string, cfg runtime
 	}
 	// ga-r9lv: direct create, resume, and fresh fallback share this boundary.
 	// Verify approved bytes before consuming a task attempt or starting tools.
-	if err := platforminstall.VerifyCityProviderAllowlist(m.cityPath, ""); err != nil {
+	command, err := platforminstall.ResolveCityProviderLaunch(ctx, m.cityPath, "", cfg.Command)
+	if err != nil {
 		return err
 	}
+	cfg.Command = command
 	if m.store == nil {
 		return fmt.Errorf("%w: authoritative session store unavailable", taskattempt.ErrRefused)
 	}

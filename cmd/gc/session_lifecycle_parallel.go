@@ -231,7 +231,7 @@ func (c startCandidate) logicalTemplate(cfg *config.City) string {
 type preparedStart struct {
 	candidate startCandidate
 	cfg       runtime.Config
-	preflight func(context.Context) error
+	preflight func(context.Context, *runtime.Config) error
 	// managedWorkerArgv is the policy-bearing provider argv after schema and
 	// per-dispatch options, but before per-session resume/fork identifiers are
 	// appended. Provisioning receipts are role/profile authority and therefore
@@ -2306,7 +2306,7 @@ func startPreparedStartCandidate(
 		}
 	}
 	if item.preflight != nil {
-		if err := item.preflight(ctx); err != nil {
+		if err := item.preflight(ctx, &item.cfg); err != nil {
 			return false, fmt.Errorf("managed-worker preflight: %w", err)
 		}
 	}

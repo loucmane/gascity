@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/providerallowlist"
+	"github.com/gastownhall/gascity/internal/shellquote"
 )
 
 func TestClosedWorkerAllowlistVersion(t *testing.T) {
@@ -79,6 +80,54 @@ func TestClosedWorkerAllowlistVersion(t *testing.T) {
 			if err := VerifyAllowlistedProvider(context.Background(), manifest, current); err != nil {
 				t.Fatalf("refreshed wrapper receipt refused: %v", err)
 			}
+			installed := testManifest(t, root, []byte("candidate"), []byte("installed"))
+			installed.CityPath, installed.Integrity = city, manifest.Integrity
+			installed = finalizeManifest(t, installed)
+			installedData, err := MarshalManifest(installed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeProviderFixture(t, DefaultManifestPath(city), installedData)
+			command := shellquote.Join([]string{wrapper, "--resume", "session key"})
+			if got, err := ResolveCityProviderLaunch(context.Background(), city, "", command); err != nil || got != command {
+				t.Fatalf("signed wrapper resume = %q, %v", got, err)
+			}
+			if _, err := ResolveCityProviderLaunch(context.Background(), city, "", filepath.Join(root, "unsigned-worker")); err == nil {
+				t.Fatal("accepted unsigned wrapper chain")
+			}
+			probeMarker := filepath.Join(root, "symlink-source-probed")
+			aliasTarget := filepath.Join(root, "alias-target", name)
+			aliasSource := []byte("#!/bin/sh\ntouch " + shellquote.Quote(probeMarker) + "\nprintf '%s\\n' " + shellquote.Quote(version) + "\n")
+			writeProviderFixture(t, aliasTarget, aliasSource)
+			if err := os.Chmod(aliasTarget, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			alias := filepath.Join(root, "alias", "bin", name)
+			if err := os.MkdirAll(filepath.Dir(alias), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(aliasTarget, alias); err != nil {
+				t.Fatal(err)
+			}
+			aliasPin := pin
+			aliasPin.Path, aliasPin.ResolvedPath, aliasPin.SHA256 = alias, aliasTarget, testSHA256(aliasSource)
+			aliasManifest := installed
+			aliasIntegrity := *installed.Integrity
+			aliasManifest.Integrity = &aliasIntegrity
+			aliasIntegrity.Providers = []ProviderPin{aliasPin}
+			aliasManifest = finalizeManifest(t, aliasManifest)
+			aliasData, err := MarshalManifest(aliasManifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeProviderFixture(t, DefaultManifestPath(city), aliasData)
+			if _, err := ResolveCityProviderLaunch(context.Background(), city, "", shellquote.Quote(alias)); err == nil {
+				t.Error("accepted symlink source chain whose helper root changes on resolution")
+			}
+			if _, err := os.Stat(probeMarker); !os.IsNotExist(err) {
+				t.Errorf("probed symlink source before refusal: %v", err)
+			}
+			writeProviderFixture(t, DefaultManifestPath(city), installedData)
 			for _, fault := range []string{"sources", "sha", "args", "stale", "unapproved", "unbound"} {
 				t.Run(fault, func(t *testing.T) {
 					bad := current
@@ -108,6 +157,17 @@ func TestClosedWorkerAllowlistVersion(t *testing.T) {
 			manifest.Integrity.ProviderAllowlist = nil
 			if report := inspectPinnedIntegrity(context.Background(), manifest); len(report.Drifts) == 0 {
 				t.Fatal("legacy version checks disabled")
+			}
+			marker := filepath.Join(root, "unapproved-version-probe")
+			writeProviderFixture(t, wrapper, []byte("#!/bin/sh\ntouch "+shellquote.Quote(marker)+"\n"))
+			if err := os.Chmod(wrapper, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ResolveCityProviderLaunch(context.Background(), city, "", command); err == nil {
+				t.Fatal("accepted changed wrapper bytes")
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("ran unapproved wrapper version probe: %v", err)
 			}
 		})
 	}

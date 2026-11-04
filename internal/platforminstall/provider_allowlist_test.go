@@ -158,3 +158,17 @@ func TestCompanionManifestRejectsNullReference(t *testing.T) {
 		t.Fatal("accepted null provider_allowlist reference")
 	}
 }
+
+func TestLegacyProviderStartIgnoresUnrelatedManifestDrift(t *testing.T) {
+	city := t.TempDir()
+	manifest := integrityManifest(t, city)
+	manifest.ReleaseID = "stale-self-digest"
+	data, err := MarshalManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeProviderFixture(t, DefaultManifestPath(city), data)
+	if err := VerifyCityProviderAllowlist(city, ""); err != nil {
+		t.Fatalf("legacy direct start changed when no allowlist delegates approval: %v", err)
+	}
+}

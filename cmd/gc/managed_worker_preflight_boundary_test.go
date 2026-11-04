@@ -37,7 +37,7 @@ func TestStartPreparedStartCandidateRefusesProviderStartWhenManagedPreflightFail
 			Command: "codex --ask-for-approval never --sandbox workspace-write",
 			WorkDir: t.TempDir(),
 		},
-		preflight: func(context.Context) error {
+		preflight: func(context.Context, *runtime.Config) error {
 			return errors.New("rules sha256 mismatch")
 		},
 	}
@@ -124,7 +124,7 @@ func TestConfigureManagedWorkerPreflightUsesProductionReceiptAndRoutedWork(t *te
 	if item.preflight == nil {
 		t.Fatal("production preflight was not attached")
 	}
-	if err := item.preflight(context.Background()); err != nil {
+	if err := item.preflight(context.Background(), &item.cfg); err != nil {
 		t.Fatalf("production preflight: %v", err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"unicode/utf8"
 )
 
 // ReadApproved checks a protected provisioning receipt's self-digest and its
@@ -16,6 +17,9 @@ import (
 // projection avoids importing that higher-level package into platforminstall.
 // An empty revision is used by platform inspection, which has no loaded config.
 func ReadApproved(path string, receipt []byte, revision string) (List, error) {
+	if err := ValidateOptionalJSON(receipt, false); err != nil {
+		return List{}, fmt.Errorf("provider allowlist approval: %w", err)
+	}
 	value, err := strictJSON(receipt)
 	if err != nil {
 		return List{}, fmt.Errorf("provider allowlist approval: %w", err)
@@ -73,6 +77,9 @@ func ReadApproved(path string, receipt []byte, revision string) (List, error) {
 // strictJSON retains exact numeric spelling and rejects duplicate keys at
 // every nesting level, unlike encoding/json's default last-value-wins decoder.
 func strictJSON(data []byte) (any, error) {
+	if !utf8.Valid(data) {
+		return nil, fmt.Errorf("JSON must be UTF-8")
+	}
 	if len(data) > 16*1024*1024 {
 		return nil, fmt.Errorf("JSON exceeds 16 MiB")
 	}
