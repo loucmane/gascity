@@ -10,7 +10,13 @@ import (
 // reference before encoding/json can accept case aliases or null pointers.
 // Legacy documents without this extension keep their existing decoder path.
 func ValidateOptionalJSON(data []byte, manifest bool) error {
-	// Validate the byte image before the absent-extension legacy shortcut.
+	// ga-r9lv: legacy documents keep encoding/json's original byte and duplicate
+	// handling. Inspect every member before choosing that branch, so a duplicate
+	// outer integrity object cannot hide an earlier provider authority declaration.
+	found, err := hasProviderExtension(data, manifest)
+	if err != nil || !found {
+		return err
+	}
 	value, err := strictJSON(data)
 	if err != nil {
 		return err
@@ -36,7 +42,7 @@ func ValidateOptionalJSON(data []byte, manifest bool) error {
 			return err
 		}
 	}
-	found := false
+	found = false
 	for key := range object {
 		if strings.EqualFold(key, "provider_allowlist") {
 			if key != "provider_allowlist" {

@@ -12,8 +12,8 @@ import (
 
 // ResolveCityProviderLaunch binds the actual fresh/resume command to the city's
 // approved executable or signed closed-worker chain. Legacy commands are returned
-// byte-for-byte. Approved commands become literal argv with an absolute target,
-// so PATH and shell expansion cannot select another executable after approval.
+// byte-for-byte. Direct native commands enter a signed launcher that verifies
+// and executes one retained descriptor at the runtime boundary (ga-r9lv).
 func ResolveCityProviderLaunch(ctx context.Context, city, revision, command string) (string, error) {
 	manifest, delegated, err := cityProviderManifest(city)
 	if err != nil || !delegated {
@@ -32,9 +32,9 @@ func ResolveCityProviderLaunch(ctx context.Context, city, revision, command stri
 	// permission to launch a Python interpreter or a caller-selected city.
 	if len(argv) >= 5 && argv[0] == "/usr/bin/python3" && argv[1] == "-I" && argv[4] == manifest.CityPath &&
 		filepath.IsAbs(argv[2]) && filepath.Clean(argv[2]) == argv[2] && filepath.Base(argv[2]) == "gct_attention_launch.py" && filepath.Base(filepath.Dir(argv[2])) == "lib" &&
-		(argv[3] == "claude" || argv[3] == "codex") {
+		(argv[3] == "claude" || argv[3] == "codex" || argv[3] == "native:claude" || argv[3] == "native:codex") {
 		root := filepath.Dir(filepath.Dir(argv[2]))
-		wrapper := filepath.Join(root, "bin", argv[3]+"-attention")
+		wrapper := filepath.Join(root, "bin", strings.TrimPrefix(argv[3], "native:")+"-attention")
 		if _, err := verifyAttentionLaunchChain(manifest, wrapper); err != nil {
 			return "", err
 		}
@@ -43,8 +43,10 @@ func ResolveCityProviderLaunch(ctx context.Context, city, revision, command stri
 	for _, binding := range manifest.Integrity.ProviderAllowlist.Bindings {
 		entry, ok := list.Active(binding.Provider)
 		if ok && (argv[0] == binding.Path || argv[0] == entry.Path) {
-			argv[0] = entry.Path
-			return shellquote.Join(argv), nil
+			// Returning entry.Path would reopen it in the runtime after this
+			// check. Enter the pinned helper instead; it opens, verifies and
+			// executes the same inode even if the pathname is then replaced.
+			return nativeProviderLaunch(manifest, binding.Provider, argv[1:])
 		}
 	}
 	if supported, err := verifyAttentionLaunchChain(manifest, argv[0]); supported {
@@ -84,4 +86,22 @@ func ResolveCityProviderLaunch(ctx context.Context, city, revision, command stri
 		return shellquote.Join(argv), nil
 	}
 	return "", fmt.Errorf("provider allowlist launch executable %q is not approved", argv[0])
+}
+
+func nativeProviderLaunch(manifest Manifest, provider string, arguments []string) (string, error) {
+	for _, pin := range manifest.Integrity.Files {
+		if filepath.Base(pin.Path) != provider+"-attention" || filepath.Base(filepath.Dir(pin.Path)) != "bin" {
+			continue
+		}
+		supported, err := verifyAttentionLaunchChain(manifest, pin.Path)
+		if err != nil {
+			return "", err
+		}
+		if !supported {
+			return "", fmt.Errorf("provider allowlist native launcher does not support %q", provider)
+		}
+		helper := filepath.Join(filepath.Dir(filepath.Dir(pin.Path)), "lib", "gct_attention_launch.py")
+		return shellquote.Join(append([]string{"/usr/bin/python3", "-I", helper, "native:" + provider, manifest.CityPath}, arguments...)), nil
+	}
+	return "", fmt.Errorf("provider allowlist native launcher for %q requires a signed attention source chain", provider)
 }

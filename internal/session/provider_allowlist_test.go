@@ -2,9 +2,6 @@ package session
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +12,7 @@ import (
 	"github.com/gastownhall/gascity/internal/providerallowlist"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/shellquote"
+	"github.com/gastownhall/gascity/internal/testutil/providerlaunch"
 )
 
 func TestDirectStartRefusesProviderAllowlistAuthority(t *testing.T) {
@@ -109,7 +107,7 @@ func TestNativeLaunchUsesApprovedExecutable(t *testing.T) {
 						if shape == "legacy stale manifest" && call.Config.Command != command {
 							t.Fatalf("legacy command changed: %q", call.Config.Command)
 						}
-						want := target
+						want := "/usr/bin/python3"
 						if shape == "legacy stale manifest" {
 							want = "codex"
 						}
@@ -134,48 +132,6 @@ func TestNativeLaunchUsesApprovedExecutable(t *testing.T) {
 
 func approvedNativeFixture(t *testing.T) (city, stable, target string) {
 	t.Helper()
-	root := t.TempDir()
-	city, stable, target = filepath.Join(root, "city"), filepath.Join(root, "bin", "codex"), filepath.Join(root, "toolchains", "codex-1")
-	write := func(path string, data []byte, mode os.FileMode) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, data, mode); err != nil {
-			t.Fatal(err)
-		}
-	}
-	digest := func(data []byte) string { hash := sha256.Sum256(data); return hex.EncodeToString(hash[:]) }
-	encode := func(value any) []byte {
-		data, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return data
-	}
-	cli := []byte("#!/bin/sh\nexit 0\n")
-	write(target, cli, 0o555)
-	if err := os.MkdirAll(filepath.Dir(stable), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, stable); err != nil {
-		t.Fatal(err)
-	}
-	list := encode(providerallowlist.List{Schema: providerallowlist.Schema, Entries: []providerallowlist.Entry{{Provider: "codex", Version: "1", Path: target, SHA256: digest(cli), Active: true}}})
-	write(providerallowlist.Path(city), list, 0o600)
-	receipt := map[string]any{"schema": "gc.provisioning-receipt.v2", "permission_revision": strings.Repeat("b", 64), "provider_allowlist": map[string]string{"path": providerallowlist.Path(city), "sha256": digest(list)}}
-	receipt["receipt_sha256"] = digest(encode(receipt))
-	write(providerallowlist.ReceiptPath(city), encode(receipt), 0o600)
-	manifest := platforminstall.Manifest{
-		Schema: platforminstall.ManifestSchemaV1, ReleaseID: "test-native", CityPath: city,
-		Core:           platforminstall.Artifact{Name: "gc", Source: filepath.Join(root, "candidate"), Destination: filepath.Join(root, "bin", "gc"), SHA256: strings.Repeat("c", 64), Mode: 0o755},
-		PreviousSHA256: strings.Repeat("d", 64), BackupPath: filepath.Join(root, "backup"), ReceiptPath: filepath.Join(root, "receipt"),
-		Integrity: &platforminstall.IntegritySpec{ProviderAllowlist: &providerallowlist.Reference{Path: providerallowlist.Path(city), Bindings: []providerallowlist.Binding{{Provider: "codex", Path: stable}}}},
-	}
-	_, data, err := platforminstall.FinalizeManifest(encode(manifest))
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(platforminstall.DefaultManifestPath(city), data, 0o600)
-	return city, stable, target
+	f := providerlaunch.New(t, "codex")
+	return f.City, f.Stable, f.Target
 }

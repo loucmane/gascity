@@ -34,7 +34,13 @@ func TestCompanionParserCorpus(t *testing.T) {
 			if item.Target == "" {
 				_, err = Parse(data)
 			} else {
-				err = ValidateOptionalJSON(data, item.Target == "manifest")
+				// The shared corpus specifies the strict authority decoder. Python
+				// consumers likewise decode_json before validate_optional; legacy
+				// document selection is exercised separately against each baseline.
+				_, err = strictJSON(data)
+				if err == nil {
+					err = ValidateOptionalJSON(data, item.Target == "manifest")
+				}
 			}
 			if (err == nil) != item.Accepted {
 				t.Fatalf("accepted=%v, error=%v", item.Accepted, err)
