@@ -2356,6 +2356,108 @@ func TestReplaceMarkdownBlockRequiresOneOrderedMarkerPair(t *testing.T) {
 	}
 }
 
+// Each ga-r9lv probe needs one real child to prove that pathname replacement
+// cannot change the bytes executed through an already verified descriptor.
+var reviewedProviderProbeSites = map[runnableKey]string{
+	{"cmd/gc", "main", "TestDelegatedToolchainProbeRetainsVerifiedInode"}:                               "cmd/gc/managed_worker_probe_race_test.go",
+	{"internal/api", "api", "TestDelegatedReadinessRunsApprovedClaude"}:                                 "internal/api/provider_readiness_delegated_test.go",
+	{"internal/platforminstall", "platforminstall", "TestProviderVersionProbeRetainsVerifiedInode"}:     "internal/platforminstall/provider_probe_race_test.go",
+	{"internal/platforminstall", "platforminstall", "TestAllowlistedProviderProbeRetainsVerifiedInode"}: "internal/platforminstall/provider_probe_race_test.go",
+	{"internal/verifiedexec", "verifiedexec", "TestDescriptorExecKeepsOpenedBytes"}:                     "internal/verifiedexec/executable_test.go",
+}
+
+func TestReviewedProviderProbesStayWithinExactMediumBudget(t *testing.T) {
+	root := repositoryRoot(t)
+	ledger, err := LoadLedger(filepath.Join(root, "test", "test-resources.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	census, err := ScanRepository(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems := validateManifestAgainstPolicy(bootstrapPolicy, ledger); len(problems) != 0 {
+		t.Fatalf("checked policy drift: %v", problems)
+	}
+	medium := make(map[runnableKey]MediumOwner)
+	for _, row := range ledger.Medium {
+		if row.OwnerBead == "ga-r9lv" {
+			medium[runnableKey{row.PackageDir, row.PackageName, row.Owner}] = row
+		}
+	}
+	if len(medium) != len(reviewedProviderProbeSites) {
+		t.Fatalf("provider probe Medium owners = %d, want exactly %d", len(medium), len(reviewedProviderProbeSites))
+	}
+	for key, path := range reviewedProviderProbeSites {
+		row, exists := medium[key]
+		if !exists || !equalResources(row.Resources, []Resource{ResourceSubprocess}) {
+			t.Errorf("missing exact subprocess Medium owner: %+v", key)
+		}
+		calls := 0
+		for _, occurrence := range census.Occurrences {
+			if occurrence.Resource == ResourceSubprocess && occurrence.PackageDir == key.packageDir && occurrence.PackageName == key.packageName && occurrence.Owner == key.owner {
+				calls++
+				if occurrence.Path != path || occurrence.Tagged || !occurrence.Runnable {
+					t.Errorf("provider probe ownership changed: %+v", occurrence)
+				}
+			}
+		}
+		if calls != 1 {
+			t.Errorf("provider probe %+v has %d subprocess sites, want exactly 1", key, calls)
+		}
+	}
+	audit := *findRow(t, ledger.AuditBaseline, ScopeAll, ResourceSubprocess)
+	debt := *findRow(t, ledger.Debt, ScopeUntagged, ResourceSubprocess)
+	small := *findRow(t, ledger.SmallDebt, ScopeUntagged, ResourceSubprocess)
+	for _, row := range []Baseline{audit, debt} {
+		if problems := validateBaseline("provider probes", row, census); len(problems) != 0 {
+			t.Fatalf("raw subprocess budget: %v", problems)
+		}
+	}
+	if problems := validateSmallBaseline(small, census, ledger.Medium); len(problems) != 0 {
+		t.Fatalf("Small subprocess budget: %v", problems)
+	}
+	// Exercise structural ratchets independently of the existing waiver clock.
+	// The repository-wide validation below still enforces every dated waiver.
+	for key, path := range reviewedProviderProbeSites {
+		for _, where := range []string{"same-owner", "sibling", "helper", "other-file"} {
+			t.Run(key.owner+"/"+where, func(t *testing.T) {
+				extra := Occurrence{Path: path, PackageDir: key.packageDir, PackageName: key.packageName, Owner: key.owner, Runnable: true, Resource: ResourceSubprocess}
+				switch where {
+				case "sibling":
+					extra.Owner = "TestUnreviewedProviderProbe"
+				case "helper":
+					extra.Runnable = false
+				case "other-file":
+					extra.Path = key.packageDir + "/unreviewed_probe_test.go"
+				}
+				changed := census
+				changed.Occurrences = append(append([]Occurrence(nil), census.Occurrences...), extra)
+				for _, row := range []Baseline{audit, debt} {
+					problems := strings.Join(validateBaseline("provider probes", row, changed), "\n")
+					if !strings.Contains(problems, "source resource census grew") {
+						t.Fatalf("additional subprocess escaped raw budget: %s", problems)
+					}
+				}
+				if where == "sibling" || where == "helper" {
+					problems := strings.Join(validateSmallBaseline(small, changed, ledger.Medium), "\n")
+					if !strings.Contains(problems, "Small resource census grew") {
+						t.Fatalf("unreviewed owner escaped Small budget: %s", problems)
+					}
+				}
+			})
+		}
+	}
+	doc, err := os.ReadFile(filepath.Join(root, "TESTING.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := CheckedMarkdownBlock(string(doc))
+	if err != nil || block != RenderMarkdown(ledger) {
+		t.Fatalf("checked resource ledger documentation drift: %v", err)
+	}
+}
+
 func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.T) {
 	root := repositoryRoot(t)
 	ledger, err := LoadLedger(filepath.Join(root, "test", "test-resources.toml"))
@@ -2377,6 +2479,11 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 	withoutFixtures := Census{}
 	guardCalls := 0
 	for _, occurrence := range census.Occurrences {
+		key := runnableKey{occurrence.PackageDir, occurrence.PackageName, occurrence.Owner}
+		if path, reviewed := reviewedProviderProbeSites[key]; reviewed && occurrence.Path == path && occurrence.Resource == ResourceSubprocess {
+			// Exact ownership and one-site budgets are checked separately above.
+			continue
+		}
 		// This shell harness is separately reviewed exact Medium ownership,
 		// not a new integration tag or an exemption from raw source counts.
 		if occurrence.Path == "scripts/native_dependency_guard_test.go" && occurrence.Resource == ResourceSubprocess {
@@ -2405,11 +2512,11 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 		t.Errorf("native guard subprocess attribution: got %d, want exactly 1", guardCalls)
 	}
 	if count := withoutFixtures.Count(ScopeAll, ResourceSubprocess); count.Calls > 709 || count.Files > 206 {
-		t.Errorf("subprocess growth outside four reviewed integration fixtures and one exact Medium guard: %+v", count)
+		t.Errorf("subprocess growth outside four reviewed integration fixtures, one exact Medium guard, and five exact Medium provider probes: %+v", count)
 	}
 	audit := findRow(t, ledger.AuditBaseline, ScopeAll, ResourceSubprocess)
-	if audit.BaselineCalls != 719 || audit.BaselineFiles != 211 {
-		t.Errorf("reviewed subprocess audit = %d calls / %d files, want 719 / 211", audit.BaselineCalls, audit.BaselineFiles)
+	if audit.BaselineCalls != 724 || audit.BaselineFiles != 215 {
+		t.Errorf("reviewed subprocess audit = %d calls / %d files, want 724 / 215", audit.BaselineCalls, audit.BaselineFiles)
 	}
 	if audit.ReportedCalls != 495 || audit.ReportedFiles != 135 || audit.Expires != "2026-10-31" {
 		t.Errorf("historical audit or expiry changed: %+v", audit)
@@ -2420,7 +2527,7 @@ func TestConformanceFixturesStayTaggedWithinReviewedSubprocessBudget(t *testing.
 		calls int
 		files int
 	}{
-		{"untagged", ledger.Debt, 479, 137},
+		{"untagged", ledger.Debt, 484, 141},
 		{"Small", ledger.SmallDebt, 459, 129},
 	} {
 		row := findRow(t, budget.rows, ScopeUntagged, ResourceSubprocess)

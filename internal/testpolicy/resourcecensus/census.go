@@ -121,16 +121,17 @@ type Baseline struct {
 
 // v1.5.0 supplies the 2026-10-31 upstream policy. Retain the fork's exact
 // ga-tmgr owner and its 2026-10-15 expiry. The source baseline adds only its
-// one untagged subprocess and nine sites in four tagged conformance fixtures;
-// the upstream Small baseline stays unchanged. Renewals need an owner decision.
+// one untagged subprocess and nine sites in four tagged conformance fixtures,
+// plus five ga-r9lv descriptor-probe sites with exact Medium ownership.
+// The upstream Small baseline and all existing expiries stay unchanged.
 var bootstrapPolicy = Ledger{
 	Version: 2,
 	AuditBaseline: []Baseline{
 		{
 			Scope:           ScopeAll,
 			Resource:        ResourceSubprocess,
-			BaselineCalls:   719,
-			BaselineFiles:   211,
+			BaselineCalls:   724,
+			BaselineFiles:   215,
 			ReportedCalls:   495,
 			ReportedFiles:   135,
 			OwnerBead:       "ga-cp3hwi",
@@ -170,8 +171,8 @@ var bootstrapPolicy = Ledger{
 		{
 			Scope:           ScopeUntagged,
 			Resource:        ResourceSubprocess,
-			BaselineCalls:   479,
-			BaselineFiles:   137,
+			BaselineCalls:   484,
+			BaselineFiles:   141,
 			ReportedCalls:   380,
 			ReportedFiles:   98,
 			OwnerBead:       "ga-cp3hwi",
@@ -325,6 +326,61 @@ var bootstrapPolicy = Ledger{
 		},
 	},
 	Medium: []MediumOwner{
+		{
+			PackageDir:      "cmd/gc",
+			PackageName:     "main",
+			Owner:           "TestDelegatedToolchainProbeRetainsVerifiedInode",
+			Resources:       []Resource{ResourceSubprocess},
+			OwnerBead:       "ga-r9lv",
+			Invariant:       "delegated toolchain probes execute the descriptor verified before pathname replacement",
+			ResourceOwner:   "one test-owned shell process proves the managed-worker toolchain probe retains verified bytes",
+			MigrationTarget: "provider-descriptor-boundary",
+			Expires:         "2026-12-05",
+		},
+		{
+			PackageDir:      "internal/api",
+			PackageName:     "api",
+			Owner:           "TestDelegatedReadinessRunsApprovedClaude",
+			Resources:       []Resource{ResourceSubprocess},
+			OwnerBead:       "ga-r9lv",
+			Invariant:       "delegated readiness uses the approved descriptor despite discovery candidates and pathname replacement",
+			ResourceOwner:   "one subprocess site runs a test-owned auth response script through the city provider readiness boundary",
+			MigrationTarget: "provider-descriptor-boundary",
+			Expires:         "2026-12-05",
+		},
+		{
+			PackageDir:      "internal/platforminstall",
+			PackageName:     "platforminstall",
+			Owner:           "TestProviderVersionProbeRetainsVerifiedInode",
+			Resources:       []Resource{ResourceSubprocess},
+			OwnerBead:       "ga-r9lv",
+			Invariant:       "provider version probes execute the descriptor verified before pathname replacement",
+			ResourceOwner:   "one test-owned shell process proves the provider pin descriptor probe retains verified bytes",
+			MigrationTarget: "provider-descriptor-boundary",
+			Expires:         "2026-12-05",
+		},
+		{
+			PackageDir:      "internal/platforminstall",
+			PackageName:     "platforminstall",
+			Owner:           "TestAllowlistedProviderProbeRetainsVerifiedInode",
+			Resources:       []Resource{ResourceSubprocess},
+			OwnerBead:       "ga-r9lv",
+			Invariant:       "allowlisted version probes retain verified bytes and refuse replacement before a later probe",
+			ResourceOwner:   "one subprocess site exercises the allowlist and receipt composition against test-owned provider scripts",
+			MigrationTarget: "provider-descriptor-boundary",
+			Expires:         "2026-12-05",
+		},
+		{
+			PackageDir:      "internal/verifiedexec",
+			PackageName:     "verifiedexec",
+			Owner:           "TestDescriptorExecKeepsOpenedBytes",
+			Resources:       []Resource{ResourceSubprocess},
+			OwnerBead:       "ga-r9lv",
+			Invariant:       "descriptor binding executes opened bytes after the original pathname is replaced",
+			ResourceOwner:   "one test-owned shell process proves inherited descriptor execution at the verifiedexec boundary",
+			MigrationTarget: "provider-descriptor-boundary",
+			Expires:         "2026-12-05",
+		},
 		{
 			PackageDir:      "scripts",
 			PackageName:     "scripts_test",

@@ -7,7 +7,9 @@ version = 2
 # Retain upstream v1.5.0 policy and its 2026-10-31 expiry, plus the exact
 # fork ga-tmgr Medium owner with its existing 2026-10-15 expiry. The combined
 # source baseline adds ten fork subprocess sites across five files; only the
-# ga-tmgr site is untagged. No change to the upstream Small baseline.
+# ga-tmgr site is untagged. Five additional ga-r9lv descriptor-probe sites
+# have exact Medium owners below. Their raw totals stay visible without
+# increasing Small debt or changing existing waiver metadata.
 
 # These broad rows retain the audit's point-in-time source needles. They do
 # not classify tests. The AST baselines below ignore comments and strings;
@@ -15,8 +17,8 @@ version = 2
 [[audit_baseline]]
 scope = "all"
 resource = "subprocess"
-baseline_calls = 719
-baseline_files = 211
+baseline_calls = 724
+baseline_files = 215
 reported_calls = 495
 reported_files = 135
 owner_bead = "ga-cp3hwi"
@@ -56,8 +58,8 @@ expires = "2026-10-31"
 [[debt]]
 scope = "untagged"
 resource = "subprocess"
-baseline_calls = 479
-baseline_files = 137
+baseline_calls = 484
+baseline_files = 141
 reported_calls = 380
 reported_files = 98
 owner_bead = "ga-cp3hwi"
@@ -213,6 +215,61 @@ expires = "2026-10-31"
 # top-level Go test identity. Only matching resources lexically inside that
 # declaration leave the Small-debt census; helper bodies and sibling tests do
 # not inherit a source exemption.
+[[medium]]
+package_dir = "cmd/gc"
+package_name = "main"
+owner = "TestDelegatedToolchainProbeRetainsVerifiedInode"
+resources = ["subprocess"]
+owner_bead = "ga-r9lv"
+invariant = "delegated toolchain probes execute the descriptor verified before pathname replacement"
+resource_owner = "one test-owned shell process proves the managed-worker toolchain probe retains verified bytes"
+migration_target = "provider-descriptor-boundary"
+expires = "2026-12-05"
+
+[[medium]]
+package_dir = "internal/api"
+package_name = "api"
+owner = "TestDelegatedReadinessRunsApprovedClaude"
+resources = ["subprocess"]
+owner_bead = "ga-r9lv"
+invariant = "delegated readiness uses the approved descriptor despite discovery candidates and pathname replacement"
+resource_owner = "one subprocess site runs a test-owned auth response script through the city provider readiness boundary"
+migration_target = "provider-descriptor-boundary"
+expires = "2026-12-05"
+
+[[medium]]
+package_dir = "internal/platforminstall"
+package_name = "platforminstall"
+owner = "TestProviderVersionProbeRetainsVerifiedInode"
+resources = ["subprocess"]
+owner_bead = "ga-r9lv"
+invariant = "provider version probes execute the descriptor verified before pathname replacement"
+resource_owner = "one test-owned shell process proves the provider pin descriptor probe retains verified bytes"
+migration_target = "provider-descriptor-boundary"
+expires = "2026-12-05"
+
+[[medium]]
+package_dir = "internal/platforminstall"
+package_name = "platforminstall"
+owner = "TestAllowlistedProviderProbeRetainsVerifiedInode"
+resources = ["subprocess"]
+owner_bead = "ga-r9lv"
+invariant = "allowlisted version probes retain verified bytes and refuse replacement before a later probe"
+resource_owner = "one subprocess site exercises the allowlist and receipt composition against test-owned provider scripts"
+migration_target = "provider-descriptor-boundary"
+expires = "2026-12-05"
+
+[[medium]]
+package_dir = "internal/verifiedexec"
+package_name = "verifiedexec"
+owner = "TestDescriptorExecKeepsOpenedBytes"
+resources = ["subprocess"]
+owner_bead = "ga-r9lv"
+invariant = "descriptor binding executes opened bytes after the original pathname is replaced"
+resource_owner = "one test-owned shell process proves inherited descriptor execution at the verifiedexec boundary"
+migration_target = "provider-descriptor-boundary"
+expires = "2026-12-05"
+
 [[medium]]
 package_dir = "scripts"
 package_name = "scripts_test"
