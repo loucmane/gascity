@@ -229,16 +229,19 @@ func ownershipVariants() []ownershipVariant {
 	for _, tc := range []struct {
 		name, status, kind, attempt string
 		kept, cleanup               bool
+		wrongIdentity               string
 	}{
-		{"marked execution open", "open", "", "attempt", true, false},
-		{"marked execution blocked", "blocked", "", "attempt", true, false},
-		{"marked execution without attempt", "in_progress", "", "", true, false},
-		{"marked execution open without attempt", "open", "", "", true, false},
-		{"marked control in progress", "in_progress", "check", "attempt", true, true},
-		{"marked control open", "open", "check", "attempt", false, false},
-		{"marked control blocked", "blocked", "check", "attempt", false, false},
-		{"marked control closed", "closed", "check", "attempt", false, false},
-		{"marked control without attempt", "open", "check", "", false, false},
+		{"marked execution open", "open", "", "attempt", true, false, ""},
+		{"marked execution blocked", "blocked", "", "attempt", true, false, ""},
+		{"marked execution without attempt", "in_progress", "", "", true, false, ""},
+		{"marked execution open without attempt", "open", "", "", true, false, ""},
+		{"marked control in progress", "in_progress", "check", "attempt", true, true, ""},
+		{"marked control open", "open", "check", "attempt", false, false, ""},
+		{"marked control blocked", "blocked", "check", "attempt", false, false, ""},
+		{"marked control closed", "closed", "check", "attempt", false, false, ""},
+		{"marked control without attempt", "open", "check", "", false, false, ""},
+		{"marked control wrong incarnation", "in_progress", "check", "attempt", false, false, "incarnation"},
+		{"marked control wrong assignee", "in_progress", "check", "attempt", false, false, "assignee"},
 	} {
 		variants = append(variants, ownershipVariant{name: tc.name, kept: tc.kept, apply: func(t *testing.T, f *ownershipFixture) {
 			f.env.setSessionMetadata(&f.session, map[string]string{"generation": "1", "instance_token": "fixture"})
@@ -250,9 +253,16 @@ func ownershipVariants() []ownershipVariant {
 					owner = "unrelated-session" // Control ignores execution back-references.
 				}
 			}
-			if err := f.backing.Update(f.work.ID, beads.UpdateOpts{Status: &tc.status, Metadata: map[string]string{
+			incarnation, assignee := "1:"+drainAckInstanceTokenDigest("fixture"), "legacy-claim-owner"
+			if tc.wrongIdentity == "incarnation" {
+				incarnation = "2:" + drainAckInstanceTokenDigest("successor")
+			}
+			if tc.wrongIdentity == "assignee" {
+				assignee = "other-worker"
+			}
+			if err := f.backing.Update(f.work.ID, beads.UpdateOpts{Status: &tc.status, Assignee: &assignee, Metadata: map[string]string{
 				beadmeta.KindMetadataKey: tc.kind, beadmeta.SessionIDMetadataKey: owner,
-				verifiedHookIncarnationKey: "1:" + drainAckInstanceTokenDigest("fixture"),
+				verifiedHookIncarnationKey: incarnation,
 				verifiedHookAttemptKey:     tc.attempt,
 			}}); err != nil {
 				t.Fatal(err)

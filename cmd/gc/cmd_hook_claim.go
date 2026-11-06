@@ -475,7 +475,7 @@ func tryHookClaim(workQuery, dir string, opts *hookClaimOptions, ops *hookClaimO
 	}
 	// ga-gwav: a slow suffix must not spend the claim window before a healthy
 	// head can win. Each tier previews only its next eligible candidate.
-	opts.preview = &hookClaimPreview{candidates: make(map[string]beads.Bead)}
+	opts.preview = &hookClaimPreview{candidates: make(map[hookClaimCandidateKey]beads.Bead)}
 
 	if result, bead, ok, err := hookClaimExistingAssignment(candidates, *opts, *ops, dir); err != nil {
 		return hookClaimResult{terminal: true, code: verifiedHookFailure(err, *opts, stdout, stderr)}
@@ -484,6 +484,8 @@ func tryHookClaim(workQuery, dir string, opts *hookClaimOptions, ops *hookClaimO
 		// of the work query alone — and a stale caching-store row survives long
 		// enough to re-serve a bead the dispatcher already gave to a fresher
 		// seat. Certify against the canonical store before promising it.
+		// ga-gwav: selection's preview has finished before certification and
+		// restamping create their mutation contexts, just as in the claim tiers.
 		verdict, canonicalAssignee := certifyHookAdoption(bead, *opts, *ops, dir, stderr)
 		if verdict != hookAdoptionRefused {
 			if restamped, adopt := restampHookAdoption(bead, canonicalAssignee, verdict, *opts, *ops, dir, stderr); adopt {
@@ -691,8 +693,7 @@ func refuseExpiredHookClaimWindow(candidateID string, ops hookClaimOps, stderr i
 // error still fails closed: ownership is unresolved on a bead this session
 // already owns, and claiming unrelated fresh work would strand it.
 func claimFirstReadyHookAssignment(candidates []beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, stdout, stderr io.Writer) hookClaimResult {
-	ctx, cancel := ops.claimMutationContext()
-	defer cancel()
+	var ctx context.Context
 	claimsErrored := false
 	now := ops.nowOrWallClock()
 	for _, candidate := range candidates {
@@ -717,6 +718,13 @@ func claimFirstReadyHookAssignment(candidates []beads.Bead, opts hookClaimOption
 		// exempt: it mints no new obligation.
 		if ops.claimWindowSpent() {
 			return refuseExpiredHookClaimWindow(candidate.ID, ops, stderr)
+		}
+		// ga-gwav: Git-backed selection must finish before starting the
+		// shared mutation budget; a slow head preview still gets a full claim.
+		if ctx == nil {
+			var cancel context.CancelFunc
+			ctx, cancel = ops.claimMutationContext()
+			defer cancel()
 		}
 		if ctx.Err() != nil {
 			fmt.Fprintf(stderr, "gc hook --claim: ready assignment %s claim deadline exhausted: %v\n", candidate.ID, ctx.Err()) //nolint:errcheck
@@ -838,8 +846,7 @@ func hookClaimBeadIsElsewhere(err error) bool {
 // store before the shared no-work drain; the result's claimsErrored flag records
 // whether any skip was an error so that drain stays distinguishable from idle.
 func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, stdout, stderr io.Writer) hookClaimResult {
-	ctx, cancel := ops.claimMutationContext()
-	defer cancel()
+	var ctx context.Context
 	claimsErrored := false
 	now := ops.nowOrWallClock()
 	for _, candidate := range candidates {
@@ -857,6 +864,13 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 		}
 		if !matchesWorkspace {
 			continue
+		}
+		// ga-gwav: start the tier's budget only after the first compatible
+		// preview, before either reclaim or Claim can mutate the candidate.
+		if ctx == nil {
+			var cancel context.CancelFunc
+			ctx, cancel = ops.claimMutationContext()
+			defer cancel()
 		}
 		if !claimable {
 			// ga-7rj87d FR1/FR2: a route-matched candidate whose ONLY claim
@@ -984,7 +998,7 @@ func hookCandidateMatchesSessionWorktree(candidate beads.Bead, opts hookClaimOpt
 }
 
 // ga-gwav: branch resolution can complete managed ownership at the work fence.
-// Preview that identity patch before selection so publication sees the same
+// Preview that identity patch during selection so publication sees the same
 // workspace shape. The query/store row stays untouched until a claim is won.
 func hookClaimWorktreeCompatible(info session.Info, candidate beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) bool {
 	if !session.IsPoolManaged(info) {
@@ -997,9 +1011,10 @@ func hookClaimWorktreeCompatible(info session.Info, candidate beads.Bead, opts h
 	}
 	if strings.TrimSpace(candidate.Metadata[beadmeta.WorkDirMetadataKey]) == "" ||
 		strings.TrimSpace(candidate.Metadata[beadmeta.WorkBranchMetadataKey]) == "" {
+		key := hookClaimCandidateKey{id: candidate.ID, revision: candidate.Revision}
 		projected, cached := beads.Bead{}, false
 		if opts.preview != nil {
-			projected, cached = opts.preview.candidates[candidate.ID]
+			projected, cached = opts.preview.candidates[key]
 		}
 		if cached {
 			candidate = projected
@@ -1008,7 +1023,7 @@ func hookClaimWorktreeCompatible(info session.Info, candidate beads.Bead, opts h
 			candidate.Metadata = maps.Clone(candidate.Metadata)
 			maps.Copy(candidate.Metadata, patch)
 			if opts.preview != nil {
-				opts.preview.candidates[candidate.ID] = candidate
+				opts.preview.candidates[key] = candidate
 			}
 		}
 	}
@@ -1277,6 +1292,7 @@ func hookClaimCandidateIsMessage(candidate beads.Bead) bool {
 // turn legitimately made. A held claim that goes undelivered is re-served to the
 // next turn by the existing-assignment tier instead.
 func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, minted bool, stdout, stderr io.Writer) int {
+	opts.preview.retryUnavailableHead()
 	// ga-gwav: do not repeatedly restamp a known-incompatible adoption.
 	// Minted work still fences before publication so a binding race can unwind it.
 	if opts.Verified != nil && !minted {
@@ -1940,8 +1956,9 @@ const (
 )
 
 // hookClaimStoreHead identifies the repository whose HEAD the store checkout would
-// answer a branch read with. It is resolved once per claim so a candidate list does
-// not re-probe the store for every entry.
+// answer a branch read with. It is memoized by store directory so a candidate list
+// does not re-probe the store for every entry; publication retries an unavailable
+// preview probe once.
 //
 // The branch is read by running git inside a candidate, and git answers that read
 // from the repository it discovers, not from the candidate's own path. So the
@@ -2156,11 +2173,11 @@ func hookClaimHeadRepoDir(dir string) (string, hookClaimProbe) {
 	return hookClaimRunGit(dir, "rev-parse", "--absolute-git-dir")
 }
 
-// hookClaimGitProbeTimeout bounds each git query the claim path runs. Repository
-// discovery reads the filesystem and can block on an unresponsive mount, and no
-// caller deadline covers it: the claim's delivery window is checked before the
-// identity patch is built, and the metadata-write timeout is created after it. It
-// does not bound the claim as a whole, only each query.
+// hookClaimGitProbeTimeout bounds each git query independently, including
+// selection previews before the tier's mutation budget starts. Repository
+// discovery can block on an unresponsive mount; the delivery-window checks
+// around claim/publication do not cancel these children. This bounds each query,
+// not the claim as a whole.
 const hookClaimGitProbeTimeout = 5 * time.Second
 
 // hookClaimRunGit runs one git query in dir and returns its single-line output.

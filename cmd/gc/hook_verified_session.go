@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
@@ -131,19 +132,34 @@ func verifiedHookFailure(err error, opts hookClaimOptions, stdout, stderr io.Wri
 
 // ga-gwav: previews belong to one store's query in one invocation. Resolve only
 // candidates reached by a selection tier, sharing their projected shape across
-// tiers and duplicate rows. Publication still fences fresh work under CAS.
+// tiers and duplicate rows of the same revision. Publication still fences fresh
+// work under CAS.
 type hookClaimPreview struct {
-	candidates map[string]beads.Bead
+	candidates map[hookClaimCandidateKey]beads.Bead
 	storeHead  *hookClaimStoreHead
+}
+
+type hookClaimCandidateKey struct {
+	id       string
+	revision int64
 }
 
 func (p *hookClaimPreview) head(dir string) hookClaimStoreHead {
 	if p == nil {
 		return hookClaimResolveStoreHead(dir)
 	}
-	if p.storeHead == nil {
+	if p.storeHead == nil || p.storeHead.dir != strings.TrimSpace(dir) {
 		head := hookClaimResolveStoreHead(dir)
 		p.storeHead = &head
 	}
 	return *p.storeHead
+}
+
+// ga-gwav: a failed preview probe must not suppress identity stamping after
+// recovery. Publication retries it once; an unavailable retry still refuses to
+// infer a branch. Successful probes remain shared with the work fence.
+func (p *hookClaimPreview) retryUnavailableHead() {
+	if p != nil && p.storeHead != nil && p.storeHead.probe == hookClaimProbeUnavailable {
+		p.storeHead = nil
+	}
 }
