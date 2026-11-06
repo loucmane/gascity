@@ -298,11 +298,6 @@ func reusablePoolSessionInfosForRequest(
 	candidates := reusablePoolSessionInfos(bp, cfgAgent, template, used)
 	filtered := candidates[:0]
 	for _, info := range candidates {
-		// ga-gwav: absent cached assigned work does not make a claim holder
-		// spare capacity, even when this is a concrete preferred request.
-		if !poolSessionClaimAllowsRequest(bp, info, request) {
-			continue
-		}
 		if request.SessionBeadID != "" || poolSessionConsumesNewDemandInfo(info) {
 			filtered = append(filtered, info)
 			continue
@@ -330,32 +325,6 @@ func findReusableCanonicalNonExpandingPoolSessionInfo(
 	}
 	canonical := cfgAgent.QualifiedName()
 	for _, info := range reusablePoolSessionInfos(bp, cfgAgent, template, used) {
-		if strings.TrimSpace(info.SessionNameMetadata) == "" {
-			continue
-		}
-		if staleNonExpandingPoolSessionBeadInfo(cfgAgent, info) {
-			continue
-		}
-		if infoIdentifiesAsCanonical(info, canonical) {
-			return info, true
-		}
-	}
-	return session.Info{}, false
-}
-
-func findReusableCanonicalNonExpandingPoolSessionInfoForRequest(
-	bp *agentBuildParams,
-	cfgAgent *config.Agent,
-	template string,
-	request SessionRequest,
-	decisionTime time.Time,
-	used map[string]bool,
-) (session.Info, bool) {
-	if bp == nil || bp.sessionBeads == nil || !cfgAgent.UsesCanonicalSingletonPoolIdentity() {
-		return session.Info{}, false
-	}
-	canonical := cfgAgent.QualifiedName()
-	for _, info := range reusablePoolSessionInfosForRequest(bp, cfgAgent, template, request, decisionTime, used) {
 		if strings.TrimSpace(info.SessionNameMetadata) == "" {
 			continue
 		}

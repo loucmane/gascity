@@ -74,7 +74,7 @@ type warmClaimTriggerResolver func(triggerID string) (beads.Bead, error)
 // that once per tick rather than once per pool slot: a refused city or a dark
 // binding suppresses the nudge for every slot at once, so a per-session line would
 // be a fleet-sized burst of a single fact. A nil faults writer discards.
-func buildWarmClaimTriggerProbe(resolve warmClaimTriggerResolver, faults io.Writer) warmClaimTriggerProbe {
+func buildWarmClaimTriggerProbe(resolve warmClaimTriggerResolver, faults io.Writer, guards ...*poolClaimGuard) warmClaimTriggerProbe {
 	var reported sync.Once // the probe runs from async start goroutines too
 	return func(session beads.Bead) bool {
 		if resolve == nil {
@@ -83,6 +83,11 @@ func buildWarmClaimTriggerProbe(resolve warmClaimTriggerResolver, faults io.Writ
 		triggerID := strings.TrimSpace(session.Metadata[beadmeta.TriggerBeadIDMetadataKey])
 		if triggerID == "" {
 			return false
+		}
+		if len(guards) > 0 && guards[0] != nil {
+			if row, conflict, _ := guards[0].check(session.ID, triggerID, false); conflict || strings.TrimSpace(row.Metadata[beadmeta.TriggerBeadIDMetadataKey]) != triggerID {
+				return false
+			}
 		}
 		wb, err := resolve(triggerID)
 		if err != nil {
@@ -164,6 +169,11 @@ func deliverWarmBindClaimNudge(ctx context.Context, sp runtime.Provider, store b
 	// bound only bites on a slot still finishing prior work.
 	if waiter, ok := sp.(runtime.IdleWaitProvider); ok {
 		_ = waiter.WaitForIdle(ctx, name, warmBindNudgeIdleTimeout)
+	}
+	// ga-gwav: waiting can outlive a claim or rebind. Recheck live ownership
+	// and trigger work immediately before delivery through the tick's probe.
+	if !probe(*session) {
+		return
 	}
 	if err := sp.Nudge(name, runtime.TextContent(claimText)); err != nil {
 		// Best-effort: delivery did not confirm (TUI race / transient). Leave the

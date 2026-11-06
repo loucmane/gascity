@@ -14,15 +14,22 @@ import (
 	"github.com/gastownhall/gascity/internal/runtime"
 )
 
-// failUpdateStore is a beads.Store whose Update always fails; every other op
-// delegates. It lets the trigger-bind fail-on-write test prove the cluster commits
-// all-or-nothing.
-type failUpdateStore struct {
-	beads.Store
-	err error
+// conditionalBindingStore records the binding's atomic cluster mutation and
+// can reject it without changing the durable row.
+type conditionalBindingStore struct {
+	*beadstest.RecordingStore
+	beads.ConditionalWriter
+	updates []beads.UpdateOpts
+	err     error
 }
 
-func (s failUpdateStore) Update(string, beads.UpdateOpts) error { return s.err }
+func (s *conditionalBindingStore) UpdateIfMatch(id string, revision int64, opts beads.UpdateOpts) error {
+	s.updates = append(s.updates, opts)
+	if s.err != nil {
+		return s.err
+	}
+	return s.ConditionalWriter.UpdateIfMatch(id, revision, opts)
+}
 
 // triggerClusterSessionBead builds a pool session bead carrying a full
 // trigger/provenance cluster, so a clear reconciles every cluster key at once.
@@ -44,7 +51,7 @@ func triggerClusterSessionBead() beads.Bead {
 
 // TestBindPoolSessionTriggerBead_ClearEmitsSingleUpdate pins the one-operation
 // contract at the pool trigger bind/clear call site (council finding 1): dropping
-// the trigger/provenance cluster must persist through exactly ONE Store.Update
+// the trigger/provenance cluster must persist through exactly ONE UpdateIfMatch
 // carrying the FULL patch — not a per-key SetMetadata / SetMetadataBatch
 // decomposition that could commit a mixed provenance row on exec:/partial-write
 // backends. The returned Info folds the patch on success.
@@ -54,7 +61,7 @@ func TestBindPoolSessionTriggerBead_ClearEmitsSingleUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session bead: %v", err)
 	}
-	rec := beadstest.NewRecordingStore(mem)
+	rec := &conditionalBindingStore{RecordingStore: beadstest.NewRecordingStore(mem), ConditionalWriter: mem}
 
 	info, err := sessionFrontDoor(rec).Get(created.ID)
 	if err != nil {
@@ -71,20 +78,20 @@ func TestBindPoolSessionTriggerBead_ClearEmitsSingleUpdate(t *testing.T) {
 		t.Fatalf("bind: %v", err)
 	}
 
-	updates := rec.CallsForOp("Update")
+	updates := rec.updates
 	if len(updates) != 1 {
 		t.Fatalf("want exactly 1 Update op, got %d (all ops: %#v)", len(updates), rec.Calls())
 	}
-	if updates[0].ID != created.ID {
-		t.Errorf("Update target = %q, want %q", updates[0].ID, created.ID)
+	if len(rec.CallsForOp("Update")) != 0 {
+		t.Error("binding used an unconditional update")
 	}
 	wantPatch := map[string]string{
 		beadmeta.TriggerBeadIDMetadataKey:       "",
 		beadmeta.TriggerBeadStoreRefMetadataKey: "",
 		beadmeta.BrainParentSIDMetadataKey:      "",
 	}
-	if !reflect.DeepEqual(updates[0].Opts.Metadata, wantPatch) {
-		t.Errorf("Update metadata = %#v, want the FULL cluster clear %#v", updates[0].Opts.Metadata, wantPatch)
+	if !reflect.DeepEqual(updates[0].Metadata, wantPatch) {
+		t.Errorf("Update metadata = %#v, want the FULL cluster clear %#v", updates[0].Metadata, wantPatch)
 	}
 	// One-operation contract: no per-key decomposition.
 	if n := len(rec.CallsForOp("SetMetadata")); n != 0 {
@@ -100,9 +107,9 @@ func TestBindPoolSessionTriggerBead_ClearEmitsSingleUpdate(t *testing.T) {
 }
 
 // TestBindPoolSessionTriggerBead_FailedWritePersistsNothing proves the bind/clear
-// is all-or-nothing by construction (council finding 1): when the single Update
+// is all-or-nothing by construction (council finding 1): when the single conditional update
 // fails, NOTHING is persisted (the durable cluster is untouched) and the returned
-// Info is the INPUT unchanged, so the caller's log-and-continue path never
+// Info is the INPUT unchanged, so the caller never
 // advances onto a half-applied provenance cluster.
 func TestBindPoolSessionTriggerBead_FailedWritePersistsNothing(t *testing.T) {
 	mem := beads.NewMemStore()
@@ -110,7 +117,7 @@ func TestBindPoolSessionTriggerBead_FailedWritePersistsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session bead: %v", err)
 	}
-	fail := failUpdateStore{Store: mem, err: errors.New("update rejected")}
+	fail := &conditionalBindingStore{RecordingStore: beadstest.NewRecordingStore(mem), ConditionalWriter: mem, err: errors.New("update rejected")}
 
 	info, err := sessionFrontDoor(fail).Get(created.ID)
 	if err != nil {

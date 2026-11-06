@@ -24,8 +24,8 @@ func TestPoolClaimGuardSelectionControls(t *testing.T) {
 			{name: "empty-claim", target: "work-b", wantReuse: true},
 			{name: "different-claim", claim: "work-a", target: "work-b"},
 			{name: "anonymous-demand", claim: "work-a"},
-			{name: "closed-work-stale-stamp", claim: "work-a", target: "work-b", closeClaim: true},
-			{name: "missing-work-stale-stamp", claim: "missing", target: "work-b"},
+			{name: "closed-work-stale-stamp", claim: "work-a", target: "work-b", closeClaim: true, wantReuse: true},
+			{name: "missing-work-stale-stamp", claim: "missing", target: "work-b", wantReuse: true},
 		} {
 			name := "ordinary/"
 			if concrete {
@@ -146,7 +146,7 @@ func TestPoolClaimGuardReadFailureSkipsReuseAndIdleMarker(t *testing.T) {
 	bp.stderr = &out
 	info, _, plan, err := selectOrPlanPoolSessionBead(bp, &bp.city.Agents[0], "worker", nil,
 		SessionRequest{WorkBeadID: "work-b"}, now, map[string]bool{}, map[int]bool{})
-	if err != nil || plan == nil || info.ID != "" {
+	if err == nil || plan != nil || info.ID != "" {
 		t.Fatalf("unreadable claim selection = %q, plan=%v, err=%v", info.ID, plan, err)
 	}
 	if out.Len() == 0 {
@@ -159,7 +159,7 @@ func TestPoolClaimGuardReadFailureSkipsReuseAndIdleMarker(t *testing.T) {
 	owner.Metadata[beadmeta.TriggerBeadIDMetadataKey] = "work-b"
 	out.Reset()
 	nudgeStalledPoolClaims(sp, bp.city, reads, []beads.Bead{owner},
-		[]beads.Bead{{ID: "work-b", Status: "open"}}, nil, now, &out)
+		[]beads.Bead{{ID: "work-b", Status: "open"}}, nil, now, &out, &poolClaimGuard{store: reads, cfg: bp.city, stderr: &out})
 	if out.Len() == 0 || sp.CountCalls("Nudge", "worker-a") != 0 {
 		t.Error("backstop must report read failure and withhold delivery")
 	}

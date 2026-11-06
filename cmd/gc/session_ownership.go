@@ -73,30 +73,6 @@ func liveSessionClaim(store beads.Store, sessionID string) (string, error) {
 	return strings.TrimSpace(sb.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey]), nil
 }
 
-// sessionHoldsConflictingClaim refuses repointing even a stale stamp until an
-// existing release/retirement path clears it (ga-gwav). A missing work bead is
-// not permission to reuse its owner. Anonymous demand cannot clear a claim's
-// binding either. Read failures fail closed, with the error reported by callers.
-func sessionHoldsConflictingClaim(store beads.Store, sessionID, targetBeadID string) (bool, error) {
-	claimID, err := liveSessionClaim(store, sessionID)
-	return err != nil || (claimID != "" && claimID != strings.TrimSpace(targetBeadID)), err
-}
-
-// poolSessionClaimAllowsRequest gates both preferred protected capacity and
-// ordinary reuse on the live claim instead of the assigned-work cache (ga-gwav).
-func poolSessionClaimAllowsRequest(bp *agentBuildParams, info sessionpkg.Info, request SessionRequest) bool {
-	if bp == nil {
-		return true
-	}
-	conflict, err := sessionHoldsConflictingClaim(bp.beadStore, info.ID, request.WorkBeadID)
-	if err != nil && bp.stderr != nil {
-		fmt.Fprintf(bp.stderr, "buildDesiredState: pool session %s claim check failed (skipping reuse): %v\n", info.ID, err) //nolint:errcheck
-	}
-	return !conflict
-}
-
-var errPoolSessionClaimConflict = errors.New("pool session claim prevents binding")
-
 // sessionOwnsLiveClaim reports whether the session still owns the work bead it
 // last claimed through `gc hook --claim`.
 //
@@ -131,13 +107,20 @@ func sessionOwnsLiveClaim(
 	if claimID == "" {
 		return false, "", nil
 	}
+	held, err := sessionStillHoldsClaim(cityPath, cfg, store, rigStores, info, claimID)
+	return held, claimID, err
+}
+
+// sessionStillHoldsClaim shares the live work-bead validation with pool binding
+// (ga-gwav); closing or reassigning work makes its old stamp stale.
+func sessionStillHoldsClaim(cityPath string, cfg *config.City, store beads.Store, rigStores map[string]beads.Store, info sessionpkg.Info, claimID string) (bool, error) {
 	// The first leg that holds the claimed bead answers for it — bead ids are
 	// unique, so the bead's own state (held, closed, released, re-owned) is
 	// final and the walk stops there either way. Only NotFound moves on to the
 	// next leg. Without this a finished worker whose stamp names a closed bead
 	// would read every remaining leg on every tick.
 	held := false
-	_, err = assignedWorkExistsForSession(cityPath, cfg, store, rigStores, info, func(s beads.Store) (bool, error) {
+	_, err := assignedWorkExistsForSession(cityPath, cfg, store, rigStores, info, func(s beads.Store) (bool, error) {
 		work, err := liveBeadRead(s, claimID)
 		if err != nil {
 			if errors.Is(err, beads.ErrNotFound) {
@@ -149,9 +132,9 @@ func sessionOwnsLiveClaim(
 		return true, nil
 	})
 	if err != nil {
-		return true, claimID, fmt.Errorf("reading claimed bead %s: %w", claimID, err)
+		return true, fmt.Errorf("reading claimed bead %s: %w", claimID, err)
 	}
-	return held, claimID, nil
+	return held, nil
 }
 
 // claimedWorkStillHeldBy is the per-bead half of sessionOwnsLiveClaim.

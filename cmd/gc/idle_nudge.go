@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -94,6 +95,7 @@ func nudgeStalledPoolClaims(
 	claimWorkStoreRefs []string,
 	now time.Time,
 	stdout io.Writer,
+	guards ...*poolClaimGuard,
 ) {
 	if sp == nil || cfg == nil || store == nil {
 		return // hot reconcile path: never panic on a half-built dependency
@@ -104,14 +106,17 @@ func nudgeStalledPoolClaims(
 	if sess, ok := store.(beads.SessionStore); ok && sess.Store == nil {
 		return
 	}
+	guard := &poolClaimGuard{store: store, cfg: cfg, stderr: os.Stderr}
+	if len(guards) > 0 && guards[0] != nil {
+		guard = guards[0]
+	}
 	// The shared engine keys work by bead ID alone, which cannot tell two
 	// same-ID beads in different stores apart, so this predicate carries its own
 	// store-scoped snapshot and leaves the engine's ID map empty.
 	runNudgeBackstop(sp, store, sessionBeads, nil, now, stdout, "idle-claim-nudge", poolClaimBackstop{
-		cfg:    cfg,
-		store:  store,
-		stdout: stdout,
-		work:   newIdleClaimWorkSnapshot(claimWork, claimWorkStoreRefs),
+		cfg:   cfg,
+		guard: guard,
+		work:  newIdleClaimWorkSnapshot(claimWork, claimWorkStoreRefs),
 	})
 }
 
@@ -163,10 +168,9 @@ func nudgeStalledPoolContinuations(
 // re-delivers the claim nudge to a slot whose assigned trigger bead is still
 // unclaimed. See nudgeStalledPoolClaims for the full rationale and scope.
 type poolClaimBackstop struct {
-	cfg    *config.City
-	store  beads.Store
-	stdout io.Writer
-	work   idleClaimWorkSnapshot
+	cfg   *config.City
+	guard *poolClaimGuard
+	work  idleClaimWorkSnapshot
 }
 
 // poolContinuationBackstop is the backstopPredicate for a graph-v2 successor
@@ -432,9 +436,8 @@ func (p poolClaimBackstop) resolve(s beads.Bead, _ map[string]beads.Bead, sessNa
 	}
 	// ga-gwav: a crossed trigger is not idle work for a session claiming a
 	// different bead. Use live ownership even if this tick's session is stale.
-	if conflict, err := sessionHoldsConflictingClaim(p.store, s.ID, triggerID); conflict {
+	if _, conflict, err := p.guard.check(s.ID, triggerID, false); conflict {
 		if err != nil {
-			fmt.Fprintf(p.stdout, "idle-claim-nudge: claim check for %s failed: %v\n", s.ID, err) //nolint:errcheck
 			return backstopTarget{}, backstopResolutionHold
 		}
 		return backstopTarget{}, backstopResolutionClear
@@ -456,11 +459,11 @@ func (p poolClaimBackstop) revalidate(_ backstopTarget) backstopResolution {
 }
 
 func (p poolClaimBackstop) observe(store beads.Store, s *beads.Bead, target backstopTarget, now time.Time, stdout io.Writer) {
-	writeIdleClaimMarker(store, s, target.ID, 0, now, stdout)
+	writeIdleClaimMarker(store, s, target.ID, 0, now, stdout, p.guard)
 }
 
 func (p poolClaimBackstop) reserve(store beads.Store, s *beads.Bead, target backstopTarget, attempts int, now time.Time, stdout io.Writer) bool {
-	return writeIdleClaimMarker(store, s, target.ID, attempts, now, stdout)
+	return writeIdleClaimMarker(store, s, target.ID, attempts, now, stdout, p.guard)
 }
 
 // exhausted is a deliberate no-op: manual re-nudge remains the pool escape
@@ -581,22 +584,18 @@ func configuredClaimNudgeFor(cfg *config.City, session beads.Bead) (string, bool
 // writeIdleClaimMarker persists the backstop state machine onto the session
 // bead and mirrors it into the in-memory snapshot so the rest of this tick
 // reads the just-written values.
-func writeIdleClaimMarker(store beads.Store, s *beads.Bead, triggerID string, attempts int, now time.Time, stdout io.Writer) bool {
-	// ga-gwav: observation and reservation both recheck after resolution;
-	// refusing reservation also prevents the engine from delivering a nudge.
-	if conflict, err := sessionHoldsConflictingClaim(store, s.ID, triggerID); conflict {
-		if err != nil {
-			fmt.Fprintf(stdout, "idle-claim-nudge: claim check for %s failed: %v\n", s.ID, err) //nolint:errcheck
-		}
-		return false
+func writeIdleClaimMarker(store beads.Store, s *beads.Bead, triggerID string, attempts int, now time.Time, stderr io.Writer, guards ...*poolClaimGuard) bool {
+	// ga-gwav: both observation and reservation use the observed row revision.
+	guard := &poolClaimGuard{store: store, stderr: stderr}
+	if len(guards) > 0 && guards[0] != nil {
+		guard = guards[0]
 	}
 	kvs := map[string]string{
 		idleClaimNudgeTriggerKey: triggerID,
 		idleClaimNudgeCountKey:   strconv.Itoa(attempts),
 		idleClaimNudgeAtKey:      now.UTC().Format(time.RFC3339),
 	}
-	if err := store.SetMetadataBatch(s.ID, kvs); err != nil {
-		fmt.Fprintf(stdout, "idle-claim-nudge: marking %s failed: %v\n", s.ID, err) //nolint:errcheck // best-effort
+	if err := guard.write(s.ID, triggerID, kvs); err != nil {
 		return false
 	}
 	if s.Metadata == nil {

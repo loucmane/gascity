@@ -2742,7 +2742,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 		// warm-bind gap; on tmux it is the fast primary nudge ahead of the
 		// idle-timeout relaunch backstop, deduped by the marker + the
 		// unclaimed-trigger gate.
-		withWarmClaimProbe(buildWarmClaimTriggerProbe(cr.newWarmClaimTriggerResolver(rigStores), cr.stderr)),
+		withWarmClaimProbe(buildWarmClaimTriggerProbe(cr.newWarmClaimTriggerResolver(rigStores), cr.stderr, result.claimGuard)),
 	}
 	if bootReconcile {
 		// #3288: skip the per-session orphan/failed-create session-bead closes on
@@ -2829,7 +2829,7 @@ func (cr *CityRuntime) beadReconcileTick(ctx context.Context, result DesiredStat
 		claimWorkStoreRefs := make([]string, len(claimWork))
 		copy(claimWorkStoreRefs, assignedWorkStoreRefs)
 		copy(claimWorkStoreRefs[len(assignedWorkBeads):], result.ReadyUnassignedRoutedWorkStoreRefs)
-		nudgeStalledPoolClaims(cr.sp, reconcileCfg, sessStore, stalledPoolBeads, claimWork, claimWorkStoreRefs, time.Now(), cr.stdout)
+		nudgeStalledPoolClaims(cr.sp, reconcileCfg, sessStore, stalledPoolBeads, claimWork, claimWorkStoreRefs, time.Now(), cr.stdout, result.claimGuard)
 		nudgeStalledPoolContinuations(
 			cr.sp,
 			reconcileCfg,
@@ -3832,6 +3832,15 @@ func (cr *CityRuntime) loadDemandSnapshot(
 		return runtimeDemandSnapshot{}
 	}
 	snapshot := *cr.demandSnapshot
+	// ga-gwav: cached demand must not carry ownership evidence or diagnostics
+	// across ticks. Refreshes within this tick share this guard.
+	if !refresh {
+		snapshot.result.claimGuard = &poolClaimGuard{
+			store:    cr.sessionsBeadStore().Store,
+			cityPath: cr.cityPath, cfg: snapshot.result.reconciliationConfig(cr.cfg),
+			rigStores: unwrapWorkStores(cr.workBeadStores()), stderr: cr.stderr,
+		}
+	}
 	cr.installDemandSnapshotSideEffects(snapshot.result)
 	return snapshot
 }

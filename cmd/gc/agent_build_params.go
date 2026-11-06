@@ -42,7 +42,8 @@ type agentBuildParams struct {
 	// beadStore is the city-level bead store for session bead lookups.
 	// When non-nil, session names are derived from bead IDs ("s-{beadID}")
 	// instead of the legacy SessionNameFor function.
-	beadStore beads.Store
+	beadStore  beads.Store
+	claimGuard *poolClaimGuard
 	// Work authority is distinct from a potentially relocated session store.
 	attemptWorkStore session.AttemptWorkStoreAccess
 

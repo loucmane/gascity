@@ -118,9 +118,17 @@ func testPoolClaimGuardRoute(t *testing.T, age time.Duration) {
 			if err := sp.Start(context.Background(), owner.Metadata["session_name"], runtime.Config{}); err != nil {
 				t.Fatal(err)
 			}
-			nudgeStalledPoolClaims(sp, bp.city, bp.beadStore,
-				[]beads.Bead{mustGetTestBead(t, bp.beadStore, owner.ID)},
-				[]beads.Bead{mustGetTestBead(t, bp.beadStore, "work-b")}, nil, now, io.Discard)
+			// Match the binding's actual store scope, and advance through grace so
+			// a broken rebind would both persist a marker AND deliver a nudge.
+			for _, tick := range []time.Time{now, now.Add(idleClaimNudgeGrace + time.Second)} {
+				current := mustGetTestBead(t, bp.beadStore, owner.ID)
+				nudgeStalledPoolClaims(sp, bp.city, bp.beadStore, []beads.Bead{current},
+					[]beads.Bead{mustGetTestBead(t, bp.beadStore, "work-b")},
+					[]string{current.Metadata[beadmeta.TriggerBeadStoreRefMetadataKey]}, tick, io.Discard)
+			}
+			if sp.CountCalls("Nudge", owner.Metadata["session_name"]) != 0 {
+				t.Error("claim holder nudged for B")
+			}
 			assertClaimGuardOwner(t, bp.beadStore, owner)
 		})
 	}

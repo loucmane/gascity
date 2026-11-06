@@ -63,6 +63,7 @@ type ContinuationClaimCandidate struct {
 // can pass ScaleCheckCounts to ComputePoolDesiredStates without re-running
 // scale_check commands.
 type DesiredStateResult struct {
+	claimGuard       *poolClaimGuard
 	State            map[string]TemplateParams
 	BaseState        map[string]TemplateParams
 	ScaleCheckCounts map[string]int // nil when store is nil or scale_check not run
@@ -1253,6 +1254,7 @@ func buildDesiredStateWithSessionBeadsAt(
 	sessionOccupancyInfos := make([]session.Info, len(allOpenSessionInfos))
 	copy(sessionOccupancyInfos, allOpenSessionInfos)
 	return DesiredStateResult{
+		claimGuard:                         bp.poolClaims(),
 		State:                              desired,
 		BaseState:                          baseDesired,
 		ScaleCheckCounts:                   scaleCheckCounts,
@@ -1579,6 +1581,8 @@ func refreshDesiredStateWithSessionBeads(
 	}
 
 	bp := newAgentBuildParams(cityName, cityPath, cfg, sp, result.BeaconTime, store, stderr)
+	bp.claimGuard = result.claimGuard
+	refreshed.claimGuard = bp.poolClaims()
 	bp.sessionBeads = sessionBeads
 	bp.sessionSnapshotCompletenessKnown = true
 	bp.sessionSnapshotComplete = false
@@ -3424,6 +3428,8 @@ func realizePoolDesiredSessionsAt(
 			sessionInfo, slot, plan, err := selectOrPlanPoolSessionBead(bp, cfgAgent, qualifiedName, prefer, request, poolDecisionTime, used, usedSlots)
 			if err != nil {
 				switch {
+				case errors.Is(err, errPoolSessionClaimConflict):
+					// The tick guard already reported this session once.
 				case errors.Is(err, errPoolSessionCreateBudgetExhausted):
 					fmt.Fprintf(stderr, "buildDesiredState: pool %q request: %v (fresh create deferred)\n", qualifiedName, err) //nolint:errcheck
 				case errors.Is(err, errPoolSessionCreatePartial):
@@ -3552,7 +3558,10 @@ func realizePoolDesiredSessionsAt(
 		// (poolTriggerMetadata via selectOrPlanPoolSessionBead), which also
 		// resolves the work dir off the base agent plus the per-slot name.
 		if bound, err := bindPoolSessionTriggerBead(bp, cfgAgent, qualifiedInstance, sbInfo, item.request); err != nil {
-			if errors.Is(err, errPoolTriggerWorktreeEvidence) || errors.Is(err, errPoolSessionClaimConflict) {
+			if errors.Is(err, errPoolSessionClaimConflict) {
+				continue
+			}
+			if errors.Is(err, errPoolTriggerWorktreeEvidence) {
 				// ga-gwav: a claim acquired after selection must also prevent
 				// realization against the previous binding's environment.
 				// Unusable ownership evidence is not a partial bind: a reused
@@ -3753,23 +3762,8 @@ func computePoolTriggerBindingPatch(info session.Info, request SessionRequest, w
 	return metadata
 }
 
-// bindPoolSessionTriggerBead reconciles a pool session bead's trigger/pack/
-// workspace/work-dir cluster to its dispatch request. The SESSION side is typed
-// session.Info (WI-5 W3): it computes the byte-identical key diff via
-// computePoolTriggerBindingPatch and persists it through the session front
-// door's ONE-Update chokepoint (Store.UpdateMetadataInfo → single
-// Store.Update(UpdateOpts{Metadata})). The write is byte-identical to the
-// beadStore.Update this path used before the typed migration (same sorted
-// --set-metadata args in one backend op), which the SetMetadataBatch route it
-// briefly took could not guarantee: on an exec: or partial-write backend a
-// per-key decomposition can commit an arbitrary subset of the trigger/store-ref/
-// brain-parent/pack/workspace/workdir cluster, leaving a mixed provenance row.
-// UpdateMetadataInfo commits the whole cluster all-or-nothing and folds the patch
-// onto the returned Info only on success; on failure it returns info UNCHANGED
-// with the error. It returns the bound Info; the caller folds the returned
-// boundInfo into the Info-taking resolveTemplateForSessionBeadInfo chain (WI-5 W4
-// dropped the former raw-bead mirror and retired the raw wrapper). A dry-run
-// build with no store folds locally without a write.
+// bindPoolSessionTriggerBead fences the entire binding cluster against a claim
+// committed after selection (ga-gwav). Empty patches need no read or write.
 func bindPoolSessionTriggerBead(bp *agentBuildParams, cfgAgent *config.Agent, qualifiedName string, info session.Info, request SessionRequest) (session.Info, error) {
 	if info.ID == "" {
 		return info, nil
@@ -3778,16 +3772,6 @@ func bindPoolSessionTriggerBead(bp *agentBuildParams, cfgAgent *config.Agent, qu
 	if err != nil {
 		return info, err
 	}
-	// ga-gwav: selection can precede an out-of-process claim. Recheck live
-	// before changing any of the trigger/work-directory cluster, even on clears.
-	if bp != nil {
-		if conflict, err := sessionHoldsConflictingClaim(bp.beadStore, info.ID, request.WorkBeadID); conflict {
-			if err != nil {
-				return info, fmt.Errorf("%w: %w", errPoolSessionClaimConflict, err)
-			}
-			return info, fmt.Errorf("%w: session %s cannot bind work %q", errPoolSessionClaimConflict, info.ID, request.WorkBeadID)
-		}
-	}
 	patch := computePoolTriggerBindingPatch(info, request, workDir)
 	if len(patch) == 0 {
 		return info, nil
@@ -3795,11 +3779,10 @@ func bindPoolSessionTriggerBead(bp *agentBuildParams, cfgAgent *config.Agent, qu
 	if bp == nil || bp.beadStore == nil {
 		return info.ApplyPatch(patch), nil
 	}
-	boundInfo, err := sessionFrontDoor(bp.beadStore).UpdateMetadataInfo(info, patch)
-	if err != nil {
+	if err := bp.poolClaims().write(info.ID, request.WorkBeadID, patch); err != nil {
 		return info, bindWriteFailure(request, err)
 	}
-	return boundInfo, nil
+	return info.ApplyPatch(patch), nil
 }
 
 // bindWriteFailure marks a failed binding write on a managed-worktree
@@ -4689,8 +4672,7 @@ func selectOrPlanPoolSessionBead(
 	// Resume tier: reuse the session that has in-progress work assigned.
 	// ga-gwav: protected-capacity rebinding also enters here. A conflicting
 	// claim must fall through to other capacity, never normalize/repoint its owner.
-	if preferred != nil && preferred.ID != "" && !used[preferred.ID] && !isFailedCreateSessionInfo(*preferred) &&
-		poolSessionClaimAllowsRequest(bp, *preferred, request) {
+	if preferred != nil && preferred.ID != "" && !used[preferred.ID] && !isFailedCreateSessionInfo(*preferred) {
 		preserveAboveCapacity := poolRequestResumesAssignedWorkInfo(
 			request,
 			bp.assignedWorkBeads,
@@ -4706,16 +4688,19 @@ func selectOrPlanPoolSessionBead(
 		if slot == 0 && !cfgAgent.UsesCanonicalSingletonPoolIdentity() {
 			return session.Info{}, 0, nil, fmt.Errorf("pool session %s concrete slot already claimed", preferred.ID)
 		}
-		if isManualSessionInfoForAgent(*preferred, cfgAgent) {
-			return *preferred, slot, nil, nil
+		allowed, claimErr := poolSessionClaimAllowsRequest(bp, *preferred, request)
+		if !allowed {
+			delete(usedSlots, slot)
+			if claimErr != nil {
+				return session.Info{}, 0, nil, claimErr
+			}
+		} else {
+			if isManualSessionInfoForAgent(*preferred, cfgAgent) {
+				return *preferred, slot, nil, nil
+			}
+			info, err := normalizeNonExpandingPoolSessionInfoForSelection(bp, cfgAgent, *preferred)
+			return info, slot, nil, err
 		}
-		info, err := normalizeNonExpandingPoolSessionInfoForSelection(bp, cfgAgent, *preferred)
-		return info, slot, nil, err
-	}
-	if canonical, ok := findReusableCanonicalNonExpandingPoolSessionInfoForRequest(bp, cfgAgent, template, request, decisionTime, used); ok {
-		slot := claimDesiredPoolSlotInfo(bp.city, cfgAgent, canonical, usedSlots)
-		info, err := normalizeNonExpandingPoolSessionInfoForSelection(bp, cfgAgent, canonical)
-		return info, slot, nil, err
 	}
 	// Reuse an existing active/creating session bead. Skip drained and
 	// closed. Asleep is skipped too, with one carve-out: a
@@ -4723,10 +4708,27 @@ func selectOrPlanPoolSessionBead(
 	// holds no assigned work is reused through the wake path — see
 	// reusablePoolSessionInfo. Nothing in the reconciler closes orphaned
 	// asleep beads; an earlier version of this comment claimed it did.
-	for _, candidate := range reusablePoolSessionInfosForRequest(bp, cfgAgent, template, request, decisionTime, used) {
+	candidates := reusablePoolSessionInfosForRequest(bp, cfgAgent, template, request, decisionTime, used)
+	// ga-gwav: prioritize canonical identities in this single candidate scan.
+	if cfgAgent.UsesCanonicalSingletonPoolIdentity() {
+		canonical := func(info session.Info) bool {
+			return strings.TrimSpace(info.SessionNameMetadata) != "" && !staleNonExpandingPoolSessionBeadInfo(cfgAgent, info) && infoIdentifiesAsCanonical(info, cfgAgent.QualifiedName())
+		}
+		sort.SliceStable(candidates, func(i, j int) bool { return canonical(candidates[i]) && !canonical(candidates[j]) })
+	}
+	for _, candidate := range candidates {
 		if desiredName := strings.TrimSpace(candidate.SessionNameMetadata); desiredName != "" {
 			slot := claimDesiredPoolSlotInfo(bp.city, cfgAgent, candidate, usedSlots)
 			if slot == 0 && !cfgAgent.UsesCanonicalSingletonPoolIdentity() {
+				continue
+			}
+			// ga-gwav: all cheap filters passed; stop reading at the first usable row.
+			allowed, claimErr := poolSessionClaimAllowsRequest(bp, candidate, request)
+			if !allowed {
+				delete(usedSlots, slot)
+				if claimErr != nil {
+					return session.Info{}, 0, nil, claimErr
+				}
 				continue
 			}
 			info, err := normalizeNonExpandingPoolSessionInfoForSelection(bp, cfgAgent, candidate)
