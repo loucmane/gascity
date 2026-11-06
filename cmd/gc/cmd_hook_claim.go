@@ -20,6 +20,7 @@ import (
 	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/executionevent"
 	"github.com/gastownhall/gascity/internal/git"
+	"github.com/gastownhall/gascity/internal/session"
 )
 
 const hookClaimCommandName = "hook"
@@ -41,6 +42,7 @@ const (
 const (
 	hookClaimReasonNoWork                     = "no_work"
 	hookClaimReasonClaimsErrored              = "claims_errored"
+	hookClaimReasonSessionBindingConflict     = "session_binding_conflict"
 	hookClaimReasonStaleSession               = "stale_session"
 	hookClaimReasonNonTurnContext             = "non_turn_context"
 	hookClaimReasonDrainPending               = "drain_pending"
@@ -465,6 +467,10 @@ func tryHookClaim(workQuery, dir string, opts *hookClaimOptions, ops *hookClaimO
 	}
 	for _, skip := range skipped {
 		fmt.Fprintf(stderr, "gc hook --claim: skipping undecodable bead %s: %v\n", skip.ID, skip.Err) //nolint:errcheck
+	}
+	candidates, err = boundHookClaimCandidates(candidates, opts.Verified)
+	if err != nil {
+		return hookClaimResult{terminal: true, code: verifiedHookFailure(err, *opts, stdout, stderr)}
 	}
 	if len(candidates) == 0 {
 		return hookClaimResult{}
@@ -1254,15 +1260,18 @@ func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead
 	result.ContinuationGroup = strings.TrimSpace(bead.Metadata[beadmeta.ContinuationGroupMetadataKey])
 	if opts.Verified != nil {
 		v := opts.Verified
-		if err := v.front.CompareAndSetCurrentClaim(v.VerifiedSession, v.CurrentClaim, bead.ID); err != nil {
+		if err := v.front.CompareAndSetCurrentClaimForWork(v.VerifiedSession, v.CurrentClaim, bead); err != nil {
 			if minted {
-				unwindUndeliveredHookClaim("session_fence_refused", "session claim stamp refused", bead, opts, ops, dir, stderr)
+				reason := "session_fence_refused"
+				if errors.Is(err, session.ErrClaimBindingConflict) {
+					reason = hookClaimReasonSessionBindingConflict
+				}
+				unwindUndeliveredHookClaim(reason, "session claim stamp refused", bead, opts, ops, dir, stderr)
 			}
 			return verifiedHookFailure(err, opts, stdout, stderr)
 		}
-		// CompareAndSetCurrentClaim validates but does not write when the
-		// prior stamp already names this bead. A later delivery failure must
-		// not clear a stamp published by an earlier invocation.
+		// Same-ID publication advances the row fence, but retains the earlier
+		// pointer's compensation ownership: a delivery failure must not clear it.
 		if v.CurrentClaim != bead.ID {
 			opts.publishedClaim = bead.ID
 		}

@@ -4672,6 +4672,7 @@ func selectOrPlanPoolSessionBead(
 	// Resume tier: reuse the session that has in-progress work assigned.
 	// ga-gwav: protected-capacity rebinding also enters here. A conflicting
 	// claim must fall through to other capacity, never normalize/repoint its owner.
+	var uncertainClaim error
 	if preferred != nil && preferred.ID != "" && !used[preferred.ID] && !isFailedCreateSessionInfo(*preferred) {
 		preserveAboveCapacity := poolRequestResumesAssignedWorkInfo(
 			request,
@@ -4692,7 +4693,7 @@ func selectOrPlanPoolSessionBead(
 		if !allowed {
 			delete(usedSlots, slot)
 			if claimErr != nil {
-				return session.Info{}, 0, nil, claimErr
+				uncertainClaim = claimErr
 			}
 		} else {
 			if isManualSessionInfoForAgent(*preferred, cfgAgent) {
@@ -4727,13 +4728,18 @@ func selectOrPlanPoolSessionBead(
 			if !allowed {
 				delete(usedSlots, slot)
 				if claimErr != nil {
-					return session.Info{}, 0, nil, claimErr
+					uncertainClaim = claimErr
 				}
 				continue
 			}
 			info, err := normalizeNonExpandingPoolSessionInfoForSelection(bp, cfgAgent, candidate)
 			return info, slot, nil, err
 		}
+	}
+	// ga-gwav: uncertain ownership blocks fresh capacity, but must not starve
+	// healthy existing siblings. Only defer after exhausting the reuse scan.
+	if uncertainClaim != nil {
+		return session.Info{}, 0, nil, uncertainClaim
 	}
 	if !bp.hasCompleteSessionSnapshot() {
 		return session.Info{}, 0, nil, errPoolSessionCreatePartial

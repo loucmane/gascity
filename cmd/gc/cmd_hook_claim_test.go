@@ -84,22 +84,23 @@ func TestHookClaimManagedWorktreeReclaim(t *testing.T) {
 
 func TestHookClaimManagedWorktreeCompatibility(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		change func(*beads.Bead)
-		want   string
+		name    string
+		change  func(*beads.Bead)
+		want    string
+		refused bool
 	}{
 		{name: "different managed tree"},
 		{name: "no work dir", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkDirMetadataKey) }, want: "B"},
 		{name: "work dir only", change: func(b *beads.Bead) {
 			b.Metadata = map[string]string{beadmeta.RoutedToMetadataKey: "rig/worker", beadmeta.WorkDirMetadataKey: b.Metadata[beadmeta.WorkDirMetadataKey]}
-		}, want: "B"},
+		}, want: "B", refused: true},
 		{name: "branch without ownership", change: func(b *beads.Bead) {
 			for _, key := range worktreeOwnershipEvidenceKeys {
 				delete(b.Metadata, key)
 			}
-		}, want: "B"},
-		{name: "partial ownership", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorktreeOwnerMetadataKey) }, want: "B"},
-		{name: "missing branch", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkBranchMetadataKey) }, want: "B"},
+		}, want: "B", refused: true},
+		{name: "partial ownership", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorktreeOwnerMetadataKey) }, want: "B", refused: true},
+		{name: "missing branch", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkBranchMetadataKey) }, want: "B", refused: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -114,6 +115,19 @@ func TestHookClaimManagedWorktreeCompatibility(t *testing.T) {
 			}
 			work := beads.NewMemStoreFrom(1, candidates, nil)
 			result, attempts, _ := runHookClaimWorkspaceCandidates(t, v, work, candidates, false)
+			if tc.refused {
+				// ga-gwav: legacy selection still attempts B first. The atomic
+				// publication fence refuses its incompatible directory, unwinds,
+				// and terminates rather than retrying or taking the later A.
+				if result.Action != "drain" || result.Reason != hookClaimReasonSessionBindingConflict || result.BeadID != "" || strings.Join(attempts, ",") != "B" {
+					t.Fatalf("directory refusal: result=%+v claims=%v", result, attempts)
+				}
+				live := mustGetTestBead(t, work, "B")
+				if live.Status != "open" || live.Assignee != "" || live.Metadata[verifiedHookAttemptKey] != "" {
+					t.Fatal("incompatible directory left a parked work fence")
+				}
+				return
+			}
 			if result.BeadID != tc.want || strings.Join(attempts, ",") != tc.want {
 				t.Fatalf("result=%+v claims=%v; want %q", result, attempts, tc.want)
 			}
@@ -246,6 +260,7 @@ func runHookClaimWorkspaceCandidates(t *testing.T, v *VerifiedSession, work *bea
 			return err == nil, b.Assignee, err
 		},
 		EmitHookClaimReclaimedStale: func(string, string, string) {},
+		EmitClaimReleased:           func(hookClaimReleaseRecord) {},
 	}
 	opts := hookClaimOptions{
 		Verified: v, SessionID: v.ID, Assignee: v.assignee(), IdentityCandidates: v.identifiers(),
@@ -253,14 +268,15 @@ func runHookClaimWorkspaceCandidates(t *testing.T, v *VerifiedSession, work *bea
 	}
 	var stdout, stderr bytes.Buffer
 	outcome := claimFirstEligibleHookCandidate(candidates, opts, ops, "", &stdout, &stderr)
-	if outcome.code != 0 || outcome.claimsErrored {
-		t.Fatalf("claim failed: outcome=%+v stdout=%q stderr=%q", outcome, stdout.String(), stderr.String())
-	}
 	var result hookClaimJSONResult
 	if outcome.terminal {
 		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 			t.Fatalf("result %q, stderr %q: %v", stdout.String(), stderr.String(), err)
 		}
+	}
+	bindingRefused := outcome.code == 1 && result.Action == "drain" && result.Reason == hookClaimReasonSessionBindingConflict
+	if outcome.claimsErrored || (outcome.code != 0 && !bindingRefused) {
+		t.Fatalf("claim failed: outcome=%+v stdout=%q stderr=%q", outcome, stdout.String(), stderr.String())
 	}
 	return result, attempts, reclaimed
 }

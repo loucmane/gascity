@@ -34,6 +34,7 @@
         "ready_assignment",
         "no_work",
         "claims_errored",
+        "session_binding_conflict",
         "stale_session",
         "non_turn_context",
         "drain_pending",
@@ -101,6 +102,7 @@
             "enum": [
               "no_work",
               "claims_errored",
+              "session_binding_conflict",
               "stale_session",
               "non_turn_context",
               "drain_pending",

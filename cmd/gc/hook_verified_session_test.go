@@ -18,7 +18,7 @@ import (
 )
 
 // Embedding only Store makes every unimplemented operation panic. The allowlist
-// is exact own-row reads and one-key conditional writes, never List/name lookup.
+// is exact own-row reads and claim-only conditional writes, never List/name lookup.
 type ownSessionOnlyStore struct {
 	beads.Store
 	mem           *beads.MemStore
@@ -54,7 +54,14 @@ type ownSessionWriter struct{ s *ownSessionOnlyStore }
 
 func (w ownSessionWriter) UpdateIfMatch(id string, revision int64, opts beads.UpdateOpts) error {
 	w.s.t.Helper()
-	if id != w.s.id || revision == 0 || len(opts.Metadata) != 1 || opts.Status != nil || opts.Assignee != nil || opts.Type != nil || opts.Title != nil || opts.Description != nil || opts.Priority != nil || opts.ParentID != nil || len(opts.Labels)+len(opts.RemoveLabels) != 0 {
+	wantKeys := 1
+	if opts.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey] != "" {
+		wantKeys = 2
+		if opts.Metadata[session.CurrentClaimStampMetadataKey] == "" {
+			w.s.t.Fatal("claim publication lacks a fresh stamp")
+		}
+	}
+	if id != w.s.id || revision == 0 || len(opts.Metadata) != wantKeys || opts.Status != nil || opts.Assignee != nil || opts.Type != nil || opts.Title != nil || opts.Description != nil || opts.Priority != nil || opts.ParentID != nil || len(opts.Labels)+len(opts.RemoveLabels) != 0 {
 		w.s.t.Fatal("session write escaped own-row claim contract")
 	}
 	if _, ok := opts.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey]; !ok {

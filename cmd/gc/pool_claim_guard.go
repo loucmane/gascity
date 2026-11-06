@@ -46,7 +46,7 @@ func (bp *agentBuildParams) poolClaims() *poolClaimGuard {
 }
 
 func (g *poolClaimGuard) report(id string, err error) {
-	if err == nil || g.stderr == nil {
+	if err == nil || g.stderr == nil || beads.IsPreconditionFailed(err) {
 		return
 	}
 	g.mu.Lock()
@@ -54,11 +54,18 @@ func (g *poolClaimGuard) report(id string, err error) {
 	if g.reported == nil {
 		g.reported = make(map[string]bool)
 	}
-	if g.reported[id] {
+	kind := "claim check/write failed"
+	if errors.Is(err, beads.ErrConditionalWriteUnsupported) {
+		kind = "conditional writes unsupported; pool binding and idle markers disabled"
+	} else if errors.Is(err, errPoolSessionClaimConflict) {
+		kind = "held claim prevents binding"
+	}
+	key := id + ":" + kind
+	if g.reported[key] {
 		return
 	}
-	g.reported[id] = true
-	fmt.Fprintf(g.stderr, "pool session %s claim check/write failed (deferred): %v\n", id, err) //nolint:errcheck
+	g.reported[key] = true
+	fmt.Fprintf(g.stderr, "pool session %s %s (deferred): %v\n", id, kind, err) //nolint:errcheck
 }
 
 func (g *poolClaimGuard) check(id, target string, memo bool) (beads.Bead, bool, error) {
@@ -99,7 +106,9 @@ func (g *poolClaimGuard) write(id, target string, metadata map[string]string) er
 		if err != nil {
 			return fmt.Errorf("%w: %w", errPoolSessionClaimConflict, err)
 		}
-		return fmt.Errorf("%w: session %s target %q", errPoolSessionClaimConflict, id, target)
+		err = fmt.Errorf("%w: session %s target %q", errPoolSessionClaimConflict, id, target)
+		g.report(id, err)
+		return err
 	}
 	writer, ok := beads.RequiredConditionalWriterFor(g.store)
 	if !ok {
@@ -113,6 +122,9 @@ func (g *poolClaimGuard) write(id, target string, metadata map[string]string) er
 		g.report(id, err)
 		return fmt.Errorf("%w: %w", errPoolSessionClaimConflict, err)
 	}
+	// ga-gwav: later selection in this tick must not reuse our pre-write row
+	// or its held-work observation. Mutation checks themselves always read live.
+	delete(g.observed, id)
 	return nil
 }
 

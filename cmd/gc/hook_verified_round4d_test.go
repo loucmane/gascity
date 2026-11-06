@@ -141,7 +141,7 @@ func TestRound4DAdoptionNoopStampSurvivesLaterFailure(t *testing.T) {
 			row, _ := own.mem.Get(v.ID)
 			wantClaim, wantWrites := "", 2
 			if alreadyStamped {
-				wantClaim, wantWrites = bead.ID, 0
+				wantClaim, wantWrites = bead.ID, 1
 			}
 			if row.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey] != wantClaim || own.writes != wantWrites {
 				t.Fatalf("claim=%q writes=%d, want %q/%d", row.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey], own.writes, wantClaim, wantWrites)

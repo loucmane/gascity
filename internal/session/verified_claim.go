@@ -10,6 +10,8 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/pathutil"
+	"github.com/google/uuid"
 )
 
 var (
@@ -17,7 +19,13 @@ var (
 	ErrStaleSession = errors.New("session incarnation no longer matches")
 	// ErrClaimPrecondition means another invocation changed the current claim.
 	ErrClaimPrecondition = errors.New("current claim prior value no longer matches")
+	// ErrClaimBindingConflict means the session is bound to incompatible work.
+	ErrClaimBindingConflict = errors.New("session binding conflicts with claim")
 )
+
+// CurrentClaimStampMetadataKey forces every claim publication, including a
+// same-ID reacquisition, to change the session row under its revision fence.
+const CurrentClaimStampMetadataKey = "current_claim_stamp"
 
 // VerifiedSession binds a worker operation to one persisted incarnation. It
 // contains a digest, never the runtime token. Only VerifySession constructs it.
@@ -126,6 +134,17 @@ func (s *Store) CurrentClaimVerified(v VerifiedSession) (string, error) {
 // revision passed to UpdateIfMatch. A conflict retries the complete predicate,
 // never just a metadata merge. Unsupported backends fail closed.
 func (s *Store) CompareAndSetCurrentClaim(v VerifiedSession, expected, next string) error {
+	return s.compareAndSetCurrentClaim(v, expected, beads.Bead{ID: next})
+}
+
+// CompareAndSetCurrentClaimForWork also checks the claimed work's directories
+// against the binding on the exact session revision being stamped (ga-gwav).
+func (s *Store) CompareAndSetCurrentClaimForWork(v VerifiedSession, expected string, work beads.Bead) error {
+	return s.compareAndSetCurrentClaim(v, expected, work)
+}
+
+func (s *Store) compareAndSetCurrentClaim(v VerifiedSession, expected string, work beads.Bead) error {
+	next := work.ID
 	writer, ok := beads.RequiredConditionalWriterFor(s.store.Store)
 	if !ok {
 		return beads.ErrConditionalWriteUnsupported
@@ -138,15 +157,53 @@ func (s *Store) CompareAndSetCurrentClaim(v VerifiedSession, expected, next stri
 		if b.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey] != expected {
 			return ErrClaimPrecondition
 		}
-		if expected == next {
+		if next != "" && !claimBindingCompatible(b, work) {
+			return ErrClaimBindingConflict
+		}
+		if expected == next && next == "" {
 			return nil
 		}
-		err = writer.UpdateIfMatch(v.ID, b.Revision, beads.UpdateOpts{Metadata: map[string]string{
+		metadata := map[string]string{
 			beadmeta.CurrentClaimBeadIDMetadataKey: next,
-		}})
+		}
+		if next != "" {
+			// ga-gwav: identical metadata can be a backend no-op. A fresh stamp
+			// forces a row change without interpreting the opaque revision as a
+			// counter or depending on clock resolution. Binding's older CAS loses.
+			stamp, err := uuid.NewRandom()
+			if err != nil {
+				return fmt.Errorf("creating current claim stamp: %w", err)
+			}
+			metadata[CurrentClaimStampMetadataKey] = stamp.String()
+		}
+		err = writer.UpdateIfMatch(v.ID, b.Revision, beads.UpdateOpts{Metadata: metadata})
 		if !beads.IsPreconditionFailed(err) {
 			return err
 		}
 	}
 	return fmt.Errorf("current claim contention: %w", ErrClaimPrecondition)
+}
+
+// Binding trims IDs and paths, writes both directory aliases, and can preserve
+// an existing directory for same-trigger/resume requests. Compare the persisted
+// values, never a newly derived worktree path. Every nonempty directory alias
+// on either row must agree when both rows name a directory. Keep the existing
+// workspace selector's path equivalence for symlink and platform aliases.
+func claimBindingCompatible(row, work beads.Bead) bool {
+	trigger := strings.TrimSpace(row.Metadata[beadmeta.TriggerBeadIDMetadataKey])
+	if trigger != "" && trigger != strings.TrimSpace(work.ID) {
+		return false
+	}
+	for _, workKey := range []string{beadmeta.WorkDirMetadataKey, beadmeta.LegacyWorkDirMetadataKey} {
+		workDir := strings.TrimSpace(work.Metadata[workKey])
+		if workDir == "" {
+			continue
+		}
+		for _, sessionKey := range []string{beadmeta.WorkDirMetadataKey, beadmeta.LegacyWorkDirMetadataKey} {
+			if dir := strings.TrimSpace(row.Metadata[sessionKey]); dir != "" && dir != workDir && !pathutil.SamePath(dir, workDir) {
+				return false
+			}
+		}
+	}
+	return true
 }
