@@ -13967,7 +13967,9 @@ func TestBuildDesiredState_ProviderRedBlocksNewPoolSessionCreate(t *testing.T) {
 		writeHealthFile(t, cityPath, "unhealthy")
 		cfg := makeCfg()
 		active := makeSessionBead("session-worker-1", "worker-1", "active", "1")
-		store := beads.NewMemStore()
+		// ga-gwav: reuse verifies the live claim, so the snapshot owner must
+		// exist in the backing store as well.
+		store := beads.NewMemStoreFrom(0, []beads.Bead{active}, nil)
 		var stderr strings.Builder
 		result := buildDesiredStateWithSessionBeads(
 			"test-city", cityPath, time.Now().UTC(),

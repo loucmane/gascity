@@ -296,12 +296,14 @@ func reusablePoolSessionInfosForRequest(
 	used map[string]bool,
 ) []session.Info {
 	candidates := reusablePoolSessionInfos(bp, cfgAgent, template, used)
-	if request.SessionBeadID != "" {
-		return candidates
-	}
 	filtered := candidates[:0]
 	for _, info := range candidates {
-		if poolSessionConsumesNewDemandInfo(info) {
+		// ga-gwav: absent cached assigned work does not make a claim holder
+		// spare capacity, even when this is a concrete preferred request.
+		if !poolSessionClaimAllowsRequest(bp, info, request) {
+			continue
+		}
+		if request.SessionBeadID != "" || poolSessionConsumesNewDemandInfo(info) {
 			filtered = append(filtered, info)
 			continue
 		}

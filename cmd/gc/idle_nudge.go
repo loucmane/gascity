@@ -108,8 +108,10 @@ func nudgeStalledPoolClaims(
 	// same-ID beads in different stores apart, so this predicate carries its own
 	// store-scoped snapshot and leaves the engine's ID map empty.
 	runNudgeBackstop(sp, store, sessionBeads, nil, now, stdout, "idle-claim-nudge", poolClaimBackstop{
-		cfg:  cfg,
-		work: newIdleClaimWorkSnapshot(claimWork, claimWorkStoreRefs),
+		cfg:    cfg,
+		store:  store,
+		stdout: stdout,
+		work:   newIdleClaimWorkSnapshot(claimWork, claimWorkStoreRefs),
 	})
 }
 
@@ -161,8 +163,10 @@ func nudgeStalledPoolContinuations(
 // re-delivers the claim nudge to a slot whose assigned trigger bead is still
 // unclaimed. See nudgeStalledPoolClaims for the full rationale and scope.
 type poolClaimBackstop struct {
-	cfg  *config.City
-	work idleClaimWorkSnapshot
+	cfg    *config.City
+	store  beads.Store
+	stdout io.Writer
+	work   idleClaimWorkSnapshot
 }
 
 // poolContinuationBackstop is the backstopPredicate for a graph-v2 successor
@@ -426,6 +430,15 @@ func (p poolClaimBackstop) resolve(s beads.Bead, _ map[string]beads.Bead, sessNa
 	if !ok || !isUnclaimedTrigger(w, sessName) {
 		return backstopTarget{}, backstopResolutionClear
 	}
+	// ga-gwav: a crossed trigger is not idle work for a session claiming a
+	// different bead. Use live ownership even if this tick's session is stale.
+	if conflict, err := sessionHoldsConflictingClaim(p.store, s.ID, triggerID); conflict {
+		if err != nil {
+			fmt.Fprintf(p.stdout, "idle-claim-nudge: claim check for %s failed: %v\n", s.ID, err) //nolint:errcheck
+			return backstopTarget{}, backstopResolutionHold
+		}
+		return backstopTarget{}, backstopResolutionClear
+	}
 	return backstopTarget{ID: triggerID}, backstopResolutionOutstanding
 }
 
@@ -569,6 +582,14 @@ func configuredClaimNudgeFor(cfg *config.City, session beads.Bead) (string, bool
 // bead and mirrors it into the in-memory snapshot so the rest of this tick
 // reads the just-written values.
 func writeIdleClaimMarker(store beads.Store, s *beads.Bead, triggerID string, attempts int, now time.Time, stdout io.Writer) bool {
+	// ga-gwav: observation and reservation both recheck after resolution;
+	// refusing reservation also prevents the engine from delivering a nudge.
+	if conflict, err := sessionHoldsConflictingClaim(store, s.ID, triggerID); conflict {
+		if err != nil {
+			fmt.Fprintf(stdout, "idle-claim-nudge: claim check for %s failed: %v\n", s.ID, err) //nolint:errcheck
+		}
+		return false
+	}
 	kvs := map[string]string{
 		idleClaimNudgeTriggerKey: triggerID,
 		idleClaimNudgeCountKey:   strconv.Itoa(attempts),

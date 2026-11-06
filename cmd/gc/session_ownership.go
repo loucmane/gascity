@@ -60,6 +60,43 @@ func liveClaimVetoApplies(cityPath string, cfg *config.City, info sessionpkg.Inf
 	return !isAgentEffectivelySuspendedWith(cfg, cityPath, agentCfg, suspState)
 }
 
+// liveSessionClaim reads the same authoritative session stamp for drain and
+// pool binding decisions (ga-gwav). Info and cached assigned work can omit it.
+func liveSessionClaim(store beads.Store, sessionID string) (string, error) {
+	if store == nil || strings.TrimSpace(sessionID) == "" {
+		return "", nil
+	}
+	sb, err := liveBeadRead(store, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("reading session bead %s: %w", sessionID, err)
+	}
+	return strings.TrimSpace(sb.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey]), nil
+}
+
+// sessionHoldsConflictingClaim refuses repointing even a stale stamp until an
+// existing release/retirement path clears it (ga-gwav). A missing work bead is
+// not permission to reuse its owner. Anonymous demand cannot clear a claim's
+// binding either. Read failures fail closed, with the error reported by callers.
+func sessionHoldsConflictingClaim(store beads.Store, sessionID, targetBeadID string) (bool, error) {
+	claimID, err := liveSessionClaim(store, sessionID)
+	return err != nil || (claimID != "" && claimID != strings.TrimSpace(targetBeadID)), err
+}
+
+// poolSessionClaimAllowsRequest gates both preferred protected capacity and
+// ordinary reuse on the live claim instead of the assigned-work cache (ga-gwav).
+func poolSessionClaimAllowsRequest(bp *agentBuildParams, info sessionpkg.Info, request SessionRequest) bool {
+	if bp == nil {
+		return true
+	}
+	conflict, err := sessionHoldsConflictingClaim(bp.beadStore, info.ID, request.WorkBeadID)
+	if err != nil && bp.stderr != nil {
+		fmt.Fprintf(bp.stderr, "buildDesiredState: pool session %s claim check failed (skipping reuse): %v\n", info.ID, err) //nolint:errcheck
+	}
+	return !conflict
+}
+
+var errPoolSessionClaimConflict = errors.New("pool session claim prevents binding")
+
 // sessionOwnsLiveClaim reports whether the session still owns the work bead it
 // last claimed through `gc hook --claim`.
 //
@@ -87,11 +124,10 @@ func sessionOwnsLiveClaim(
 	if store == nil || strings.TrimSpace(info.ID) == "" {
 		return false, "", nil
 	}
-	sessionBead, err := liveBeadRead(store, info.ID)
+	claimID, err = liveSessionClaim(store, info.ID)
 	if err != nil {
-		return true, "", fmt.Errorf("reading session bead %s: %w", info.ID, err)
+		return true, "", err
 	}
-	claimID = strings.TrimSpace(sessionBead.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey])
 	if claimID == "" {
 		return false, "", nil
 	}

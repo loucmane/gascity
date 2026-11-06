@@ -3552,7 +3552,9 @@ func realizePoolDesiredSessionsAt(
 		// (poolTriggerMetadata via selectOrPlanPoolSessionBead), which also
 		// resolves the work dir off the base agent plus the per-slot name.
 		if bound, err := bindPoolSessionTriggerBead(bp, cfgAgent, qualifiedInstance, sbInfo, item.request); err != nil {
-			if errors.Is(err, errPoolTriggerWorktreeEvidence) {
+			if errors.Is(err, errPoolTriggerWorktreeEvidence) || errors.Is(err, errPoolSessionClaimConflict) {
+				// ga-gwav: a claim acquired after selection must also prevent
+				// realization against the previous binding's environment.
 				// Unusable ownership evidence is not a partial bind: a reused
 				// session left in desired would restart against its previous
 				// binding's work dir.
@@ -3775,6 +3777,16 @@ func bindPoolSessionTriggerBead(bp *agentBuildParams, cfgAgent *config.Agent, qu
 	workDir, err := verifiedPoolTriggerWorkDir(bp, cfgAgent, qualifiedName, request)
 	if err != nil {
 		return info, err
+	}
+	// ga-gwav: selection can precede an out-of-process claim. Recheck live
+	// before changing any of the trigger/work-directory cluster, even on clears.
+	if bp != nil {
+		if conflict, err := sessionHoldsConflictingClaim(bp.beadStore, info.ID, request.WorkBeadID); conflict {
+			if err != nil {
+				return info, fmt.Errorf("%w: %w", errPoolSessionClaimConflict, err)
+			}
+			return info, fmt.Errorf("%w: session %s cannot bind work %q", errPoolSessionClaimConflict, info.ID, request.WorkBeadID)
+		}
 	}
 	patch := computePoolTriggerBindingPatch(info, request, workDir)
 	if len(patch) == 0 {
@@ -4675,7 +4687,10 @@ func selectOrPlanPoolSessionBead(
 		return session.Info{}, 0, nil, fmt.Errorf("pool template %q has no configured agent", template)
 	}
 	// Resume tier: reuse the session that has in-progress work assigned.
-	if preferred != nil && preferred.ID != "" && !used[preferred.ID] && !isFailedCreateSessionInfo(*preferred) {
+	// ga-gwav: protected-capacity rebinding also enters here. A conflicting
+	// claim must fall through to other capacity, never normalize/repoint its owner.
+	if preferred != nil && preferred.ID != "" && !used[preferred.ID] && !isFailedCreateSessionInfo(*preferred) &&
+		poolSessionClaimAllowsRequest(bp, *preferred, request) {
 		preserveAboveCapacity := poolRequestResumesAssignedWorkInfo(
 			request,
 			bp.assignedWorkBeads,

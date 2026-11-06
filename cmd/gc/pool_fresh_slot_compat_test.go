@@ -26,10 +26,20 @@ func freshSlotTestInfo(id, template, agentName string, slot int) sessionpkg.Info
 }
 
 func freshSlotTestParams(cfg *config.City, infos ...sessionpkg.Info) *agentBuildParams {
+	// ga-gwav: a snapshot proves occupancy, but reuse must also be able to
+	// read the session's live claim. Seed the same unclaimed owners there.
+	rows := make([]beads.Bead, 0, len(infos))
+	for _, info := range infos {
+		rows = append(rows, beads.Bead{ID: info.ID, Type: sessionBeadType, Status: "open", Metadata: map[string]string{
+			"template": info.Template, "agent_name": info.AgentName, "alias": info.Alias,
+			"pool_slot": info.PoolSlot, "pool_managed": boolMetadata(info.PoolManaged),
+			"state": info.MetadataState, "session_name": info.SessionNameMetadata,
+		}})
+	}
 	return &agentBuildParams{
 		city:                             cfg,
 		agents:                           cfg.Agents,
-		beadStore:                        beads.NewMemStore(),
+		beadStore:                        beads.NewMemStoreFrom(0, rows, nil),
 		sessionBeads:                     newSessionBeadSnapshotFromInfos(infos),
 		sessionOccupancyInfos:            infos,
 		sessionSnapshotComplete:          true,
