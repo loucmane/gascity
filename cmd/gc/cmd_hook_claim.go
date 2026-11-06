@@ -152,6 +152,7 @@ type hookClaimReleaseRecord struct {
 type hookClaimOptions struct {
 	Verified       *VerifiedSession
 	publishedClaim string
+	publishedStamp string
 	Assignee       string
 	// SessionID is this session's durable bead ID. Assignee is deliberately the
 	// alias/agent form that read paths query through GC_AGENT, but a continuation
@@ -468,7 +469,7 @@ func tryHookClaim(workQuery, dir string, opts *hookClaimOptions, ops *hookClaimO
 	for _, skip := range skipped {
 		fmt.Fprintf(stderr, "gc hook --claim: skipping undecodable bead %s: %v\n", skip.ID, skip.Err) //nolint:errcheck
 	}
-	candidates, err = boundHookClaimCandidates(candidates, opts.Verified)
+	candidates, err = compatibleHookClaimCandidates(candidates, opts.Verified)
 	if err != nil {
 		return hookClaimResult{terminal: true, code: verifiedHookFailure(err, *opts, stdout, stderr)}
 	}
@@ -961,26 +962,14 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 // hookCandidateMatchesSessionWorktree restricts managed per-bead workspaces to
 // pool sessions in the same tree. Legacy candidates keep their existing order.
 func hookCandidateMatchesSessionWorktree(candidate beads.Bead, v *VerifiedSession) (bool, error) {
-	workDir := strings.TrimSpace(candidate.Metadata[beadmeta.WorkDirMetadataKey])
-	if v == nil || workDir == "" || strings.TrimSpace(candidate.Metadata[beadmeta.WorkBranchMetadataKey]) == "" {
+	if v == nil {
 		return true, nil
-	}
-	for _, key := range worktreeOwnershipEvidenceKeys {
-		if strings.TrimSpace(candidate.Metadata[key]) == "" {
-			return true, nil
-		}
 	}
 	info, err := v.front.ReadVerified(v.VerifiedSession)
 	if err != nil {
 		return false, err
 	}
-	if !isPoolManagedSessionInfo(info) {
-		return true, nil
-	}
-	// ResolveSessionWorkDir is a stamping seam that deliberately hides pool
-	// directories (gc-j0cfh). Compare the verified row's actual directory here.
-	sessionDir := strings.TrimSpace(info.WorkDir)
-	return filepath.IsAbs(workDir) && filepath.IsAbs(sessionDir) && samePath(workDir, sessionDir), nil
+	return session.ClaimWorktreeCompatible(info, candidate), nil
 }
 
 // mergeHookClaimCandidateMetadata retains work-query metadata when bd update
@@ -1237,6 +1226,17 @@ func hookClaimCandidateIsMessage(candidate beads.Bead) bool {
 // turn legitimately made. A held claim that goes undelivered is re-served to the
 // next turn by the existing-assignment tier instead.
 func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, minted bool, stdout, stderr io.Writer) int {
+	// ga-gwav: do not repeatedly restamp a known-incompatible adoption.
+	// Minted work still fences before publication so a binding race can unwind it.
+	if opts.Verified != nil && !minted {
+		matches, err := hookCandidateMatchesSessionWorktree(bead, opts.Verified)
+		if err == nil && !matches {
+			err = session.ErrClaimBindingConflict
+		}
+		if err != nil {
+			return verifiedHookFailure(err, opts, stdout, stderr)
+		}
+	}
 	if opts.Verified != nil {
 		fenced, err := fenceVerifiedHookWork(bead, opts, ops, dir)
 		if err != nil {
@@ -1260,7 +1260,8 @@ func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead
 	result.ContinuationGroup = strings.TrimSpace(bead.Metadata[beadmeta.ContinuationGroupMetadataKey])
 	if opts.Verified != nil {
 		v := opts.Verified
-		if err := v.front.CompareAndSetCurrentClaimForWork(v.VerifiedSession, v.CurrentClaim, bead); err != nil {
+		stamp, err := v.front.CompareAndSetCurrentClaimForWork(v.VerifiedSession, v.CurrentClaim, bead)
+		if err != nil {
 			if minted {
 				reason := "session_fence_refused"
 				if errors.Is(err, session.ErrClaimBindingConflict) {
@@ -1274,6 +1275,7 @@ func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead
 		// pointer's compensation ownership: a delivery failure must not clear it.
 		if v.CurrentClaim != bead.ID {
 			opts.publishedClaim = bead.ID
+			opts.publishedStamp = stamp
 		}
 	}
 	durable, stamped := bead, opts.Verified != nil
@@ -2383,7 +2385,7 @@ func clearHookSessionCurrentClaim(opts hookClaimOptions, ops hookClaimOps, stder
 		if opts.publishedClaim == "" {
 			return
 		}
-		if err := v.front.CompareAndSetCurrentClaim(v.VerifiedSession, opts.publishedClaim, ""); err != nil {
+		if err := v.front.ClearPublishedClaim(v.VerifiedSession, opts.publishedClaim, opts.publishedStamp); err != nil {
 			fmt.Fprintf(stderr, "gc hook --claim: conditional current-claim clear refused: %v\n", err) //nolint:errcheck
 		}
 		return

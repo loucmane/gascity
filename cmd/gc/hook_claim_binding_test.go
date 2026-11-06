@@ -33,6 +33,12 @@ func (s *afterWorkFenceStore) UpdateIfMatch(id string, rev int64, opts beads.Upd
 func TestHookClaimBindingAfterWorkFenceUnwinds(t *testing.T) {
 	v, own := newVerifiedHookFixture(t)
 	work, bead := verifiedWorkFixture(t, v)
+	if err := own.mem.SetMetadataBatch(v.ID, map[string]string{"pool_managed": "true", "work_dir": "/work/ga-gwav/a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := work.SetMetadataBatch(bead.ID, hookClaimManagedWorkspaceBead(bead.ID, "/work/ga-gwav/a").Metadata); err != nil {
+		t.Fatal(err)
+	}
 	info, err := v.front.ReadVerified(v.VerifiedSession)
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +46,8 @@ func TestHookClaimBindingAfterWorkFenceUnwinds(t *testing.T) {
 	bp := &agentBuildParams{beadStore: own.mem, stderr: io.Discard}
 	bound := false
 	installVerifiedWorkStore(t, v, &afterWorkFenceStore{MemStore: work, after: func() {
-		if _, err := bindPoolSessionTriggerBead(bp, nil, "", info, SessionRequest{WorkBeadID: "other"}); err != nil {
+		patch := computePoolTriggerBindingPatch(info, SessionRequest{WorkBeadID: "other"}, "/work/ga-gwav/b")
+		if err := bp.poolClaims().write(info.ID, "other", patch); err != nil {
 			t.Fatal(err)
 		}
 		bound = true
@@ -106,16 +113,7 @@ func TestHookClaimBoundTriggerSelection(t *testing.T) {
 			bindVerifiedHookOps(&ops, v)
 			var out, stderr bytes.Buffer
 			code := doHookClaim("query", "", hookClaimOptions{Verified: v, Assignee: v.assignee(), RouteTargets: []string{v.Template}, JSON: true}, ops, &out, &stderr)
-			if trigger == "absent" {
-				if len(claimed) != 0 || code != 1 {
-					t.Fatalf("absent bound trigger claimed %v code=%d", claimed, code)
-				}
-				return
-			}
-			want := trigger
-			if want == "" {
-				want = "work-a"
-			}
+			want := "work-a"
 			if code != 0 || len(claimed) != 1 || claimed[0] != want {
 				t.Fatalf("claimed=%v want=%s code=%d stderr=%s", claimed, want, code, &stderr)
 			}
@@ -124,25 +122,21 @@ func TestHookClaimBoundTriggerSelection(t *testing.T) {
 }
 
 func TestHookClaimBindingWorkDirFence(t *testing.T) {
-	for _, key := range []string{beadmeta.WorkDirMetadataKey, beadmeta.LegacyWorkDirMetadataKey} {
-		t.Run(key, func(t *testing.T) {
-			v, own := newVerifiedHookFixture(t)
-			work, bead := verifiedWorkFixture(t, v)
-			if err := work.SetMetadata(bead.ID, key, "/work/ga-gwav/a"); err != nil {
-				t.Fatal(err)
-			}
-			if err := own.mem.SetMetadata(v.ID, key, "/work/ga-gwav/b"); err != nil {
-				t.Fatal(err)
-			}
-			ops := hookClaimOps{PublishRunMap: noopPublishRunMap, EmitClaimReleased: func(hookClaimReleaseRecord) {}}
-			ops.applyDefaults()
-			var out bytes.Buffer
-			code := writeHookClaimWorkResultForBead(hookClaimJSONResult{Action: "work", BeadID: bead.ID}, bead,
-				hookClaimOptions{Verified: v, Assignee: v.assignee(), JSON: true}, ops, "", true, &out, io.Discard)
-			if code != 1 || own.writes != 0 || mustGetTestBead(t, work, bead.ID).Status != "open" {
-				t.Fatalf("incompatible work dir accepted: code=%d writes=%d result=%s", code, own.writes, &out)
-			}
-		})
+	v, own := newVerifiedHookFixture(t)
+	work, bead := verifiedWorkFixture(t, v)
+	if err := work.SetMetadataBatch(bead.ID, hookClaimManagedWorkspaceBead(bead.ID, "/work/ga-gwav/a").Metadata); err != nil {
+		t.Fatal(err)
+	}
+	if err := own.mem.SetMetadataBatch(v.ID, map[string]string{"pool_managed": "true", "work_dir": "/work/ga-gwav/b"}); err != nil {
+		t.Fatal(err)
+	}
+	ops := hookClaimOps{PublishRunMap: noopPublishRunMap, EmitClaimReleased: func(hookClaimReleaseRecord) {}}
+	ops.applyDefaults()
+	var out bytes.Buffer
+	code := writeHookClaimWorkResultForBead(hookClaimJSONResult{Action: "work", BeadID: bead.ID}, bead,
+		hookClaimOptions{Verified: v, Assignee: v.assignee(), JSON: true}, ops, "", true, &out, io.Discard)
+	if code != 1 || own.writes != 0 || mustGetTestBead(t, work, bead.ID).Status != "open" {
+		t.Fatalf("incompatible work dir accepted: code=%d writes=%d result=%s", code, own.writes, &out)
 	}
 }
 

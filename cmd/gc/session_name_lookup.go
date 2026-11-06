@@ -82,13 +82,7 @@ func isPoolManagedSessionBead(bead beads.Bead) bool {
 
 // isPoolManagedSessionInfo is the session.Info mirror of isPoolManagedSessionBead.
 func isPoolManagedSessionInfo(i sessionpkg.Info) bool {
-	if isEphemeralSessionInfo(i) {
-		return true
-	}
-	if i.PoolManaged {
-		return true
-	}
-	return strings.TrimSpace(i.PoolSlot) != ""
+	return sessionpkg.IsPoolManaged(i)
 }
 
 // isCanonicalPoolManagedSessionBeadForTemplate is the bead-shape companion to

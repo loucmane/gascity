@@ -98,7 +98,7 @@ func TestRound4DClaimOwnershipMatchesMarkedIncarnation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			info.Generation, info.InstanceToken = tc.generation, tc.token
 			b := beads.Bead{Status: "in_progress", Assignee: info.ID, Metadata: map[string]string{
-				beadmeta.SessionIDMetadataKey: info.ID, verifiedHookIncarnationKey: tc.marker,
+				beadmeta.SessionIDMetadataKey: info.ID, verifiedHookIncarnationKey: tc.marker, verifiedHookAttemptKey: "attempt",
 			}}
 			if got := claimedWorkStillHeldBy(b, info); got != tc.want {
 				t.Fatalf("held=%v, want %v", got, tc.want)

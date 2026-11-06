@@ -9,6 +9,7 @@ go_library(
         "canonical_identity.go",
         "chat.go",
         "circuit_state.go",
+        "claim_binding.go",
         "create.go",
         "create_options.go",
         "info_apply_patch.go",

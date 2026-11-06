@@ -128,11 +128,27 @@ func restampVerifiedHookWork(v *VerifiedSession, route *hookClaimClassRoute, dir
 }
 
 func verifiedHookOwnsWork(v *VerifiedSession, b beads.Bead) bool {
-	ownerMatches := b.Metadata[beadmeta.SessionIDMetadataKey] == v.ID ||
-		beadmeta.IsControlKind(strings.TrimSpace(b.Metadata[beadmeta.KindMetadataKey]))
-	return b.Status == "in_progress" && slices.Contains(v.identifiers(), b.Assignee) &&
-		ownerMatches &&
-		b.Metadata[verifiedHookIncarnationKey] == v.workIncarnation() &&
+	return hookWorkHeldBy(b, v.ID, v.identifiers(), v.workIncarnation(), false)
+}
+
+// hookWorkHeldBy is shared by worker compensation/drain and scheduler guards.
+// Only the scheduler accepts legacy execution claims without fence markers;
+// control claims always require assignee, incarnation and attempt (ga-gwav).
+func hookWorkHeldBy(b beads.Bead, id string, identifiers []string, incarnation string, allowLegacy bool) bool {
+	if b.Status == "closed" || !slices.Contains(identifiers, strings.TrimSpace(b.Assignee)) {
+		return false
+	}
+	control := beadmeta.IsControlKind(strings.TrimSpace(b.Metadata[beadmeta.KindMetadataKey]))
+	ownerMatches := strings.TrimSpace(b.Metadata[beadmeta.SessionIDMetadataKey]) == id ||
+		control
+	if !ownerMatches {
+		return false
+	}
+	if allowLegacy && !control && b.Metadata[verifiedHookIncarnationKey] == "" {
+		return true
+	}
+	return b.Status == "in_progress" && incarnation != "" &&
+		b.Metadata[verifiedHookIncarnationKey] == incarnation &&
 		b.Metadata[verifiedHookAttemptKey] != ""
 }
 

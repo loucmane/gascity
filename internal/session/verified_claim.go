@@ -10,7 +10,6 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
-	"github.com/gastownhall/gascity/internal/pathutil"
 	"github.com/google/uuid"
 )
 
@@ -134,34 +133,47 @@ func (s *Store) CurrentClaimVerified(v VerifiedSession) (string, error) {
 // revision passed to UpdateIfMatch. A conflict retries the complete predicate,
 // never just a metadata merge. Unsupported backends fail closed.
 func (s *Store) CompareAndSetCurrentClaim(v VerifiedSession, expected, next string) error {
-	return s.compareAndSetCurrentClaim(v, expected, beads.Bead{ID: next})
+	_, err := s.compareAndSetCurrentClaim(v, expected, beads.Bead{ID: next}, "")
+	return err
 }
 
 // CompareAndSetCurrentClaimForWork also checks the claimed work's directories
 // against the binding on the exact session revision being stamped (ga-gwav).
-func (s *Store) CompareAndSetCurrentClaimForWork(v VerifiedSession, expected string, work beads.Bead) error {
-	return s.compareAndSetCurrentClaim(v, expected, work)
+// It returns the committed publication stamp for exact-attempt compensation.
+func (s *Store) CompareAndSetCurrentClaimForWork(v VerifiedSession, expected string, work beads.Bead) (string, error) {
+	return s.compareAndSetCurrentClaim(v, expected, work, "")
 }
 
-func (s *Store) compareAndSetCurrentClaim(v VerifiedSession, expected string, work beads.Bead) error {
+// ClearPublishedClaim clears only the publication made by the caller, checking
+// both its bead ID and stamp on the same row revision (ga-gwav).
+func (s *Store) ClearPublishedClaim(v VerifiedSession, expected, stamp string) error {
+	if expected == "" || stamp == "" {
+		return ErrClaimPrecondition
+	}
+	_, err := s.compareAndSetCurrentClaim(v, expected, beads.Bead{}, stamp)
+	return err
+}
+
+func (s *Store) compareAndSetCurrentClaim(v VerifiedSession, expected string, work beads.Bead, expectedStamp string) (string, error) {
 	next := work.ID
 	writer, ok := beads.RequiredConditionalWriterFor(s.store.Store)
 	if !ok {
-		return beads.ErrConditionalWriteUnsupported
+		return "", beads.ErrConditionalWriteUnsupported
 	}
 	for attempt := 0; attempt < 4; attempt++ {
 		b, err := s.verifiedBead(v, next != "")
 		if err != nil {
-			return err
+			return "", err
 		}
-		if b.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey] != expected {
-			return ErrClaimPrecondition
+		if b.Metadata[beadmeta.CurrentClaimBeadIDMetadataKey] != expected ||
+			(expectedStamp != "" && b.Metadata[CurrentClaimStampMetadataKey] != expectedStamp) {
+			return "", ErrClaimPrecondition
 		}
-		if next != "" && !claimBindingCompatible(b, work) {
-			return ErrClaimBindingConflict
+		if next != "" && !ClaimWorktreeCompatible(infoFromPersistedBead(b), work) {
+			return "", ErrClaimBindingConflict
 		}
 		if expected == next && next == "" {
-			return nil
+			return "", nil
 		}
 		metadata := map[string]string{
 			beadmeta.CurrentClaimBeadIDMetadataKey: next,
@@ -172,38 +184,17 @@ func (s *Store) compareAndSetCurrentClaim(v VerifiedSession, expected string, wo
 			// counter or depending on clock resolution. Binding's older CAS loses.
 			stamp, err := uuid.NewRandom()
 			if err != nil {
-				return fmt.Errorf("creating current claim stamp: %w", err)
+				return "", fmt.Errorf("creating current claim stamp: %w", err)
 			}
 			metadata[CurrentClaimStampMetadataKey] = stamp.String()
 		}
 		err = writer.UpdateIfMatch(v.ID, b.Revision, beads.UpdateOpts{Metadata: metadata})
+		if err == nil {
+			return metadata[CurrentClaimStampMetadataKey], nil
+		}
 		if !beads.IsPreconditionFailed(err) {
-			return err
+			return "", err
 		}
 	}
-	return fmt.Errorf("current claim contention: %w", ErrClaimPrecondition)
-}
-
-// Binding trims IDs and paths, writes both directory aliases, and can preserve
-// an existing directory for same-trigger/resume requests. Compare the persisted
-// values, never a newly derived worktree path. Every nonempty directory alias
-// on either row must agree when both rows name a directory. Keep the existing
-// workspace selector's path equivalence for symlink and platform aliases.
-func claimBindingCompatible(row, work beads.Bead) bool {
-	trigger := strings.TrimSpace(row.Metadata[beadmeta.TriggerBeadIDMetadataKey])
-	if trigger != "" && trigger != strings.TrimSpace(work.ID) {
-		return false
-	}
-	for _, workKey := range []string{beadmeta.WorkDirMetadataKey, beadmeta.LegacyWorkDirMetadataKey} {
-		workDir := strings.TrimSpace(work.Metadata[workKey])
-		if workDir == "" {
-			continue
-		}
-		for _, sessionKey := range []string{beadmeta.WorkDirMetadataKey, beadmeta.LegacyWorkDirMetadataKey} {
-			if dir := strings.TrimSpace(row.Metadata[sessionKey]); dir != "" && dir != workDir && !pathutil.SamePath(dir, workDir) {
-				return false
-			}
-		}
-	}
-	return true
+	return "", fmt.Errorf("current claim contention: %w", ErrClaimPrecondition)
 }

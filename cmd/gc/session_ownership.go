@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -139,24 +138,12 @@ func sessionStillHoldsClaim(cityPath string, cfg *config.City, store beads.Store
 
 // claimedWorkStillHeldBy is the per-bead half of sessionOwnsLiveClaim.
 func claimedWorkStillHeldBy(work beads.Bead, info sessionpkg.Info) bool {
-	if work.Status == "closed" {
-		return false
-	}
 	identifiers := hookClaimIdentityCandidates(append(sessionAssignmentIdentifiersInfo(info), info.Alias, info.AgentName)...)
-	if !slices.Contains(identifiers, strings.TrimSpace(work.Assignee)) {
-		return false
+	incarnation := ""
+	if generation, err := strconv.Atoi(info.Generation); err == nil && generation > 0 && info.InstanceToken != "" {
+		incarnation = fmt.Sprintf("%d:%s", generation, drainAckInstanceTokenDigest(info.InstanceToken))
 	}
-	if owner := strings.TrimSpace(work.Metadata[beadmeta.SessionIDMetadataKey]); owner == "" || owner != info.ID {
-		return false
-	}
-	// New incarnations must still clear current_claim_bead_id: legacy work
-	// has no marker, and the pointer must never be inherited by a successor.
-	if marker := work.Metadata[verifiedHookIncarnationKey]; marker != "" {
-		generation, err := strconv.Atoi(info.Generation)
-		return err == nil && generation > 0 && info.InstanceToken != "" &&
-			marker == fmt.Sprintf("%d:%s", generation, drainAckInstanceTokenDigest(info.InstanceToken))
-	}
-	return true
+	return hookWorkHeldBy(work, info.ID, identifiers, incarnation, true)
 }
 
 // liveBeadRead reads one bead through the store's authoritative live handle,

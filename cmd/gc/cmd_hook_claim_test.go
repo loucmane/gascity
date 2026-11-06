@@ -84,23 +84,22 @@ func TestHookClaimManagedWorktreeReclaim(t *testing.T) {
 
 func TestHookClaimManagedWorktreeCompatibility(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		change  func(*beads.Bead)
-		want    string
-		refused bool
+		name   string
+		change func(*beads.Bead)
+		want   string
 	}{
 		{name: "different managed tree"},
 		{name: "no work dir", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkDirMetadataKey) }, want: "B"},
 		{name: "work dir only", change: func(b *beads.Bead) {
 			b.Metadata = map[string]string{beadmeta.RoutedToMetadataKey: "rig/worker", beadmeta.WorkDirMetadataKey: b.Metadata[beadmeta.WorkDirMetadataKey]}
-		}, want: "B", refused: true},
+		}, want: "B"},
 		{name: "branch without ownership", change: func(b *beads.Bead) {
 			for _, key := range worktreeOwnershipEvidenceKeys {
 				delete(b.Metadata, key)
 			}
-		}, want: "B", refused: true},
-		{name: "partial ownership", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorktreeOwnerMetadataKey) }, want: "B", refused: true},
-		{name: "missing branch", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkBranchMetadataKey) }, want: "B", refused: true},
+		}, want: "B"},
+		{name: "partial ownership", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorktreeOwnerMetadataKey) }, want: "B"},
+		{name: "missing branch", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkBranchMetadataKey) }, want: "B"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -115,19 +114,6 @@ func TestHookClaimManagedWorktreeCompatibility(t *testing.T) {
 			}
 			work := beads.NewMemStoreFrom(1, candidates, nil)
 			result, attempts, _ := runHookClaimWorkspaceCandidates(t, v, work, candidates, false)
-			if tc.refused {
-				// ga-gwav: legacy selection still attempts B first. The atomic
-				// publication fence refuses its incompatible directory, unwinds,
-				// and terminates rather than retrying or taking the later A.
-				if result.Action != "drain" || result.Reason != hookClaimReasonSessionBindingConflict || result.BeadID != "" || strings.Join(attempts, ",") != "B" {
-					t.Fatalf("directory refusal: result=%+v claims=%v", result, attempts)
-				}
-				live := mustGetTestBead(t, work, "B")
-				if live.Status != "open" || live.Assignee != "" || live.Metadata[verifiedHookAttemptKey] != "" {
-					t.Fatal("incompatible directory left a parked work fence")
-				}
-				return
-			}
 			if result.BeadID != tc.want || strings.Join(attempts, ",") != tc.want {
 				t.Fatalf("result=%+v claims=%v; want %q", result, attempts, tc.want)
 			}

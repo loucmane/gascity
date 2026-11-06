@@ -164,10 +164,11 @@ func TestVerifiedHookClearDoesNotOverwriteSuccessorOrDifferentClaim(t *testing.T
 			if err := v.front.CompareAndSetCurrentClaim(v.VerifiedSession, "", "work-own"); err != nil {
 				t.Fatal(err)
 			}
+			stamp := mustGetTestBead(t, store.mem, v.ID).Metadata[session.CurrentClaimStampMetadataKey]
 			if err := store.mem.SetMetadata(v.ID, changed, "replacement"); err != nil {
 				t.Fatal(err)
 			}
-			clearHookSessionCurrentClaim(hookClaimOptions{Verified: v, publishedClaim: "work-own"}, hookClaimOps{}, io.Discard)
+			clearHookSessionCurrentClaim(hookClaimOptions{Verified: v, publishedClaim: "work-own", publishedStamp: stamp}, hookClaimOps{}, io.Discard)
 			if store.writes != 1 {
 				t.Fatal("clear overwrote successor")
 			}

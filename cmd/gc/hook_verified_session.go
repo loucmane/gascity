@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strings"
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
@@ -130,11 +129,9 @@ func verifiedHookFailure(err error, opts hookClaimOptions, stdout, stderr io.Wri
 	return writeHookClaimDrain(hookClaimLabel, reason, opts.JSON, false, nil, stdout, stderr)
 }
 
-// ga-gwav: a bound seat can claim only its trigger, across adoption, assigned,
-// and routed tiers. No trigger leaves the original candidate order untouched.
-// This avoids repeatedly winning and unwinding unrelated shared-route work;
-// the stamp still checks the binding atomically in case it changes afterward.
-func boundHookClaimCandidates(candidates []beads.Bead, v *VerifiedSession) ([]beads.Bead, error) {
+// ga-gwav: skip incompatible managed worktrees before any adoption or claim
+// mutation, preserving the query order. Publication repeats this rule under CAS.
+func compatibleHookClaimCandidates(candidates []beads.Bead, v *VerifiedSession) ([]beads.Bead, error) {
 	if v == nil {
 		return candidates, nil
 	}
@@ -142,9 +139,5 @@ func boundHookClaimCandidates(candidates []beads.Bead, v *VerifiedSession) ([]be
 	if err != nil {
 		return nil, err
 	}
-	trigger := strings.TrimSpace(info.TriggerBeadID)
-	if trigger == "" {
-		return candidates, nil
-	}
-	return slices.DeleteFunc(candidates, func(b beads.Bead) bool { return strings.TrimSpace(b.ID) != trigger }), nil
+	return slices.DeleteFunc(candidates, func(b beads.Bead) bool { return !session.ClaimWorktreeCompatible(info, b) }), nil
 }
