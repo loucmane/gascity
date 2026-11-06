@@ -469,7 +469,7 @@ func tryHookClaim(workQuery, dir string, opts *hookClaimOptions, ops *hookClaimO
 	for _, skip := range skipped {
 		fmt.Fprintf(stderr, "gc hook --claim: skipping undecodable bead %s: %v\n", skip.ID, skip.Err) //nolint:errcheck
 	}
-	candidates, err = compatibleHookClaimCandidates(candidates, opts.Verified)
+	candidates, err = compatibleHookClaimCandidates(candidates, *opts, *ops, dir)
 	if err != nil {
 		return hookClaimResult{terminal: true, code: verifiedHookFailure(err, *opts, stdout, stderr)}
 	}
@@ -841,7 +841,7 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 		// ga-g189: pool seats share a route, but a managed per-bead workspace
 		// belongs to the seat in that tree. Check before either mutation so
 		// reclaim cannot release another tree's work before we skip it.
-		matchesWorkspace, err := hookCandidateMatchesSessionWorktree(candidate, opts.Verified)
+		matchesWorkspace, err := hookCandidateMatchesSessionWorktree(candidate, opts, ops, dir)
 		if err != nil {
 			return hookClaimResult{terminal: true, code: verifiedHookFailure(err, opts, stdout, stderr)}
 		}
@@ -961,7 +961,8 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 
 // hookCandidateMatchesSessionWorktree restricts managed per-bead workspaces to
 // pool sessions in the same tree. Legacy candidates keep their existing order.
-func hookCandidateMatchesSessionWorktree(candidate beads.Bead, v *VerifiedSession) (bool, error) {
+func hookCandidateMatchesSessionWorktree(candidate beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) (bool, error) {
+	v := opts.Verified
 	if v == nil {
 		return true, nil
 	}
@@ -969,7 +970,28 @@ func hookCandidateMatchesSessionWorktree(candidate beads.Bead, v *VerifiedSessio
 	if err != nil {
 		return false, err
 	}
-	return session.ClaimWorktreeCompatible(info, candidate), nil
+	return hookClaimWorktreeCompatible(info, candidate, opts, ops, dir), nil
+}
+
+// ga-gwav: branch resolution can complete managed ownership at the work fence.
+// Preview that identity patch before selection so publication sees the same
+// workspace shape. The query/store row stays untouched until a claim is won.
+func hookClaimWorktreeCompatible(info session.Info, candidate beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) bool {
+	if !session.IsPoolManaged(info) {
+		return true
+	}
+	for _, key := range worktreeOwnershipEvidenceKeys {
+		if strings.TrimSpace(candidate.Metadata[key]) == "" {
+			return true // The identity patch cannot supply ownership evidence.
+		}
+	}
+	if strings.TrimSpace(candidate.Metadata[beadmeta.WorkDirMetadataKey]) == "" ||
+		strings.TrimSpace(candidate.Metadata[beadmeta.WorkBranchMetadataKey]) == "" {
+		patch := hookClaimIdentityPatch(candidate, opts, ops, dir)
+		candidate.Metadata = maps.Clone(candidate.Metadata)
+		maps.Copy(candidate.Metadata, patch)
+	}
+	return session.ClaimWorktreeCompatible(info, candidate)
 }
 
 // mergeHookClaimCandidateMetadata retains work-query metadata when bd update
@@ -1229,7 +1251,7 @@ func writeHookClaimWorkResultForBead(result hookClaimJSONResult, bead beads.Bead
 	// ga-gwav: do not repeatedly restamp a known-incompatible adoption.
 	// Minted work still fences before publication so a binding race can unwind it.
 	if opts.Verified != nil && !minted {
-		matches, err := hookCandidateMatchesSessionWorktree(bead, opts.Verified)
+		matches, err := hookCandidateMatchesSessionWorktree(bead, opts, ops, dir)
 		if err == nil && !matches {
 			err = session.ErrClaimBindingConflict
 		}

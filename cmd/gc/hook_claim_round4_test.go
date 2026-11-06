@@ -21,6 +21,7 @@ func TestHookClaimRound4Progress(t *testing.T) {
 		"closed-trigger-continuation", "blocked-priority-sibling", "named-cross-store-trigger",
 		"bound-drain-work-dir-only", "unbound-drain-work-dir-only", "branch-only",
 		"unbound-assigned-incompatible-head", "unbound-adopted-incompatible-head", "unbound-routed-incompatible-head",
+		"unbound-assigned-missing-branch-head", "unbound-adopted-missing-branch-head", "unbound-routed-missing-branch-head",
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			v, own := newVerifiedHookFixture(t)
@@ -57,11 +58,14 @@ func TestHookClaimRound4Progress(t *testing.T) {
 				a = hookClaimManagedWorkspaceBead(a.ID, "/work/ga-gwav/a")
 				b = hookClaimManagedWorkspaceBead(b.ID, "/work/ga-gwav/b")
 				a.Metadata[beadmeta.RoutedToMetadataKey], b.Metadata[beadmeta.RoutedToMetadataKey] = v.Template, v.Template
-				if scenario != "unbound-routed-incompatible-head" {
+				if !strings.Contains(scenario, "routed") {
 					a.Assignee, b.Assignee = v.assignee(), v.assignee()
 				}
-				if scenario == "unbound-adopted-incompatible-head" {
+				if strings.Contains(scenario, "adopted") {
 					b.Status = "in_progress"
+				}
+				if strings.Contains(scenario, "missing-branch") {
+					delete(b.Metadata, beadmeta.WorkBranchMetadataKey)
 				}
 			}
 			if err := own.mem.SetMetadataBatch(v.ID, meta); err != nil {
@@ -100,6 +104,9 @@ func TestHookClaimRound4Progress(t *testing.T) {
 					return row, err == nil, err
 				},
 				PublishRunMap: noopPublishRunMap,
+			}
+			if strings.Contains(scenario, "missing-branch") {
+				ops.ResolveWorkBranch = func(hookClaimWorkTree) string { return "resolved-branch" }
 			}
 			bindVerifiedHookOps(&ops, v)
 			var out, diagnostic bytes.Buffer

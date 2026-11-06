@@ -131,7 +131,8 @@ func verifiedHookFailure(err error, opts hookClaimOptions, stdout, stderr io.Wri
 
 // ga-gwav: skip incompatible managed worktrees before any adoption or claim
 // mutation, preserving the query order. Publication repeats this rule under CAS.
-func compatibleHookClaimCandidates(candidates []beads.Bead, v *VerifiedSession) ([]beads.Bead, error) {
+func compatibleHookClaimCandidates(candidates []beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) ([]beads.Bead, error) {
+	v := opts.Verified
 	if v == nil {
 		return candidates, nil
 	}
@@ -139,5 +140,7 @@ func compatibleHookClaimCandidates(candidates []beads.Bead, v *VerifiedSession) 
 	if err != nil {
 		return nil, err
 	}
-	return slices.DeleteFunc(candidates, func(b beads.Bead) bool { return !session.ClaimWorktreeCompatible(info, b) }), nil
+	return slices.DeleteFunc(candidates, func(b beads.Bead) bool {
+		return !hookClaimWorktreeCompatible(info, b, opts, ops, dir)
+	}), nil
 }

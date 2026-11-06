@@ -84,9 +84,10 @@ func TestHookClaimManagedWorktreeReclaim(t *testing.T) {
 
 func TestHookClaimManagedWorktreeCompatibility(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		change func(*beads.Bead)
-		want   string
+		name          string
+		change        func(*beads.Bead)
+		resolveBranch bool
+		want          string
 	}{
 		{name: "different managed tree"},
 		{name: "no work dir", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkDirMetadataKey) }, want: "B"},
@@ -100,6 +101,7 @@ func TestHookClaimManagedWorktreeCompatibility(t *testing.T) {
 		}, want: "B"},
 		{name: "partial ownership", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorktreeOwnerMetadataKey) }, want: "B"},
 		{name: "missing branch", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkBranchMetadataKey) }, want: "B"},
+		{name: "missing branch resolved before claim", change: func(b *beads.Bead) { delete(b.Metadata, beadmeta.WorkBranchMetadataKey) }, resolveBranch: true, want: "A"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -113,9 +115,18 @@ func TestHookClaimManagedWorktreeCompatibility(t *testing.T) {
 				candidates = append(candidates, hookClaimManagedWorkspaceBead("A", filepath.Join(root, "A")))
 			}
 			work := beads.NewMemStoreFrom(1, candidates, nil)
-			result, attempts, _ := runHookClaimWorkspaceCandidates(t, v, work, candidates, false)
+			result, attempts, _ := runHookClaimWorkspaceCandidates(t, v, work, candidates, false, func(ops *hookClaimOps) {
+				if tc.resolveBranch {
+					ops.ResolveWorkBranch = func(hookClaimWorkTree) string { return "resolved-branch" }
+				}
+			})
 			if result.BeadID != tc.want || strings.Join(attempts, ",") != tc.want {
 				t.Fatalf("result=%+v claims=%v; want %q", result, attempts, tc.want)
+			}
+			if tc.resolveBranch {
+				if got := mustGetTestBead(t, work, b.ID); !reflect.DeepEqual(got, b) {
+					t.Fatalf("skipped foreign candidate changed: %+v", got)
+				}
 			}
 		})
 	}
@@ -226,7 +237,7 @@ func hookClaimWorkspaceSession(t *testing.T, id, dir string) *VerifiedSession {
 	return &VerifiedSession{VerifiedSession: verified, front: front}
 }
 
-func runHookClaimWorkspaceCandidates(t *testing.T, v *VerifiedSession, work *beads.MemStore, candidates []beads.Bead, reclaim bool) (hookClaimJSONResult, []string, []string) {
+func runHookClaimWorkspaceCandidates(t *testing.T, v *VerifiedSession, work *beads.MemStore, candidates []beads.Bead, reclaim bool, configure ...func(*hookClaimOps)) (hookClaimJSONResult, []string, []string) {
 	t.Helper()
 	installVerifiedWorkStore(t, v, work)
 	var attempts, reclaimed []string
@@ -247,6 +258,9 @@ func runHookClaimWorkspaceCandidates(t *testing.T, v *VerifiedSession, work *bea
 		},
 		EmitHookClaimReclaimedStale: func(string, string, string) {},
 		EmitClaimReleased:           func(hookClaimReleaseRecord) {},
+	}
+	for _, change := range configure {
+		change(&ops)
 	}
 	opts := hookClaimOptions{
 		Verified: v, SessionID: v.ID, Assignee: v.assignee(), IdentityCandidates: v.identifiers(),

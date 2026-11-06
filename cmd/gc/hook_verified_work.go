@@ -132,7 +132,7 @@ func verifiedHookOwnsWork(v *VerifiedSession, b beads.Bead) bool {
 }
 
 // hookWorkHeldBy is shared by worker compensation/drain and scheduler guards.
-// Only the scheduler accepts legacy execution claims without fence markers;
+// The scheduler keeps non-closed execution claims without requiring an attempt;
 // control claims always require assignee, incarnation and attempt (ga-gwav).
 func hookWorkHeldBy(b beads.Bead, id string, identifiers []string, incarnation string, allowLegacy bool) bool {
 	if b.Status == "closed" || !slices.Contains(identifiers, strings.TrimSpace(b.Assignee)) {
@@ -146,6 +146,12 @@ func hookWorkHeldBy(b beads.Bead, id string, identifiers []string, incarnation s
 	}
 	if allowLegacy && !control && b.Metadata[verifiedHookIncarnationKey] == "" {
 		return true
+	}
+	// ga-gwav: a blocked/open status does not release ownership. Preserve the
+	// live scheduler's marked-execution rule without widening worker cleanup.
+	if allowLegacy {
+		return incarnation != "" && b.Metadata[verifiedHookIncarnationKey] == incarnation &&
+			(!control || b.Metadata[verifiedHookAttemptKey] != "")
 	}
 	return b.Status == "in_progress" && incarnation != "" &&
 		b.Metadata[verifiedHookIncarnationKey] == incarnation &&

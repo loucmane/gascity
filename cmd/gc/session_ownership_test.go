@@ -185,7 +185,7 @@ type ownershipVariant struct {
 }
 
 func ownershipVariants() []ownershipVariant {
-	return []ownershipVariant{
+	variants := []ownershipVariant{
 		{name: "no claim", kept: false, apply: func(*testing.T, *ownershipFixture) {}},
 		{name: "live claim, stale cache", kept: true, apply: func(t *testing.T, f *ownershipFixture) {
 			f.claimOutOfProcess(t)
@@ -223,6 +223,49 @@ func ownershipVariants() []ownershipVariant {
 			f.env.cfg.Agents[0].Suspended = true
 		}},
 	}
+	// ga-gwav: blocked work reads back as open through BdStore. Neither state
+	// relinquishes a marked claim, including when execution has no attempt.
+	for _, tc := range []struct {
+		name, status, kind, attempt string
+		kept, cleanup               bool
+	}{
+		{"marked execution open", "open", "", "attempt", true, false},
+		{"marked execution blocked", "blocked", "", "attempt", true, false},
+		{"marked execution without attempt", "in_progress", "", "", true, false},
+		{"marked execution open without attempt", "open", "", "", true, false},
+		{"marked control in progress", "in_progress", "check", "attempt", true, true},
+		{"marked control open", "open", "check", "attempt", true, false},
+		{"marked control blocked", "blocked", "check", "attempt", true, false},
+		{"marked control closed", "closed", "check", "attempt", false, false},
+		{"marked control without attempt", "open", "check", "", false, false},
+	} {
+		variants = append(variants, ownershipVariant{name: tc.name, kept: tc.kept, apply: func(t *testing.T, f *ownershipFixture) {
+			f.env.setSessionMetadata(&f.session, map[string]string{"generation": "1", "instance_token": "fixture"})
+			f.claimOutOfProcess(t)
+			owner := f.session.ID
+			if tc.kind != "" {
+				owner = ""
+			}
+			if err := f.backing.Update(f.work.ID, beads.UpdateOpts{Status: &tc.status, Metadata: map[string]string{
+				beadmeta.KindMetadataKey: tc.kind, beadmeta.SessionIDMetadataKey: owner,
+				verifiedHookIncarnationKey: "1:" + drainAckInstanceTokenDigest("fixture"),
+				verifiedHookAttemptKey:     tc.attempt,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			front := sessionpkg.NewStore(beads.SessionStore{Store: f.backing})
+			identity, err := front.VerifySession(f.session.ID, "fixture", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := &VerifiedSession{VerifiedSession: identity, front: front}
+			if got := verifiedHookOwnsWork(v, mustGetTestBead(t, f.backing, f.work.ID)); got != tc.cleanup {
+				t.Fatalf("worker cleanup owns=%v, want %v", got, tc.cleanup)
+			}
+			f.assertCacheStale(t)
+		}})
+	}
+	return variants
 }
 
 // Demand-class deciders that consult sessionOwnsLiveClaim.
