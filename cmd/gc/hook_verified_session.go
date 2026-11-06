@@ -129,18 +129,21 @@ func verifiedHookFailure(err error, opts hookClaimOptions, stdout, stderr io.Wri
 	return writeHookClaimDrain(hookClaimLabel, reason, opts.JSON, false, nil, stdout, stderr)
 }
 
-// ga-gwav: skip incompatible managed worktrees before any adoption or claim
-// mutation, preserving the query order. Publication repeats this rule under CAS.
-func compatibleHookClaimCandidates(candidates []beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) ([]beads.Bead, error) {
-	v := opts.Verified
-	if v == nil {
-		return candidates, nil
+// ga-gwav: previews belong to one store's query in one invocation. Resolve only
+// candidates reached by a selection tier, sharing their projected shape across
+// tiers and duplicate rows. Publication still fences fresh work under CAS.
+type hookClaimPreview struct {
+	candidates map[string]beads.Bead
+	storeHead  *hookClaimStoreHead
+}
+
+func (p *hookClaimPreview) head(dir string) hookClaimStoreHead {
+	if p == nil {
+		return hookClaimResolveStoreHead(dir)
 	}
-	info, err := v.front.ReadVerified(v.VerifiedSession)
-	if err != nil {
-		return nil, err
+	if p.storeHead == nil {
+		head := hookClaimResolveStoreHead(dir)
+		p.storeHead = &head
 	}
-	return slices.DeleteFunc(candidates, func(b beads.Bead) bool {
-		return !hookClaimWorktreeCompatible(info, b, opts, ops, dir)
-	}), nil
+	return *p.storeHead
 }

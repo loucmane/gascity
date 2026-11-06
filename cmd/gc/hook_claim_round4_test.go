@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -22,6 +23,7 @@ func TestHookClaimRound4Progress(t *testing.T) {
 		"bound-drain-work-dir-only", "unbound-drain-work-dir-only", "branch-only",
 		"unbound-assigned-incompatible-head", "unbound-adopted-incompatible-head", "unbound-routed-incompatible-head",
 		"unbound-assigned-missing-branch-head", "unbound-adopted-missing-branch-head", "unbound-routed-missing-branch-head",
+		"lazy-assigned-compatible-head", "lazy-adopted-compatible-head", "lazy-routed-compatible-head",
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			v, own := newVerifiedHookFixture(t)
@@ -77,6 +79,24 @@ func TestHookClaimRound4Progress(t *testing.T) {
 			}
 			v.VerifiedSession = fresh
 			candidates := []beads.Bead{b, a}
+			lazy := strings.HasPrefix(scenario, "lazy-")
+			if lazy {
+				delete(a.Metadata, beadmeta.WorkBranchMetadataKey)
+				if strings.Contains(scenario, "adopted") {
+					a.Status = "in_progress"
+				}
+				candidates = []beads.Bead{a}
+				for i := range 33 {
+					suffix := hookClaimManagedWorkspaceBead(fmt.Sprintf("slow-%d", i), "/work/ga-gwav/b")
+					suffix.Status, suffix.Assignee = a.Status, a.Assignee
+					suffix.Metadata[beadmeta.RoutedToMetadataKey] = v.Template
+					delete(suffix.Metadata, beadmeta.WorkBranchMetadataKey)
+					candidates = append(candidates, suffix)
+				}
+			} else if strings.Contains(scenario, "missing-branch") {
+				// Duplicate query rows must share one preview, including refusals.
+				candidates = []beads.Bead{b, b, a}
+			}
 			triggerStore := beads.NewMemStoreFrom(1, []beads.Bead{b}, nil)
 			if scenario == "named-cross-store-trigger" {
 				// The authoritative closed trigger is in another ledger, outside
@@ -90,7 +110,12 @@ func TestHookClaimRound4Progress(t *testing.T) {
 				t.Fatal(err)
 			}
 			var claims []string
+			now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+			branchCalls := make(map[string]int)
 			ops := hookClaimOps{
+				Now:              func() time.Time { return now },
+				InvokedAt:        now,
+				ClaimWindow:      160 * time.Second,
 				Runner:           func(string, string) (string, error) { return string(query), nil },
 				ReadWorkMeta:     func(_ context.Context, _ string, _ []string, id, _ string) (beads.Bead, error) { return work.Get(id) },
 				ListContinuation: func(context.Context, string, []string, string, string) ([]beads.Bead, error) { return nil, nil },
@@ -105,8 +130,15 @@ func TestHookClaimRound4Progress(t *testing.T) {
 				},
 				PublishRunMap: noopPublishRunMap,
 			}
-			if strings.Contains(scenario, "missing-branch") {
-				ops.ResolveWorkBranch = func(hookClaimWorkTree) string { return "resolved-branch" }
+			if lazy || strings.Contains(scenario, "missing-branch") {
+				ops.ResolveWorkBranch = func(tree hookClaimWorkTree) string {
+					branchCalls[tree.Dir]++
+					if lazy && tree.Dir == "/work/ga-gwav/b" {
+						now = now.Add(5 * time.Second)
+					}
+					return "resolved-branch"
+				}
+				ops.EmitClaimWindowExpired = func(hookClaimWindowExpiry) {}
 			}
 			bindVerifiedHookOps(&ops, v)
 			var out, diagnostic bytes.Buffer
@@ -114,16 +146,61 @@ func TestHookClaimRound4Progress(t *testing.T) {
 				Verified: v, Assignee: v.assignee(),
 				IdentityCandidates: v.identifiers(), RouteTargets: []string{v.Template}, JSON: true,
 			}, ops, &out, &diagnostic)
+			if code != 0 {
+				t.Fatalf("code=%d calls=%v stderr=%s", code, branchCalls, &diagnostic)
+			}
 			result := decodeClaimIdentityRaceResult(t, &out)
-			if code != 0 || result.Action != "work" || result.BeadID != a.ID || strings.Join(claims, ",") != a.ID {
+			wantClaim := a.ID
+			if lazy && a.Status == "in_progress" {
+				wantClaim = ""
+			}
+			if result.Action != "work" || result.BeadID != a.ID || strings.Join(claims, ",") != wantClaim {
 				t.Fatalf("code=%d result=%+v claims=%v stderr=%s", code, result, claims, &diagnostic)
 			}
-			if scenario != "named-cross-store-trigger" {
+			if lazy {
+				if branchCalls["/work/ga-gwav/b"] != 0 || branchCalls["/work/ga-gwav/a"] != 2 {
+					t.Fatalf("resolver calls=%v; want one head preview plus fencing, no suffix", branchCalls)
+				}
+			} else if strings.Contains(scenario, "missing-branch") && branchCalls["/work/ga-gwav/b"] != 1 {
+				t.Fatalf("incompatible candidate preview calls=%v, want one", branchCalls)
+			}
+			if scenario != "named-cross-store-trigger" && !lazy {
 				triggerStore = work
 			}
 			if got := mustGetTestBead(t, triggerStore, b.ID); got.Revision != b.Revision {
 				t.Fatal("skipped candidate was mutated")
 			}
+		})
+	}
+}
+
+func TestHookClaimMarkedExecutionBlocksBind(t *testing.T) {
+	for _, status := range []string{"blocked", "open"} {
+		t.Run(status, func(t *testing.T) {
+			bp, owner, _ := claimGuardFixture(t, 5*time.Minute, 2)
+			mem := bp.beadStore.(*beads.MemStore)
+			if err := mem.SetMetadataBatch(owner.ID, map[string]string{"instance_token": "fixture", "generation": "1"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := mem.Update("work-a", beads.UpdateOpts{Status: &status, Metadata: map[string]string{
+				verifiedHookIncarnationKey: "1:" + drainAckInstanceTokenDigest("fixture"),
+				verifiedHookAttemptKey:     "attempt",
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			front := session.NewStore(beads.SessionStore{Store: mem})
+			identity, err := front.VerifySession(owner.ID, "fixture", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, err := front.ReadVerified(identity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := bindPoolSessionTriggerBead(bp, &bp.city.Agents[0], "worker-1", info, SessionRequest{WorkBeadID: "work-b"}); err == nil {
+				t.Fatal("bound B while marked execution A is still assigned")
+			}
+			assertClaimGuardOwner(t, mem, owner)
 		})
 	}
 }

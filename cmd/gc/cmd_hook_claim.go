@@ -153,6 +153,7 @@ type hookClaimOptions struct {
 	Verified       *VerifiedSession
 	publishedClaim string
 	publishedStamp string
+	preview        *hookClaimPreview
 	Assignee       string
 	// SessionID is this session's durable bead ID. Assignee is deliberately the
 	// alias/agent form that read paths query through GC_AGENT, but a continuation
@@ -469,15 +470,16 @@ func tryHookClaim(workQuery, dir string, opts *hookClaimOptions, ops *hookClaimO
 	for _, skip := range skipped {
 		fmt.Fprintf(stderr, "gc hook --claim: skipping undecodable bead %s: %v\n", skip.ID, skip.Err) //nolint:errcheck
 	}
-	candidates, err = compatibleHookClaimCandidates(candidates, *opts, *ops, dir)
-	if err != nil {
-		return hookClaimResult{terminal: true, code: verifiedHookFailure(err, *opts, stdout, stderr)}
-	}
 	if len(candidates) == 0 {
 		return hookClaimResult{}
 	}
+	// ga-gwav: a slow suffix must not spend the claim window before a healthy
+	// head can win. Each tier previews only its next eligible candidate.
+	opts.preview = &hookClaimPreview{candidates: make(map[string]beads.Bead)}
 
-	if result, bead, ok := hookClaimExistingAssignment(candidates, *opts); ok {
+	if result, bead, ok, err := hookClaimExistingAssignment(candidates, *opts, *ops, dir); err != nil {
+		return hookClaimResult{terminal: true, code: verifiedHookFailure(err, *opts, stdout, stderr)}
+	} else if ok {
 		// Adoption mints no CAS, so until now it minted its receipt on the word
 		// of the work query alone — and a stale caching-store row survives long
 		// enough to re-serve a bead the dispatcher already gave to a fresher
@@ -699,6 +701,14 @@ func claimFirstReadyHookAssignment(candidates []beads.Bead, opts hookClaimOption
 			!strings.EqualFold(strings.TrimSpace(candidate.Status), "open") ||
 			!hookClaimHasIdentity(candidate.Assignee, opts.IdentityCandidates) ||
 			hookCandidateBudgetDeferred(candidate, now) {
+			continue
+		}
+		// ga-gwav: skip a known-incompatible assignment before minting its claim.
+		matchesWorkspace, err := hookCandidateMatchesSessionWorktree(candidate, opts, ops, dir)
+		if err != nil {
+			return hookClaimResult{terminal: true, code: verifiedHookFailure(err, opts, stdout, stderr)}
+		}
+		if !matchesWorkspace {
 			continue
 		}
 		// F-B. Promoting a ready assignment is a status CAS — a mutation — so it
@@ -987,9 +997,20 @@ func hookClaimWorktreeCompatible(info session.Info, candidate beads.Bead, opts h
 	}
 	if strings.TrimSpace(candidate.Metadata[beadmeta.WorkDirMetadataKey]) == "" ||
 		strings.TrimSpace(candidate.Metadata[beadmeta.WorkBranchMetadataKey]) == "" {
-		patch := hookClaimIdentityPatch(candidate, opts, ops, dir)
-		candidate.Metadata = maps.Clone(candidate.Metadata)
-		maps.Copy(candidate.Metadata, patch)
+		projected, cached := beads.Bead{}, false
+		if opts.preview != nil {
+			projected, cached = opts.preview.candidates[candidate.ID]
+		}
+		if cached {
+			candidate = projected
+		} else {
+			patch := hookClaimIdentityPatch(candidate, opts, ops, dir)
+			candidate.Metadata = maps.Clone(candidate.Metadata)
+			maps.Copy(candidate.Metadata, patch)
+			if opts.preview != nil {
+				opts.preview.candidates[candidate.ID] = candidate
+			}
+		}
 	}
 	return session.ClaimWorktreeCompatible(info, candidate)
 }
@@ -1204,13 +1225,21 @@ func adoptAfterFailedRestamp(beadID, current, target string, verdict hookAdoptio
 	}
 }
 
-func hookClaimExistingAssignment(candidates []beads.Bead, opts hookClaimOptions) (hookClaimJSONResult, beads.Bead, bool) {
+func hookClaimExistingAssignment(candidates []beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string) (hookClaimJSONResult, beads.Bead, bool, error) {
 	for _, candidate := range candidates {
 		if hookClaimCandidateIsMessage(candidate) {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(candidate.Status), "in_progress") &&
 			hookClaimHasIdentity(candidate.Assignee, opts.IdentityCandidates) {
+			// ga-gwav: incompatible adoptions must not hide later usable work.
+			matches, err := hookCandidateMatchesSessionWorktree(candidate, opts, ops, dir)
+			if err != nil {
+				return hookClaimJSONResult{}, beads.Bead{}, false, err
+			}
+			if !matches {
+				continue
+			}
 			result := hookClaimJSONResult{
 				SchemaVersion: "1",
 				OK:            true,
@@ -1221,10 +1250,10 @@ func hookClaimExistingAssignment(candidates []beads.Bead, opts hookClaimOptions)
 				Assignee:      candidate.Assignee,
 				Route:         hookClaimRoute(candidate),
 			}
-			return result, candidate, true
+			return result, candidate, true, nil
 		}
 	}
-	return hookClaimJSONResult{}, beads.Bead{}, false
+	return hookClaimJSONResult{}, beads.Bead{}, false, nil
 }
 
 // hookClaimCandidateIsMessage reports whether candidate is a mail message
@@ -1816,7 +1845,7 @@ func hookClaimIdentityPatch(bead beads.Bead, opts hookClaimOptions, ops hookClai
 	sessionID := hookClaimSessionID(opts.Env)
 	isControl := beadmeta.IsControlKind(strings.TrimSpace(bead.Metadata[beadmeta.KindMetadataKey]))
 
-	storeHead := hookClaimResolveStoreHead(dir)
+	storeHead := opts.preview.head(dir)
 	trees := hookClaimWorkerTrees(bead, storeHead)
 	// A pool-routed bead records no checkout at all, so fall back to the checkout
 	// of the claiming session (gc-2n4c). Only as a fallback: a recorded value is

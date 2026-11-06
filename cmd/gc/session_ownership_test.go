@@ -224,7 +224,8 @@ func ownershipVariants() []ownershipVariant {
 		}},
 	}
 	// ga-gwav: blocked work reads back as open through BdStore. Neither state
-	// relinquishes a marked claim, including when execution has no attempt.
+	// relinquishes a marked execution claim, including without an attempt.
+	// Control work retains the in-progress incarnation/attempt rule.
 	for _, tc := range []struct {
 		name, status, kind, attempt string
 		kept, cleanup               bool
@@ -234,8 +235,8 @@ func ownershipVariants() []ownershipVariant {
 		{"marked execution without attempt", "in_progress", "", "", true, false},
 		{"marked execution open without attempt", "open", "", "", true, false},
 		{"marked control in progress", "in_progress", "check", "attempt", true, true},
-		{"marked control open", "open", "check", "attempt", true, false},
-		{"marked control blocked", "blocked", "check", "attempt", true, false},
+		{"marked control open", "open", "check", "attempt", false, false},
+		{"marked control blocked", "blocked", "check", "attempt", false, false},
 		{"marked control closed", "closed", "check", "attempt", false, false},
 		{"marked control without attempt", "open", "check", "", false, false},
 	} {
@@ -245,6 +246,9 @@ func ownershipVariants() []ownershipVariant {
 			owner := f.session.ID
 			if tc.kind != "" {
 				owner = ""
+				if tc.status == "in_progress" {
+					owner = "unrelated-session" // Control ignores execution back-references.
+				}
 			}
 			if err := f.backing.Update(f.work.ID, beads.UpdateOpts{Status: &tc.status, Metadata: map[string]string{
 				beadmeta.KindMetadataKey: tc.kind, beadmeta.SessionIDMetadataKey: owner,
