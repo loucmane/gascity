@@ -693,7 +693,6 @@ func refuseExpiredHookClaimWindow(candidateID string, ops hookClaimOps, stderr i
 // error still fails closed: ownership is unresolved on a bead this session
 // already owns, and claiming unrelated fresh work would strand it.
 func claimFirstReadyHookAssignment(candidates []beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, stdout, stderr io.Writer) hookClaimResult {
-	var ctx context.Context
 	claimsErrored := false
 	now := ops.nowOrWallClock()
 	for _, candidate := range candidates {
@@ -719,14 +718,11 @@ func claimFirstReadyHookAssignment(candidates []beads.Bead, opts hookClaimOption
 		if ops.claimWindowSpent() {
 			return refuseExpiredHookClaimWindow(candidate.ID, ops, stderr)
 		}
-		// ga-gwav: Git-backed selection must finish before starting the
-		// shared mutation budget; a slow head preview still gets a full claim.
-		if ctx == nil {
-			var cancel context.CancelFunc
-			ctx, cancel = ops.claimMutationContext()
-			defer cancel()
-		}
+		// ga-gwav: each candidate gets a fresh mutation budget after its own
+		// preview, still bounded by the invocation's remaining claim window.
+		ctx, cancel := ops.claimMutationContext()
 		if ctx.Err() != nil {
+			cancel()
 			fmt.Fprintf(stderr, "gc hook --claim: ready assignment %s claim deadline exhausted: %v\n", candidate.ID, ctx.Err()) //nolint:errcheck
 			return hookClaimResult{terminal: true, code: 1}
 		}
@@ -736,6 +732,7 @@ func claimFirstReadyHookAssignment(candidates []beads.Bead, opts hookClaimOption
 		// existing assignee exactly.
 		claimActor := strings.TrimSpace(candidate.Assignee)
 		claimed, ok, err := ops.Claim(ctx, dir, opts.Env, candidate.ID, claimActor)
+		cancel()
 		if err != nil {
 			if !ok && (hookClaimBeadIsElsewhere(err) || hookClaimBindingRefusedTheClaim(err)) {
 				// The read federated and the write did not: the assigned tier
@@ -846,7 +843,6 @@ func hookClaimBeadIsElsewhere(err error) bool {
 // store before the shared no-work drain; the result's claimsErrored flag records
 // whether any skip was an error so that drain stays distinguishable from idle.
 func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOptions, ops hookClaimOps, dir string, stdout, stderr io.Writer) hookClaimResult {
-	var ctx context.Context
 	claimsErrored := false
 	now := ops.nowOrWallClock()
 	for _, candidate := range candidates {
@@ -865,27 +861,25 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 		if !matchesWorkspace {
 			continue
 		}
-		// ga-gwav: start the tier's budget only after the first compatible
-		// preview, before either reclaim or Claim can mutate the candidate.
-		if ctx == nil {
-			var cancel context.CancelFunc
-			ctx, cancel = ops.claimMutationContext()
-			defer cancel()
+		if ops.claimWindowSpent() {
+			return refuseExpiredHookClaimWindow(candidate.ID, ops, stderr)
 		}
+		// ga-gwav: each candidate's reclaim and Claim share a fresh mutation
+		// budget after its own preview, capped by the remaining claim window.
+		ctx, cancel := ops.claimMutationContext()
 		if !claimable {
 			// ga-7rj87d FR1/FR2: a route-matched candidate whose ONLY claim
 			// blocker is an existing (possibly stale) assignee gets a scoped,
 			// opt-in reclaim attempt before being skipped. Off by default
 			// (NFR4/NFR5): the flag check above short-circuits before
 			// hookCandidateReclaimEligible or ops.ReclaimStale ever run.
-			if ops.claimWindowSpent() {
-				return refuseExpiredHookClaimWindow(candidate.ID, ops, stderr)
-			}
 			if ctx.Err() != nil {
+				cancel()
 				break
 			}
 			reclaimed, previousOwner, err := ops.ReclaimStale(ctx, dir, opts.Env, candidate.ID)
 			if err != nil || !reclaimed {
+				cancel()
 				// Best-effort optimization, not a claim path of its own: any
 				// non-reclaim outcome leaves the candidate untouched (FR4) and
 				// the hook moves on to the next candidate.
@@ -896,17 +890,17 @@ func claimFirstEligibleHookCandidate(candidates []beads.Bead, opts hookClaimOpti
 		// F-B. The fresh-claim CAS is the mutation that mints a new obligation,
 		// so it is the one the turn-binding window most directly guards.
 		if ops.claimWindowSpent() {
+			cancel()
 			return refuseExpiredHookClaimWindow(candidate.ID, ops, stderr)
 		}
 		if ctx.Err() != nil {
-			// The shared claim budget is spent (an earlier slow-failing claim
-			// consumed it). Stop rather than attempting the remaining candidates
-			// with an already-expired context, which would only manufacture
-			// deadline-exceeded skips on ids never really tried; they are reclaimed
-			// next tick (NDI).
+			cancel()
+			// This candidate's reclaim exhausted its mutation budget. Stop before
+			// attempting a Claim with an already-expired context.
 			break
 		}
 		claimed, ok, err := ops.Claim(ctx, dir, opts.Env, candidate.ID, opts.Assignee)
+		cancel()
 		if err != nil {
 			if ok {
 				// The atomic mutation committed, but its canonical readback failed.
@@ -1011,7 +1005,7 @@ func hookClaimWorktreeCompatible(info session.Info, candidate beads.Bead, opts h
 	}
 	if strings.TrimSpace(candidate.Metadata[beadmeta.WorkDirMetadataKey]) == "" ||
 		strings.TrimSpace(candidate.Metadata[beadmeta.WorkBranchMetadataKey]) == "" {
-		key := hookClaimCandidateKey{id: candidate.ID, revision: candidate.Revision}
+		key := hookClaimPreviewKey(candidate)
 		projected, cached := beads.Bead{}, false
 		if opts.preview != nil {
 			projected, cached = opts.preview.candidates[key]

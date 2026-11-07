@@ -16,11 +16,27 @@ func TestHookClaimPreviewDoesNotSpendMutationBudget(t *testing.T) {
 	previous := hookClaimMutationTimeout
 	hookClaimMutationTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { hookClaimMutationTimeout = previous })
-	for _, tier := range []string{"adopted", "assigned", "routed", "reclaimed"} {
+	for _, scenario := range []struct {
+		tier       string
+		rejectHead bool
+	}{
+		{tier: "adopted"},
+		{tier: "assigned"},
+		{tier: "routed"},
+		{tier: "reclaimed"},
+		{tier: "assigned", rejectHead: true},
+		{tier: "routed", rejectHead: true},
+	} {
+		tier := scenario.tier
 		for _, previewFails := range []bool{false, true} {
-			name := tier + "/resolved"
+			name := tier
+			if scenario.rejectHead {
+				name += "_after_rejected_head"
+			}
 			if previewFails {
-				name = tier + "/unavailable"
+				name += "/branch_unresolved"
+			} else {
+				name += "/resolved"
 			}
 			t.Run(name, func(t *testing.T) {
 				v, own := newVerifiedHookFixture(t)
@@ -44,9 +60,21 @@ func TestHookClaimPreviewDoesNotSpendMutationBudget(t *testing.T) {
 				case "reclaimed":
 					candidate.Status, candidate.Assignee = "in_progress", "stale-owner"
 				}
-				work := beads.NewMemStoreFrom(1, []beads.Bead{candidate}, nil)
+				candidates := []beads.Bead{candidate}
+				wantClaims := 1
+				if tier == "adopted" {
+					wantClaims = 0
+				}
+				if scenario.rejectHead {
+					head := hookClaimManagedWorkspaceBead("rejected-head", workDir)
+					head.Assignee = candidate.Assignee
+					head.Metadata[beadmeta.RoutedToMetadataKey] = v.Template
+					candidates = append([]beads.Bead{head}, candidates...)
+					wantClaims++
+				}
+				work := beads.NewMemStoreFrom(1, candidates, nil)
 				installVerifiedWorkStore(t, v, work)
-				query, err := json.Marshal([]beads.Bead{candidate})
+				query, err := json.Marshal(candidates)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -56,6 +84,9 @@ func TestHookClaimPreviewDoesNotSpendMutationBudget(t *testing.T) {
 					ResolveWorkBranch: func(hookClaimWorkTree) string {
 						probes++
 						if probes == 1 {
+							if scenario.rejectHead && claims != 1 {
+								t.Fatalf("slow preview preceded head rejection: claims=%d", claims)
+							}
 							// Real elapsed time is the subject: exceed the mutation
 							// budget while staying within the independent Git budget.
 							ctx, cancel := context.WithTimeout(context.Background(), 2*hookClaimMutationTimeout)
@@ -88,6 +119,9 @@ func TestHookClaimPreviewDoesNotSpendMutationBudget(t *testing.T) {
 						if err := ctx.Err(); err != nil {
 							t.Fatalf("claim started with expired budget: %v", err)
 						}
+						if id == "rejected-head" {
+							return beads.Bead{}, false, nil
+						}
 						status := "in_progress"
 						if err := work.Update(id, beads.UpdateOpts{Status: &status, Assignee: &assignee}); err != nil {
 							return beads.Bead{}, false, err
@@ -112,8 +146,7 @@ func TestHookClaimPreviewDoesNotSpendMutationBudget(t *testing.T) {
 				if result.Action != "work" || result.BeadID != candidate.ID || probes != 2 {
 					t.Fatalf("result=%+v probes=%d stderr=%s", result, probes, &diagnostic)
 				}
-				if (tier == "adopted" && (claims != 0 || reads != 1)) ||
-					(tier != "adopted" && claims != 1) || (tier == "reclaimed" && reclaims != 1) {
+				if claims != wantClaims || (tier == "adopted" && reads != 1) || (tier == "reclaimed" && reclaims != 1) {
 					t.Fatalf("claims=%d reads=%d reclaims=%d", claims, reads, reclaims)
 				}
 				row := mustGetTestBead(t, work, candidate.ID)
@@ -141,6 +174,18 @@ func TestHookClaimPreviewMemoUsesRevision(t *testing.T) {
 		candidate := hookClaimManagedWorkspaceBead("same-id", "/work/ga-gwav/"+dir)
 		candidate.Revision = int64(probes + 1)
 		delete(candidate.Metadata, beadmeta.WorkBranchMetadataKey)
+		query, err := json.Marshal([]beads.Bead{candidate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, skipped, err := decodeHookClaimBeads(string(query))
+		if err != nil || len(skipped) != 0 || len(rows) != 1 {
+			t.Fatalf("decode: rows=%v skipped=%v err=%v", rows, skipped, err)
+		}
+		candidate = rows[0]
+		if candidate.Revision != 0 {
+			t.Fatalf("query revision=%d, want zero (Revision is not on the wire)", candidate.Revision)
+		}
 		for range 2 {
 			if matches := hookClaimWorktreeCompatible(info, candidate, opts, ops, ""); matches != (dir == "a") {
 				t.Fatalf("revision=%d tree=%s matches=%v", candidate.Revision, dir, matches)
@@ -151,7 +196,7 @@ func TestHookClaimPreviewMemoUsesRevision(t *testing.T) {
 		}
 	}
 	if probes != 2 {
-		t.Fatalf("probes=%d, want one per revision", probes)
+		t.Fatalf("probes=%d, want one per distinct query workspace", probes)
 	}
 }
 
@@ -167,18 +212,34 @@ func TestHookClaimPreviewMemoUsesStoreDir(t *testing.T) {
 func TestHookClaimPreviewRetriesUnavailableStoreHeadAtFence(t *testing.T) {
 	v, _ := newVerifiedHookFixture(t)
 	work, bead := verifiedWorkFixture(t, v)
+	bead.Status = "open"
+	if err := work.Update(bead.ID, beads.UpdateOpts{Status: &bead.Status}); err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	preview := &hookClaimPreview{storeHead: &hookClaimStoreHead{dir: dir, probe: hookClaimProbeUnavailable}}
-	opts := hookClaimOptions{Verified: v, Assignee: v.assignee(), JSON: true, preview: preview}
-	ops := hookClaimOps{PublishRunMap: noopPublishRunMap}
-	ops.applyDefaults()
-	var out, diagnostic bytes.Buffer
-	code := writeHookClaimWorkResultForBead(hookClaimJSONResult{Action: "work", BeadID: bead.ID}, bead,
-		opts, ops, dir, true, &out, &diagnostic)
-	if code != 0 {
-		t.Fatalf("code=%d stderr=%s", code, &diagnostic)
+	opts := hookClaimOptions{Verified: v, Assignee: v.assignee(), IdentityCandidates: v.identifiers(), JSON: true, preview: preview}
+	ops := hookClaimOps{
+		Claim: func(_ context.Context, _ string, _ []string, id, assignee string) (beads.Bead, bool, error) {
+			status := "in_progress"
+			if err := work.Update(id, beads.UpdateOpts{Status: &status, Assignee: &assignee}); err != nil {
+				return beads.Bead{}, false, err
+			}
+			row, err := work.Get(id)
+			return row, err == nil, err
+		},
+		PublishRunMap: noopPublishRunMap,
 	}
-	if preview.storeHead == nil || preview.storeHead.probe != hookClaimProbeAbsent {
+	bindVerifiedHookOps(&ops, v)
+	var out, diagnostic bytes.Buffer
+	result := claimFirstReadyHookAssignment([]beads.Bead{bead}, opts, ops, dir, &out, &diagnostic)
+	if !result.terminal || result.code != 0 {
+		t.Fatalf("result=%+v stderr=%s", result, &diagnostic)
+	}
+	if receipt := decodeClaimIdentityRaceResult(t, &out); receipt.Action != "work" || receipt.BeadID != bead.ID {
+		t.Fatalf("receipt=%+v", receipt)
+	}
+	if preview.storeHead == nil || preview.storeHead.probe == hookClaimProbeUnavailable {
 		t.Fatalf("fence reused unavailable store head: %+v", preview.storeHead)
 	}
 	if row := mustGetTestBead(t, work, bead.ID); row.Metadata[verifiedHookAttemptKey] == "" {

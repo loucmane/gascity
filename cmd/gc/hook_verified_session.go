@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/session"
@@ -132,16 +133,37 @@ func verifiedHookFailure(err error, opts hookClaimOptions, stdout, stderr io.Wri
 
 // ga-gwav: previews belong to one store's query in one invocation. Resolve only
 // candidates reached by a selection tier, sharing their projected shape across
-// tiers and duplicate rows of the same revision. Publication still fences fresh
-// work under CAS.
+// tiers and rows with identical workspace inputs. Query JSON omits Revision, so
+// it cannot distinguish changed metadata. Publication still fences fresh work
+// under CAS.
 type hookClaimPreview struct {
 	candidates map[hookClaimCandidateKey]beads.Bead
 	storeHead  *hookClaimStoreHead
 }
 
 type hookClaimCandidateKey struct {
-	id       string
-	revision int64
+	id, workDir, legacyWorkDir, workBranch, kind string
+	ownership                                    [8]string
+}
+
+func hookClaimPreviewKey(candidate beads.Bead) hookClaimCandidateKey {
+	return hookClaimCandidateKey{
+		id:            candidate.ID,
+		workDir:       candidate.Metadata[beadmeta.WorkDirMetadataKey],
+		legacyWorkDir: candidate.Metadata[beadmeta.LegacyWorkDirMetadataKey],
+		workBranch:    candidate.Metadata[beadmeta.WorkBranchMetadataKey],
+		kind:          candidate.Metadata[beadmeta.KindMetadataKey],
+		ownership: [8]string{
+			candidate.Metadata[beadmeta.WorktreeRepoMetadataKey],
+			candidate.Metadata[beadmeta.WorktreeRootMetadataKey],
+			candidate.Metadata[beadmeta.WorktreeBaseRefMetadataKey],
+			candidate.Metadata[beadmeta.WorktreeBaseSHAMetadataKey],
+			candidate.Metadata[beadmeta.WorktreeCreatorMetadataKey],
+			candidate.Metadata[beadmeta.WorktreeOwnerMetadataKey],
+			candidate.Metadata[beadmeta.WorktreeGenerationMetadataKey],
+			candidate.Metadata[beadmeta.WorktreeLifecycleMetadataKey],
+		},
+	}
 }
 
 func (p *hookClaimPreview) head(dir string) hookClaimStoreHead {
